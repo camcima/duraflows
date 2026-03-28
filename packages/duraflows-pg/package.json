@@ -1,6 +1,6 @@
 {
   "name": "@duraflows/pg",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -20,7 +20,7 @@
     "build": "tsc --build"
   },
   "dependencies": {
-    "@duraflows/core": "^0.0.1",
+    "@duraflows/core": "^0.0.2",
     "pg": "^8.13.0"
   },
   "devDependencies": {
