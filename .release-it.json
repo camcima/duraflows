@@ -10,7 +10,9 @@
     "publish": false
   },
   "hooks": {
-    "before:bump": "npm --workspaces version ${version} --no-git-tag-version"
+    "before:bump": "npm --workspaces version ${version} --no-git-tag-version && npm pkg set --workspace=packages/duraflows-pg \"dependencies.@camcima/duraflows-core=^${version}\" && npm pkg set --workspace=packages/duraflows-nestjs \"dependencies.@camcima/duraflows-core=^${version}\"",
+    "after:bump": "npm run build",
+    "before:release": "npm publish --workspaces"
   },
   "plugins": {
     "@release-it/conventional-changelog": {
