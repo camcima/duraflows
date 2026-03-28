@@ -15,8 +15,8 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
       `INSERT INTO workflow_history (
         workflow_instance_uuid, from_state, event_name, to_state,
         outcome, error_message, command_results_json,
-        triggered_by_type, triggered_by_uuid
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        trigger_metadata_json
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING uuid`,
       [
         entry.workflowInstanceUuid,
@@ -26,8 +26,7 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
         entry.outcome,
         entry.errorMessage ?? null,
         JSON.stringify(entry.commandResultsJson),
-        entry.triggeredByType ?? null,
-        entry.triggeredByUuid ?? null,
+        JSON.stringify(entry.triggerMetadata ?? {}),
       ],
     );
     return result.rows[0].uuid as string;
@@ -55,8 +54,7 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
       outcome: row.outcome as "success" | "failure",
       errorMessage: row.error_message as string | undefined,
       commandResultsJson: row.command_results_json as WorkflowHistoryRecord["commandResultsJson"],
-      triggeredByType: row.triggered_by_type as string | undefined,
-      triggeredByUuid: row.triggered_by_uuid as string | undefined,
+      triggerMetadata: row.trigger_metadata_json as Record<string, unknown> | undefined,
     }));
   }
 }

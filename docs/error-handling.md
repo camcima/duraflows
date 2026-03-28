@@ -123,7 +123,6 @@ try {
   await runtime.triggerEvent({
     workflowInstanceUuid: instance.uuid,
     eventName: "Ship", // not available in "new" state
-    trigger: { type: "system" },
   });
 } catch (err) {
   if (err instanceof InvalidEventError) {
@@ -167,7 +166,6 @@ try {
     workflowInstanceUuid: instance.uuid,
     eventName: "PaymentReceived",
     subject: order,
-    trigger: { type: "system" },
   });
 } catch (err) {
   if (err instanceof CommandFailureError) {
@@ -214,7 +212,6 @@ try {
   await runtime.triggerEvent({
     workflowInstanceUuid: instance.uuid,
     eventName: "Start",
-    trigger: { type: "system" },
   });
 } catch (err) {
   if (err instanceof OnEnterDepthExceededError) {

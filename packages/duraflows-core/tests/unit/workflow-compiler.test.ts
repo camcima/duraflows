@@ -197,6 +197,39 @@ describe("WorkflowCompiler", () => {
     expect(() => compiler.compile(definition)).toThrow(/Error state "nonexistent"/);
   });
 
+  it("registers states only reachable via onEnter in the finita process", () => {
+    const definition: WorkflowDefinition = {
+      name: "order",
+      initialState: "pending",
+      states: {
+        pending: {
+          events: {
+            pay: { targetState: "paid" },
+          },
+        },
+        paid: {
+          onEnter: {
+            targetState: "ready_to_ship",
+            commands: [{ name: "allocate-inventory" }],
+          },
+        },
+        ready_to_ship: {
+          events: {
+            ship: { targetState: "shipped" },
+          },
+        },
+        shipped: {},
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+
+    expect(compiled.process.hasState("pending")).toBe(true);
+    expect(compiled.process.hasState("paid")).toBe(true);
+    expect(compiled.process.hasState("ready_to_ship")).toBe(true);
+    expect(compiled.process.hasState("shipped")).toBe(true);
+  });
+
   it("throws WorkflowDefinitionError for non-existent initial state", () => {
     const definition: WorkflowDefinition = {
       name: "order",

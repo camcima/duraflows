@@ -51,7 +51,6 @@ export type {
   WorkflowOnEnterDefinition,
   WorkflowCommandRef,
   WorkflowTimeoutDefinition,
-  TriggerType,
   CommandResult,
   WorkflowExecutionContext,
   WorkflowInstance,

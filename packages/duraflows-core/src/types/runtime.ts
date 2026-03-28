@@ -1,5 +1,3 @@
-export type TriggerType = "user" | "admin" | "system" | "timeout";
-
 export interface WorkflowCommand<TSubject = unknown> {
   execute(subject: TSubject, context: WorkflowExecutionContext): Promise<CommandResult> | CommandResult;
 }
@@ -13,10 +11,7 @@ export interface CommandResult {
 }
 
 export interface WorkflowExecutionContext {
-  trigger: {
-    type: TriggerType;
-    actorUuid?: string;
-  };
+  triggerMetadata: Readonly<Record<string, unknown>>;
   now: Date;
   context: Record<string, unknown>;
   metadata: Readonly<Record<string, unknown>>;
@@ -56,20 +51,14 @@ export interface CreateWorkflowInstanceInput {
   workflowName: string;
   context?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
-  trigger: {
-    type: TriggerType;
-    actorUuid?: string;
-  };
+  triggerMetadata?: Record<string, unknown>;
 }
 
 export interface TriggerWorkflowEventInput {
   workflowInstanceUuid: string;
   eventName: string;
   subject?: unknown;
-  trigger: {
-    type: TriggerType;
-    actorUuid?: string;
-  };
+  triggerMetadata?: Record<string, unknown>;
 }
 
 export interface ProcessExpiredWorkflowsInput {

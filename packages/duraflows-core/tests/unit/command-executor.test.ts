@@ -21,7 +21,7 @@ function createMockRegistry(commands: Record<string, WorkflowCommand>): Workflow
 
 function createContext(): WorkflowExecutionContext {
   return {
-    trigger: { type: "user", actorUuid: "actor-1" },
+    triggerMetadata: { actor: "actor-1" },
     now: new Date("2026-01-01T00:00:00Z"),
     context: {},
     metadata: {},

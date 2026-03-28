@@ -33,8 +33,7 @@ create table workflow_history (
   outcome                 text not null check (outcome in ('success', 'failure')),
   error_message           text,
   command_results_json    jsonb not null default '[]'::jsonb,
-  triggered_by_type       text,
-  triggered_by_uuid       uuid null,
+  trigger_metadata_json   jsonb not null default '{}'::jsonb,
   created_at              timestamptz not null default now()
 );
 

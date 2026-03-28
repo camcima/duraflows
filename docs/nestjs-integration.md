@@ -230,7 +230,6 @@ export class OrderService {
     const instance = await this.workflowService.createInstance({
       workflowName: "order",
       metadata: { orderId: order.uuid },
-      trigger: { type: "system" },
     });
 
     await this.orderRepo.setWorkflowInstanceUuid(order.uuid, instance.uuid);
@@ -244,7 +243,6 @@ export class OrderService {
       workflowInstanceUuid: order.workflowInstanceUuid,
       eventName: "PaymentReceived",
       subject: order,
-      trigger: { type: "system" },
     });
 
     return result;
@@ -328,9 +326,6 @@ Request body:
 ```json
 {
   "workflowName": "order",
-  "trigger": {
-    "type": "system"
-  },
   "metadata": { "orderId": "ORD-123" },
   "context": {}
 }
@@ -373,9 +368,9 @@ Request body:
 
 ```json
 {
-  "trigger": {
-    "type": "user",
-    "actorUuid": "550e8400-e29b-41d4-a716-446655440000"
+  "triggerMetadata": {
+    "source": "user",
+    "actor": "550e8400-e29b-41d4-a716-446655440000"
   },
   "subject": { "orderId": "ORD-123" }
 }
@@ -431,8 +426,7 @@ Response: `WorkflowHistoryRecord[]`
     "toState": "exportable",
     "outcome": "success",
     "commandResultsJson": [],
-    "triggeredByType": "user",
-    "triggeredByUuid": "..."
+    "triggerMetadata": { "source": "user", "actor": "..." }
   }
 ]
 ```

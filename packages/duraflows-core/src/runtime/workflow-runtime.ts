@@ -109,7 +109,7 @@ export class WorkflowRuntime {
         await this.instanceStore.create(instance);
 
         const executionContext: WorkflowExecutionContext = {
-          trigger: input.trigger,
+          triggerMetadata: deepFreeze({ ...(input.triggerMetadata ?? {}) }),
           now: this.clock.now(),
           context: { ...instance.context },
           metadata: deepFreeze({ ...instance.metadata }),
@@ -137,7 +137,7 @@ export class WorkflowRuntime {
 
       // Build execution context with instance's mutable context and immutable metadata
       const executionContext: WorkflowExecutionContext = {
-        trigger: input.trigger,
+        triggerMetadata: deepFreeze({ ...(input.triggerMetadata ?? {}) }),
         now: this.clock.now(),
         context: { ...instance.context },
         metadata: deepFreeze({ ...instance.metadata }),
@@ -189,8 +189,7 @@ export class WorkflowRuntime {
         outcome: result.outcome,
         errorMessage,
         commandResultsJson: result.commandResults,
-        triggeredByType: input.trigger.type,
-        triggeredByUuid: input.trigger.actorUuid,
+        triggerMetadata: input.triggerMetadata,
       });
 
       // Update execution context to reflect merged state context for onEnter commands
@@ -266,7 +265,7 @@ export class WorkflowRuntime {
     const compiled = this.compiler.compile(definition);
 
     const executionContext: WorkflowExecutionContext = {
-      trigger: { type: "timeout" },
+      triggerMetadata: deepFreeze({ source: "timeout" }),
       now: this.clock.now(),
       context: { ...instance.context },
       metadata: deepFreeze({ ...instance.metadata }),
@@ -315,8 +314,7 @@ export class WorkflowRuntime {
       outcome: result.outcome,
       errorMessage,
       commandResultsJson: result.commandResults,
-      triggeredByType: "timeout",
-      triggeredByUuid: undefined,
+      triggerMetadata: { source: "timeout" },
     });
 
     // Update execution context to reflect merged state context for onEnter commands
@@ -385,8 +383,7 @@ export class WorkflowRuntime {
         outcome: hop.outcome,
         errorMessage,
         commandResultsJson: hop.commandResults,
-        triggeredByType: "system",
-        triggeredByUuid: undefined,
+        triggerMetadata: { source: "onEnter" },
       });
 
       allCommandResults.push(...hop.commandResults);

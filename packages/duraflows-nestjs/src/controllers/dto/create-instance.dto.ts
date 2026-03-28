@@ -1,14 +1,4 @@
-import { IsString, IsOptional, IsObject, IsIn, IsUUID, ValidateNested } from "class-validator";
-import { Type } from "class-transformer";
-
-class CreateInstanceTriggerDto {
-  @IsIn(["user", "admin", "system", "timeout"])
-  type!: string;
-
-  @IsOptional()
-  @IsUUID()
-  actorUuid?: string;
-}
+import { IsString, IsOptional, IsObject } from "class-validator";
 
 export class CreateInstanceDto {
   @IsString()
@@ -22,7 +12,7 @@ export class CreateInstanceDto {
   @IsObject()
   metadata?: Record<string, unknown>;
 
-  @ValidateNested()
-  @Type(() => CreateInstanceTriggerDto)
-  trigger!: CreateInstanceTriggerDto;
+  @IsOptional()
+  @IsObject()
+  triggerMetadata?: Record<string, unknown>;
 }

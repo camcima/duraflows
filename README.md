@@ -178,7 +178,6 @@ export class OrderService {
     const instance = await this.workflowService.createInstance({
       workflowName: "order",
       metadata: { orderId: order.uuid },
-      trigger: { type: "system" },
     });
 
     return { order, workflowInstanceUuid: instance.uuid };
@@ -189,7 +188,7 @@ export class OrderService {
       workflowInstanceUuid,
       eventName: "PaymentReceived",
       subject: order,
-      trigger: { type: "user", actorUuid: order.customerUuid },
+      triggerMetadata: { source: "user", actor: order.customerUuid },
     });
 
     console.log(result.outcome); // "success"
@@ -225,7 +224,6 @@ const runtime = new WorkflowRuntime({
 // Create an instance
 const instance = await runtime.createInstance({
   workflowName: "order",
-  trigger: { type: "system" },
 });
 
 // Trigger an event
@@ -233,7 +231,6 @@ const result = await runtime.triggerEvent({
   workflowInstanceUuid: instance.uuid,
   eventName: "PaymentReceived",
   subject: orderEntity,
-  trigger: { type: "system" },
 });
 ```
 

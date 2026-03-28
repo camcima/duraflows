@@ -85,8 +85,7 @@ Both options create two tables:
 | `outcome`                | `text`        | `"success"` or `"failure"`                                                                     |
 | `error_message`          | `text`        | Error description (if failure)                                                                 |
 | `command_results_json`   | `jsonb`       | Ordered results from commands                                                                  |
-| `triggered_by_type`      | `text`        | `"user"`, `"admin"`, `"system"`, or `"timeout"`                                                |
-| `triggered_by_uuid`      | `uuid`        | Actor UUID (if applicable)                                                                     |
+| `trigger_metadata_json`  | `jsonb`       | Optional metadata about who/what triggered the transition                                      |
 | `created_at`             | `timestamptz` | When this history entry was created                                                            |
 
 ### 2. Indexes
@@ -266,7 +265,6 @@ const runtime = new WorkflowRuntime({
 const instance = await runtime.createInstance({
   workflowName: "support-ticket",
   metadata: { ticketId: "TK-001" },
-  trigger: { type: "system" },
 });
 // instance.currentState === "open"
 
@@ -275,7 +273,7 @@ const result = await runtime.triggerEvent({
   workflowInstanceUuid: instance.uuid,
   eventName: "Assign",
   subject: ticket,
-  trigger: { type: "user", actorUuid: agentUuid },
+  triggerMetadata: { source: "user", actor: agentUuid },
 });
 // result.outcome === "success"
 // result.toState === "in_progress"
@@ -285,7 +283,7 @@ const resolveResult = await runtime.triggerEvent({
   workflowInstanceUuid: instance.uuid,
   eventName: "Resolve",
   subject: ticket,
-  trigger: { type: "user", actorUuid: agentUuid },
+  triggerMetadata: { source: "user", actor: agentUuid },
 });
 // resolveResult.toState === "resolved"
 // resolveResult.commandResults[0].ok === true

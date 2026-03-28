@@ -25,8 +25,7 @@ const sampleEntry: WorkflowHistoryRecord = {
   outcome: "success",
   errorMessage: undefined,
   commandResultsJson: [{ ok: true, code: "DONE" }],
-  triggeredByType: "user",
-  triggeredByUuid: "actor-uuid",
+  triggerMetadata: { source: "user", actor: "actor-uuid" },
 };
 
 const sampleRow = {
@@ -38,8 +37,7 @@ const sampleRow = {
   outcome: "success",
   error_message: null,
   command_results_json: [{ ok: true, code: "DONE" }],
-  triggered_by_type: "user",
-  triggered_by_uuid: "actor-uuid",
+  trigger_metadata_json: { source: "user", actor: "actor-uuid" },
 };
 
 describe("PgWorkflowHistoryStore", () => {
@@ -67,15 +65,13 @@ describe("PgWorkflowHistoryStore", () => {
       const entry: WorkflowHistoryRecord = {
         ...sampleEntry,
         errorMessage: undefined,
-        triggeredByType: undefined,
-        triggeredByUuid: undefined,
+        triggerMetadata: undefined,
       };
 
       await store.append(entry);
       const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1];
       expect(params[5]).toBeNull(); // errorMessage
-      expect(params[7]).toBeNull(); // triggeredByType
-      expect(params[8]).toBeNull(); // triggeredByUuid
+      expect(params[7]).toBe("{}"); // triggerMetadata defaults to empty object
     });
 
     it("uses transaction client when available", async () => {

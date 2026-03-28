@@ -24,8 +24,7 @@ export interface WorkflowHistoryRecord {
   outcome: "success" | "failure";
   errorMessage?: string;
   commandResultsJson: CommandResult[];
-  triggeredByType?: string;
-  triggeredByUuid?: string;
+  triggerMetadata?: Record<string, unknown>;
 }
 
 export interface WorkflowTransactionRunner {

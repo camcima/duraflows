@@ -25,7 +25,7 @@ function createMocks() {
 describe("WorkflowService", () => {
   it("createInstance() delegates to runtime", async () => {
     const { service, runtime } = createMocks();
-    const input = { workflowName: "order", trigger: { type: "system" as const } };
+    const input = { workflowName: "order" };
 
     const result = await service.createInstance(input);
 
@@ -38,7 +38,6 @@ describe("WorkflowService", () => {
     const input = {
       workflowInstanceUuid: "uuid",
       eventName: "Pay",
-      trigger: { type: "system" as const },
     };
 
     const result = await service.triggerEvent(input);

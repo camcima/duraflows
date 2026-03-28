@@ -108,7 +108,7 @@ interface WorkflowOnEnterDefinition {
 
 ### Chaining
 
-If the `targetState` (or `errorState`) also has an `onEnter`, the chain continues automatically. Each hop produces its own history record with `eventName: "onEnter"` and `triggeredByType: "system"`.
+If the `targetState` (or `errorState`) also has an `onEnter`, the chain continues automatically. Each hop produces its own history record with `eventName: "onEnter"` and `triggerMetadata: { source: "onEnter" }`.
 
 The entire chain runs inside a single transaction. `triggerEvent()` returns only the **final landing state** -- intermediate hops are visible in the history table.
 
@@ -317,7 +317,6 @@ Every workflow instance carries two data stores. Understanding the difference is
 const instance = await runtime.createInstance({
   workflowName: "order",
   metadata: { orderId: "ORD-123", customerId: "CUST-456" },
-  trigger: { type: "system" },
 });
 
 // instance.metadata → { orderId: "ORD-123", customerId: "CUST-456" }
@@ -341,7 +340,6 @@ Persisted in `workflow_instances.metadata_json`.
 const instance = await runtime.createInstance({
   workflowName: "order",
   context: { priority: "high" },
-  trigger: { type: "system" },
 });
 // context → { priority: "high", paymentStatus: "pending" }
 //           (seeded value)        (merged from "new" state definition)

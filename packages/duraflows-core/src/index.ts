@@ -10,7 +10,6 @@ export type {
 
 // Types — Runtime
 export type {
-  TriggerType,
   WorkflowCommand,
   CommandResult,
   WorkflowExecutionContext,

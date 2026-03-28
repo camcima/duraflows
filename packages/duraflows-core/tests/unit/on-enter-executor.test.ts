@@ -8,7 +8,7 @@ import type { WorkflowCommandRegistry } from "../../src/registry/command-registr
 
 function makeContext(overrides: Partial<WorkflowExecutionContext> = {}): WorkflowExecutionContext {
   return {
-    trigger: { type: "system" },
+    triggerMetadata: {},
     now: new Date(),
     context: {},
     metadata: {},

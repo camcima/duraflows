@@ -9,7 +9,7 @@ import type { WorkflowCommandRegistry } from "../../src/registry/command-registr
 
 function makeContext(overrides: Partial<WorkflowExecutionContext> = {}): WorkflowExecutionContext {
   return {
-    trigger: { type: "system" },
+    triggerMetadata: {},
     now: new Date(),
     context: {},
     metadata: {},
@@ -118,44 +118,6 @@ describe("EventExecutor", () => {
     expect(result.toState).toBe("failed");
     expect(result.commandResults).toHaveLength(1);
     expect(result.commandResults[0].ok).toBe(false);
-  });
-
-  it("should succeed when any trigger type targets any event", async () => {
-    const definition: WorkflowDefinition = {
-      name: "test-wf-system",
-      initialState: "draft",
-      states: {
-        draft: {
-          events: {
-            autoProcess: {
-              targetState: "processed",
-              commands: [{ name: "process" }],
-            },
-          },
-        },
-        processed: {},
-      },
-    };
-
-    const compiled = compiler.compile(definition);
-    const registry = makeRegistry({
-      process: successCommand(),
-    });
-    const commandExecutor = new CommandExecutor(registry);
-    const executor = new EventExecutor(commandExecutor);
-
-    const result = await executor.execute(
-      compiled,
-      "draft",
-      "autoProcess",
-      "instance-5",
-      {},
-      makeContext({ trigger: { type: "system" } }),
-    );
-
-    expect(result.outcome).toBe("success");
-    expect(result.fromState).toBe("draft");
-    expect(result.toState).toBe("processed");
   });
 
   it("should throw InvalidEventError when event does not exist on state", async () => {

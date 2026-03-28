@@ -9,7 +9,7 @@ import {
   NotFoundException,
   ParseUUIDPipe,
 } from "@nestjs/common";
-import type { TriggerType, WorkflowInstance } from "@camcima/duraflows-core";
+import type { WorkflowInstance } from "@camcima/duraflows-core";
 import { WorkflowService } from "../services/workflow.service.js";
 import { CreateInstanceDto } from "./dto/index.js";
 
@@ -24,7 +24,7 @@ export class WorkflowInstanceController {
       workflowName: body.workflowName,
       context: body.context,
       metadata: body.metadata,
-      trigger: body.trigger as { type: TriggerType; actorUuid?: string },
+      triggerMetadata: body.triggerMetadata,
     });
   }
 

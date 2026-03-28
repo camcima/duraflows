@@ -160,7 +160,6 @@ describe("WorkflowRuntime.getAvailableEvents", () => {
 
     const instance = await runtime.createInstance({
       workflowName: "order-workflow",
-      trigger: { type: "system" },
     });
     instanceUuid = instance.uuid;
   });
@@ -179,7 +178,6 @@ describe("WorkflowRuntime.getAvailableEvents", () => {
     await runtime.triggerEvent({
       workflowInstanceUuid: instanceUuid,
       eventName: "autoProcess",
-      trigger: { type: "system" },
     });
 
     const events = await runtime.getAvailableEvents({

@@ -139,13 +139,12 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const instance = await runtime.createInstance({
       workflowName: "on-enter-single",
-      trigger: { type: "system" },
     });
 
     const result = await runtime.triggerEvent({
       workflowInstanceUuid: instance.uuid,
       eventName: "submit",
-      trigger: { type: "user", actorUuid: "actor-1" },
+      triggerMetadata: { actor: "actor-1" },
     });
 
     // Returns final state, not intermediate
@@ -167,12 +166,12 @@ describe("WorkflowRuntime onEnter integration", () => {
     expect(history[0].fromState).toBe("draft");
     expect(history[0].eventName).toBe("submit");
     expect(history[0].toState).toBe("validating");
-    expect(history[0].triggeredByType).toBe("user");
+    expect(history[0].triggerMetadata?.actor).toBe("actor-1");
 
     expect(history[1].fromState).toBe("validating");
     expect(history[1].eventName).toBe("onEnter");
     expect(history[1].toState).toBe("validated");
-    expect(history[1].triggeredByType).toBe("system");
+    expect(history[1].triggerMetadata?.source).toBe("onEnter");
   });
 
   it("multi-hop onEnter chain produces all history records", async () => {
@@ -207,13 +206,11 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const instance = await runtime.createInstance({
       workflowName: "on-enter-multi",
-      trigger: { type: "system" },
     });
 
     const result = await runtime.triggerEvent({
       workflowInstanceUuid: instance.uuid,
       eventName: "go",
-      trigger: { type: "system" },
     });
 
     expect(result.toState).toBe("step3");
@@ -264,13 +261,11 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const instance = await runtime.createInstance({
       workflowName: "on-enter-stay",
-      trigger: { type: "system" },
     });
 
     const result = await runtime.triggerEvent({
       workflowInstanceUuid: instance.uuid,
       eventName: "activate",
-      trigger: { type: "system" },
     });
 
     expect(result.toState).toBe("active");
@@ -313,13 +308,11 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const instance = await runtime.createInstance({
       workflowName: "on-enter-error",
-      trigger: { type: "system" },
     });
 
     const result = await runtime.triggerEvent({
       workflowInstanceUuid: instance.uuid,
       eventName: "process",
-      trigger: { type: "system" },
     });
 
     expect(result.outcome).toBe("failure");
@@ -365,7 +358,6 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const instance = await runtime.createInstance({
       workflowName: "on-enter-timeout",
-      trigger: { type: "system" },
     });
 
     // Manually set expiration in the past to trigger timeout processing
@@ -384,9 +376,9 @@ describe("WorkflowRuntime onEnter integration", () => {
     const history = await historyStore.findByInstanceUuid(instance.uuid);
     expect(history).toHaveLength(2);
     expect(history[0].eventName).toBe("expire");
-    expect(history[0].triggeredByType).toBe("timeout");
+    expect(history[0].triggerMetadata?.source).toBe("timeout");
     expect(history[1].eventName).toBe("onEnter");
-    expect(history[1].triggeredByType).toBe("system");
+    expect(history[1].triggerMetadata?.source).toBe("onEnter");
   });
 
   it("createInstance triggers onEnter on initial state", async () => {
@@ -411,7 +403,6 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const instance = await runtime.createInstance({
       workflowName: "on-enter-initial",
-      trigger: { type: "system" },
     });
 
     // The returned instance should reflect the final state after onEnter
@@ -460,13 +451,11 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const instance = await runtime.createInstance({
       workflowName: "on-enter-context",
-      trigger: { type: "system" },
     });
 
     await runtime.triggerEvent({
       workflowInstanceUuid: instance.uuid,
       eventName: "go",
-      trigger: { type: "system" },
     });
 
     const updated = await instanceStore.findByUuid(instance.uuid);
@@ -504,13 +493,12 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const instance = await runtime.createInstance({
       workflowName: "on-enter-history",
-      trigger: { type: "system" },
     });
 
     await runtime.triggerEvent({
       workflowInstanceUuid: instance.uuid,
       eventName: "submit",
-      trigger: { type: "user", actorUuid: "user-1" },
+      triggerMetadata: { actor: "user-1" },
     });
 
     const history = await historyStore.findByInstanceUuid(instance.uuid);
@@ -518,13 +506,82 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     // Event record — triggered by user
     expect(history[0].eventName).toBe("submit");
-    expect(history[0].triggeredByType).toBe("user");
-    expect(history[0].triggeredByUuid).toBe("user-1");
+    expect(history[0].triggerMetadata?.actor).toBe("user-1");
 
     // onEnter record — triggered by system
     expect(history[1].eventName).toBe("onEnter");
-    expect(history[1].triggeredByType).toBe("system");
-    expect(history[1].triggeredByUuid).toBeUndefined();
+    expect(history[1].triggerMetadata?.source).toBe("onEnter");
+    expect(history[1].triggerMetadata?.actor).toBeUndefined();
+  });
+
+  it("triggerEvent works on state reached only via onEnter", async () => {
+    const definition: WorkflowDefinition = {
+      name: "on-enter-then-event",
+      initialState: "pending",
+      states: {
+        pending: {
+          events: {
+            pay: { targetState: "paid" },
+          },
+        },
+        paid: {
+          onEnter: {
+            targetState: "ready_to_ship",
+            commands: [{ name: "allocate" }],
+          },
+        },
+        ready_to_ship: {
+          events: {
+            ship: { targetState: "shipped" },
+          },
+        },
+        shipped: {},
+      },
+    };
+
+    definitionRegistry.register(definition);
+    commandRegistry.register("allocate", {
+      execute: async () => ({ ok: true, code: "ALLOCATED" }),
+    });
+    const shipCmd: WorkflowCommand = {
+      execute: async () => ({ ok: true, code: "SHIPPED" }),
+    };
+    commandRegistry.register("ship", shipCmd);
+
+    const instance = await runtime.createInstance({
+      workflowName: "on-enter-then-event",
+    });
+
+    // Event triggers onEnter hop: pending → paid → ready_to_ship
+    const payResult = await runtime.triggerEvent({
+      workflowInstanceUuid: instance.uuid,
+      eventName: "pay",
+    });
+
+    expect(payResult.toState).toBe("ready_to_ship");
+
+    // Now trigger an event on the state that was only reachable via onEnter
+    const shipResult = await runtime.triggerEvent({
+      workflowInstanceUuid: instance.uuid,
+      eventName: "ship",
+    });
+
+    expect(shipResult.outcome).toBe("success");
+    expect(shipResult.fromState).toBe("ready_to_ship");
+    expect(shipResult.toState).toBe("shipped");
+
+    const updated = await instanceStore.findByUuid(instance.uuid);
+    expect(updated!.currentState).toBe("shipped");
+
+    // Full history: pay event + onEnter hop + ship event
+    const history = await historyStore.findByInstanceUuid(instance.uuid);
+    expect(history).toHaveLength(3);
+    expect(history[0].eventName).toBe("pay");
+    expect(history[0].toState).toBe("paid");
+    expect(history[1].eventName).toBe("onEnter");
+    expect(history[1].toState).toBe("ready_to_ship");
+    expect(history[2].eventName).toBe("ship");
+    expect(history[2].toState).toBe("shipped");
   });
 
   it("onEnter respects maxOnEnterDepth configuration", async () => {
@@ -560,14 +617,12 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const instance = await limitedRuntime.createInstance({
       workflowName: "on-enter-depth",
-      trigger: { type: "system" },
     });
 
     await expect(
       limitedRuntime.triggerEvent({
         workflowInstanceUuid: instance.uuid,
         eventName: "go",
-        trigger: { type: "system" },
       }),
     ).rejects.toThrow(OnEnterDepthExceededError);
   });

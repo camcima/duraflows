@@ -67,8 +67,7 @@ interface WorkflowHistoryRecord {
   outcome: "success" | "failure";
   errorMessage?: string; // extracted from last failed command's message/code
   commandResultsJson: CommandResult[];
-  triggeredByType?: string; // "user", "admin", "system", "timeout"
-  triggeredByUuid?: string; // actor UUID
+  triggerMetadata?: Record<string, unknown>;
 }
 ```
 

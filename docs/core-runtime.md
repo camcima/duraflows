@@ -38,12 +38,12 @@ async createInstance(input: CreateWorkflowInstanceInput): Promise<WorkflowInstan
 
 **Parameters:**
 
-| Property       | Type                                        | Required | Description                                                                                                                                           |
-| -------------- | ------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workflowName` | `string`                                    | Yes      | Must match a registered workflow definition                                                                                                           |
-| `context`      | `Record<string, unknown>`                   | No       | Initial mutable context data. Merged with state-defined context on entry. See [Context and Metadata](./workflow-definitions.md#context-and-metadata). |
-| `metadata`     | `Record<string, unknown>`                   | No       | Immutable identity labels (e.g., `{ orderId: "..." }`). Never modified after creation.                                                                |
-| `trigger`      | `{ type: TriggerType; actorUuid?: string }` | Yes      | Who/what created the instance                                                                                                                         |
+| Property          | Type                      | Required | Description                                                                                                                                           |
+| ----------------- | ------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflowName`    | `string`                  | Yes      | Must match a registered workflow definition                                                                                                           |
+| `context`         | `Record<string, unknown>` | No       | Initial mutable context data. Merged with state-defined context on entry. See [Context and Metadata](./workflow-definitions.md#context-and-metadata). |
+| `metadata`        | `Record<string, unknown>` | No       | Immutable identity labels (e.g., `{ orderId: "..." }`). Never modified after creation.                                                                |
+| `triggerMetadata` | `Record<string, unknown>` | No       | Optional metadata about who/what created the instance                                                                                                 |
 
 **Behavior:**
 
@@ -61,7 +61,6 @@ async createInstance(input: CreateWorkflowInstanceInput): Promise<WorkflowInstan
 const instance = await runtime.createInstance({
   workflowName: "order",
   metadata: { orderId: "ORD-123", customerId: "CUST-456" },
-  trigger: { type: "system" },
 });
 
 console.log(instance.uuid); // "a1b2c3d4-..."
@@ -79,12 +78,12 @@ async triggerEvent(input: TriggerWorkflowEventInput): Promise<WorkflowExecutionR
 
 **Parameters:**
 
-| Property               | Type                                        | Required | Description                                |
-| ---------------------- | ------------------------------------------- | -------- | ------------------------------------------ |
-| `workflowInstanceUuid` | `string`                                    | Yes      | The instance to trigger the event on       |
-| `eventName`            | `string`                                    | Yes      | Must be a valid event on the current state |
-| `subject`              | `unknown`                                   | No       | Domain entity passed to command handlers   |
-| `trigger`              | `{ type: TriggerType; actorUuid?: string }` | Yes      | Who/what triggered the event               |
+| Property               | Type                      | Required | Description                                          |
+| ---------------------- | ------------------------- | -------- | ---------------------------------------------------- |
+| `workflowInstanceUuid` | `string`                  | Yes      | The instance to trigger the event on                 |
+| `eventName`            | `string`                  | Yes      | Must be a valid event on the current state           |
+| `subject`              | `unknown`                 | No       | Domain entity passed to command handlers             |
+| `triggerMetadata`      | `Record<string, unknown>` | No       | Optional metadata about who/what triggered the event |
 
 **Behavior:**
 
@@ -98,7 +97,7 @@ async triggerEvent(input: TriggerWorkflowEventInput): Promise<WorkflowExecutionR
 8. Persists context: command mutations first, then new state's `context` merged on top (state context wins)
 9. Updates instance (state, version++, context, timeout deadline)
 10. Appends history record
-11. If the new state has an `onEnter` definition, processes the onEnter chain (each hop updates the instance, appends a history record with `eventName: "onEnter"` and `triggeredByType: "system"`, and merges context). See [onEnter](./workflow-definitions.md#workflowonenterdefinition).
+11. If the new state has an `onEnter` definition, processes the onEnter chain (each hop updates the instance, appends a history record with `eventName: "onEnter"` and `triggerMetadata: { source: "onEnter" }`, and merges context). See [onEnter](./workflow-definitions.md#workflowonenterdefinition).
 12. Returns the final landing state (after any onEnter hops)
 13. Commits transaction
 
@@ -121,7 +120,6 @@ const result = await runtime.triggerEvent({
   workflowInstanceUuid: instance.uuid,
   eventName: "Export",
   subject: orderEntity,
-  trigger: { type: "system" },
 });
 
 console.log(result.outcome); // "success" or "failure"
@@ -150,7 +148,7 @@ async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<Pro
 1. Opens a single transaction and finds expired instances via `instanceStore.findExpired(limit, now)` (uses `FOR UPDATE SKIP LOCKED` in PostgreSQL). The `now` parameter comes from the injected clock rather than the database's `now()`.
 2. Within that same transaction, for each expired instance:
    - Resolves the timeout event name from the current state definition
-   - Triggers the event with `trigger: { type: "timeout" }`
+   - Triggers the event with `triggerMetadata: { source: "timeout" }`
    - If the definition changed and no timeout event exists, clears `expiresAt`
 3. Individual instance failures are collected (not thrown). They do not stop the batch.
 4. Commits the transaction.
@@ -513,22 +511,19 @@ Passed to every command during execution. Provides access to the workflow's muta
 
 ```ts
 interface WorkflowExecutionContext {
-  trigger: {
-    type: TriggerType; // "user" | "admin" | "system" | "timeout"
-    actorUuid?: string;
-  };
+  triggerMetadata: Readonly<Record<string, unknown>>;
   now: Date;
   context: Record<string, unknown>;
   metadata: Readonly<Record<string, unknown>>;
 }
 ```
 
-| Property   | Type                                        | Description                                                                                                                   |
-| ---------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `trigger`  | `{ type: TriggerType; actorUuid?: string }` | Who/what triggered the event                                                                                                  |
-| `now`      | `Date`                                      | Current timestamp from the injected clock                                                                                     |
-| `context`  | `Record<string, unknown>`                   | **Mutable.** The workflow's working memory. Commands can read and write. Changes are persisted after the transition.          |
-| `metadata` | `Readonly<Record<string, unknown>>`         | **Read-only.** The workflow's immutable identity labels set at creation. Attempting to write will be ignored (frozen object). |
+| Property          | Type                                | Description                                                                                                                   |
+| ----------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `triggerMetadata` | `Readonly<Record<string, unknown>>` | Optional metadata about who/what triggered the event (frozen object)                                                          |
+| `now`             | `Date`                              | Current timestamp from the injected clock                                                                                     |
+| `context`         | `Record<string, unknown>`           | **Mutable.** The workflow's working memory. Commands can read and write. Changes are persisted after the transition.          |
+| `metadata`        | `Readonly<Record<string, unknown>>` | **Read-only.** The workflow's immutable identity labels set at creation. Attempting to write will be ignored (frozen object). |
 
 See [Context and Metadata](./workflow-definitions.md#context-and-metadata) for a full explanation of the difference.
 

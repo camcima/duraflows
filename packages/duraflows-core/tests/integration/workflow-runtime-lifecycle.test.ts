@@ -160,7 +160,6 @@ describe("WorkflowRuntime full lifecycle", () => {
       workflowName: "lifecycle-wf",
       context: { customField: "hello" },
       metadata: { createdBy: "test-actor" },
-      trigger: { type: "system" },
     });
 
     expect(instance.workflowName).toBe("lifecycle-wf");
@@ -195,13 +194,11 @@ describe("WorkflowRuntime full lifecycle", () => {
 
     const instance = await runtime.createInstance({
       workflowName: "lifecycle-wf",
-      trigger: { type: "system" },
     });
 
     const result = await runtime.triggerEvent({
       workflowInstanceUuid: instance.uuid,
       eventName: "submit",
-      trigger: { type: "system" },
     });
 
     expect(result.outcome).toBe("success");
@@ -235,13 +232,11 @@ describe("WorkflowRuntime full lifecycle", () => {
 
     const instance = await runtime.createInstance({
       workflowName: "lifecycle-wf",
-      trigger: { type: "system" },
     });
 
     const result = await runtime.triggerEvent({
       workflowInstanceUuid: instance.uuid,
       eventName: "submit",
-      trigger: { type: "system" },
     });
 
     expect(result.outcome).toBe("failure");
@@ -270,21 +265,18 @@ describe("WorkflowRuntime full lifecycle", () => {
 
     const instance = await runtime.createInstance({
       workflowName: "lifecycle-wf",
-      trigger: { type: "system" },
     });
 
     // First transition: draft -> submitted
     await runtime.triggerEvent({
       workflowInstanceUuid: instance.uuid,
       eventName: "submit",
-      trigger: { type: "system" },
     });
 
     // Second transition: submitted -> approved
     await runtime.triggerEvent({
       workflowInstanceUuid: instance.uuid,
       eventName: "approve",
-      trigger: { type: "system" },
     });
 
     const history = await historyStore.findByInstanceUuid(instance.uuid);
@@ -295,14 +287,12 @@ describe("WorkflowRuntime full lifecycle", () => {
     expect(history[0].eventName).toBe("submit");
     expect(history[0].toState).toBe("submitted");
     expect(history[0].outcome).toBe("success");
-    expect(history[0].triggeredByType).toBe("system");
 
     // Second record
     expect(history[1].fromState).toBe("submitted");
     expect(history[1].eventName).toBe("approve");
     expect(history[1].toState).toBe("approved");
     expect(history[1].outcome).toBe("success");
-    expect(history[1].triggeredByType).toBe("system");
   });
 
   it("merges state context on transition", async () => {
@@ -323,7 +313,6 @@ describe("WorkflowRuntime full lifecycle", () => {
     const instance = await runtime.createInstance({
       workflowName: "lifecycle-wf",
       context: { userProvided: "value1" },
-      trigger: { type: "system" },
     });
 
     // Verify initial context: state context merged with user context
@@ -337,7 +326,6 @@ describe("WorkflowRuntime full lifecycle", () => {
     await runtime.triggerEvent({
       workflowInstanceUuid: instance.uuid,
       eventName: "submit",
-      trigger: { type: "system" },
     });
 
     // After transition:
@@ -383,13 +371,11 @@ describe("WorkflowRuntime full lifecycle", () => {
     const instance = await runtime.createInstance({
       workflowName: "lifecycle-wf",
       metadata: { createdBy: "actor-1", nested: { key: "value" } },
-      trigger: { type: "system" },
     });
 
     await runtime.triggerEvent({
       workflowInstanceUuid: instance.uuid,
       eventName: "submit",
-      trigger: { type: "system" },
     });
 
     // Verify the metadata was captured and is frozen
