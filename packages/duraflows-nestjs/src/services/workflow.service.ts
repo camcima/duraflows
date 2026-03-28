@@ -10,7 +10,7 @@ import type {
   WorkflowInstanceStore,
   WorkflowHistoryStore,
   WorkflowHistoryRecord,
-} from "@camcima/duraflows-core";
+} from "@duraflows/core";
 import { WORKFLOW_RUNTIME, WORKFLOW_INSTANCE_STORE, WORKFLOW_HISTORY_STORE } from "../providers/injection-tokens.js";
 
 @Injectable()

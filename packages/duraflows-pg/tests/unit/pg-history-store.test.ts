@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PgWorkflowHistoryStore } from "../../src/pg-history-store.js";
 import { PgTransactionContext } from "../../src/pg-transaction-context.js";
 import type { Pool, PoolClient } from "pg";
-import type { WorkflowHistoryRecord } from "@camcima/duraflows-core";
+import type { WorkflowHistoryRecord } from "@duraflows/core";
 
 function createMockPool(queryResult = { rows: [] as Record<string, unknown>[] }) {
   return {

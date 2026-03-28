@@ -7,7 +7,7 @@ import {
   WorkflowCommand,
   WORKFLOW_COMMAND_REGISTRY,
   WORKFLOW_DEFINITION_REGISTRY,
-} from "@camcima/duraflows-nestjs";
+} from "@duraflows/nestjs";
 import {
   WorkflowError,
   WorkflowDefinitionError,
@@ -24,7 +24,7 @@ import {
   type WorkflowInstance,
   type WorkflowCommandRegistry,
   type WorkflowDefinitionRegistry as DefinitionRegistryType,
-} from "@camcima/duraflows-core";
+} from "@duraflows/core";
 
 // ---------------------------------------------------------------------------
 // Stubs

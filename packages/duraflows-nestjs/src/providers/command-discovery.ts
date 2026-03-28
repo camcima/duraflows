@@ -1,7 +1,7 @@
 import type { DiscoveryService } from "@nestjs/core";
 import type { Type } from "@nestjs/common";
-import type { WorkflowCommand } from "@camcima/duraflows-core";
-import { WorkflowError } from "@camcima/duraflows-core";
+import type { WorkflowCommand } from "@duraflows/core";
+import { WorkflowError } from "@duraflows/core";
 import type { WorkflowCommandRegistration } from "./nest-command-registry.js";
 import {
   InternalWorkflowCommandDecorator,

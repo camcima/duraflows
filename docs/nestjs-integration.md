@@ -1,32 +1,32 @@
 # NestJS Integration
 
-The `@camcima/duraflows-nestjs` package provides a NestJS module that wires the workflow runtime into dependency injection with services, optional REST controllers, and DI-backed command resolution.
+The `@duraflows/nestjs` package provides a NestJS module that wires the workflow runtime into dependency injection with services, optional REST controllers, and DI-backed command resolution.
 
 ## Installation
 
 ```bash
-npm install @camcima/duraflows-nestjs @camcima/duraflows-core
+npm install @duraflows/nestjs @duraflows/core
 
 # If using the built-in pg adapter:
-npm install @camcima/duraflows-pg pg
+npm install @duraflows/pg pg
 
 # If using REST controllers (enableControllers: true):
 npm install class-validator class-transformer
 ```
 
-`@camcima/duraflows-nestjs` does **not** depend on `@camcima/duraflows-pg`. You choose your persistence adapter.
+`@duraflows/nestjs` does **not** depend on `@duraflows/pg`. You choose your persistence adapter.
 
 ## @WorkflowCommand Decorator
 
 The `@WorkflowCommand("name")` decorator auto-registers command handlers via NestJS discovery, eliminating the need to manually list them in the `commands` array.
 
 ```ts
-import { WorkflowCommand } from "@camcima/duraflows-nestjs";
+import { WorkflowCommand } from "@duraflows/nestjs";
 import type {
   WorkflowCommand as WorkflowCommandInterface,
   CommandResult,
   WorkflowExecutionContext,
-} from "@camcima/duraflows-core";
+} from "@duraflows/core";
 
 @WorkflowCommand("chargePayment")
 export class ChargePaymentCommand implements WorkflowCommandInterface {
@@ -80,11 +80,11 @@ If the same command name is registered both explicitly and via decorator, the mo
 
 ### Naming Note
 
-The `@WorkflowCommand` decorator and the `WorkflowCommand` interface from core share the same name. Import the interface from `@camcima/duraflows-core` directly:
+The `@WorkflowCommand` decorator and the `WorkflowCommand` interface from core share the same name. Import the interface from `@duraflows/core` directly:
 
 ```ts
-import { WorkflowCommand } from "@camcima/duraflows-nestjs"; // decorator
-import type { WorkflowCommand as WorkflowCommandInterface } from "@camcima/duraflows-core"; // interface
+import { WorkflowCommand } from "@duraflows/nestjs"; // decorator
+import type { WorkflowCommand as WorkflowCommandInterface } from "@duraflows/core"; // interface
 ```
 
 ## WorkflowModule
@@ -94,7 +94,7 @@ import type { WorkflowCommand as WorkflowCommandInterface } from "@camcima/duraf
 Synchronous module configuration.
 
 ```ts
-import { WorkflowModule } from "@camcima/duraflows-nestjs";
+import { WorkflowModule } from "@duraflows/nestjs";
 
 @Module({
   imports: [
@@ -199,7 +199,7 @@ The primary application-facing service. Inject it into your services/controllers
 
 ```ts
 import { Injectable } from "@nestjs/common";
-import { WorkflowService } from "@camcima/duraflows-nestjs";
+import { WorkflowService } from "@duraflows/nestjs";
 
 @Injectable()
 export class OrderService {
@@ -276,7 +276,7 @@ export class OrderService {
 Processes expired workflow instances. Typically called from a scheduled task.
 
 ```ts
-import { WorkflowTimeoutService } from "@camcima/duraflows-nestjs";
+import { WorkflowTimeoutService } from "@duraflows/nestjs";
 ```
 
 **Methods:**
@@ -290,7 +290,7 @@ import { WorkflowTimeoutService } from "@camcima/duraflows-nestjs";
 ```ts
 import { Injectable } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
-import { WorkflowTimeoutService } from "@camcima/duraflows-nestjs";
+import { WorkflowTimeoutService } from "@duraflows/nestjs";
 
 @Injectable()
 export class TimeoutScheduler {
@@ -461,7 +461,7 @@ import {
   WORKFLOW_DEFINITION_REGISTRY,
   WORKFLOW_TRANSACTION_RUNNER,
   WORKFLOW_CLOCK,
-} from "@camcima/duraflows-nestjs";
+} from "@duraflows/nestjs";
 ```
 
 **Example:**
@@ -485,16 +485,16 @@ export class CustomService {
 
 ## Re-exports
 
-`@camcima/duraflows-nestjs` re-exports the entire `@camcima/duraflows-core` public API. You can import everything from a single package:
+`@duraflows/nestjs` re-exports the entire `@duraflows/core` public API. You can import everything from a single package:
 
 ```ts
 // Instead of:
-import type { WorkflowDefinition } from "@camcima/duraflows-core";
-import { WorkflowService } from "@camcima/duraflows-nestjs";
+import type { WorkflowDefinition } from "@duraflows/core";
+import { WorkflowService } from "@duraflows/nestjs";
 
 // You can do:
-import type { WorkflowDefinition } from "@camcima/duraflows-nestjs";
-import { WorkflowService } from "@camcima/duraflows-nestjs";
+import type { WorkflowDefinition } from "@duraflows/nestjs";
+import { WorkflowService } from "@duraflows/nestjs";
 ```
 
 ## Startup Validation

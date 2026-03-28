@@ -4,7 +4,7 @@
 
 - Node.js 18+
 - TypeScript 5.x
-- PostgreSQL 13+ (if using `@camcima/duraflows-pg`)
+- PostgreSQL 13+ (if using `@duraflows/pg`)
 
 ## Installation
 
@@ -12,14 +12,14 @@ Install the packages you need:
 
 ```bash
 # Core runtime (always required)
-npm install @camcima/duraflows-core
+npm install @duraflows/core
 
 # PostgreSQL adapter (if using pg)
-npm install @camcima/duraflows-pg pg
+npm install @duraflows/pg pg
 npm install -D @types/pg
 
 # NestJS integration (if using NestJS)
-npm install @camcima/duraflows-nestjs
+npm install @duraflows/nestjs
 ```
 
 ## Database Setup
@@ -30,10 +30,10 @@ You can set up the schema in two ways:
 
 **Option A: Copy the reference migration**
 
-The `@camcima/duraflows-pg` package ships a reference SQL migration at:
+The `@duraflows/pg` package ships a reference SQL migration at:
 
 ```
-node_modules/@camcima/duraflows-pg/sql/dbmate/001_workflow_core.sql
+node_modules/@duraflows/pg/sql/dbmate/001_workflow_core.sql
 ```
 
 Copy it into your migration directory and apply it with your migration tool (dbmate, Flyway, Knex, Prisma, etc.). This migration uses `gen_random_uuid()` (PostgreSQL 13+) for history record UUIDs.
@@ -43,7 +43,7 @@ Copy it into your migration directory and apply it with your migration tool (dbm
 Use this to choose between `gen_random_uuid()` (PG 13+) and `uuidv7()` (PG 18+, time-ordered):
 
 ```ts
-import { generateMigrationSql } from "@camcima/duraflows-pg";
+import { generateMigrationSql } from "@duraflows/pg";
 
 // For PostgreSQL 18+ (time-ordered UUIDs)
 const { up, down } = generateMigrationSql({ uuidStrategy: "uuidv7" });
@@ -103,7 +103,7 @@ The migration creates three indexes:
 Create a workflow definition as a plain TypeScript object:
 
 ```ts
-import type { WorkflowDefinition } from "@camcima/duraflows-core";
+import type { WorkflowDefinition } from "@duraflows/core";
 
 export const ticketWorkflow: WorkflowDefinition = {
   name: "support-ticket",
@@ -159,12 +159,12 @@ export const ticketWorkflow: WorkflowDefinition = {
 **With NestJS** -- use the `@WorkflowCommand` decorator to auto-register:
 
 ```ts
-import { WorkflowCommand } from "@camcima/duraflows-nestjs";
+import { WorkflowCommand } from "@duraflows/nestjs";
 import type {
   WorkflowCommand as WorkflowCommandInterface,
   CommandResult,
   WorkflowExecutionContext,
-} from "@camcima/duraflows-core";
+} from "@duraflows/core";
 
 @WorkflowCommand("sendResolutionEmail")
 export class SendResolutionEmailCommand implements WorkflowCommandInterface {
@@ -183,7 +183,7 @@ export class SendResolutionEmailCommand implements WorkflowCommandInterface {
 **Without NestJS:**
 
 ```ts
-import type { WorkflowCommand, CommandResult, WorkflowExecutionContext } from "@camcima/duraflows-core";
+import type { WorkflowCommand, CommandResult, WorkflowExecutionContext } from "@duraflows/core";
 
 export class SendResolutionEmailCommand implements WorkflowCommand {
   async execute(subject: unknown, context: WorkflowExecutionContext): Promise<CommandResult> {
@@ -205,8 +205,8 @@ export class SendResolutionEmailCommand implements WorkflowCommand {
 ```ts
 import { Module } from "@nestjs/common";
 import { Pool } from "pg";
-import { WorkflowModule } from "@camcima/duraflows-nestjs";
-import { pgWorkflowProviders } from "@camcima/duraflows-pg";
+import { WorkflowModule } from "@duraflows/nestjs";
+import { pgWorkflowProviders } from "@duraflows/pg";
 import { ticketWorkflow } from "./workflows/ticket.workflow";
 import { SendResolutionEmailCommand } from "./commands/send-resolution-email.command";
 
@@ -235,8 +235,8 @@ import {
   InMemoryCommandRegistry,
   WorkflowValidator,
   WorkflowCompiler,
-} from "@camcima/duraflows-core";
-import { pgWorkflowProviders } from "@camcima/duraflows-pg";
+} from "@duraflows/core";
+import { pgWorkflowProviders } from "@duraflows/pg";
 import { Pool } from "pg";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -307,7 +307,7 @@ In NestJS, use a cron job:
 ```ts
 import { Injectable } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
-import { WorkflowTimeoutService } from "@camcima/duraflows-nestjs";
+import { WorkflowTimeoutService } from "@duraflows/nestjs";
 
 @Injectable()
 export class TimeoutScheduler {

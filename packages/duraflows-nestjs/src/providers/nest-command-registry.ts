@@ -1,7 +1,7 @@
 import type { ModuleRef } from "@nestjs/core";
 import type { Type } from "@nestjs/common";
-import type { WorkflowCommandRegistry, WorkflowCommand } from "@camcima/duraflows-core";
-import { WorkflowError } from "@camcima/duraflows-core";
+import type { WorkflowCommandRegistry, WorkflowCommand } from "@duraflows/core";
+import { WorkflowError } from "@duraflows/core";
 
 export interface WorkflowCommandRegistration {
   name: string;

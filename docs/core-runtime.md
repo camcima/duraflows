@@ -1,13 +1,13 @@
 # Core Runtime API
 
-The `@camcima/duraflows-core` package provides the framework-agnostic workflow runtime, types, validation, compilation, and execution engine.
+The `@duraflows/core` package provides the framework-agnostic workflow runtime, types, validation, compilation, and execution engine.
 
 ## WorkflowRuntime
 
 The main entry point for all workflow operations.
 
 ```ts
-import { WorkflowRuntime } from "@camcima/duraflows-core";
+import { WorkflowRuntime } from "@duraflows/core";
 ```
 
 ### Constructor
@@ -217,7 +217,7 @@ const events = await runtime.getAvailableEvents({
 Validates a workflow definition for structural correctness.
 
 ```ts
-import { WorkflowValidator } from "@camcima/duraflows-core";
+import { WorkflowValidator } from "@duraflows/core";
 
 const validator = new WorkflowValidator();
 const result = validator.validate(definition);
@@ -260,7 +260,7 @@ interface ValidationError {
 Compiles a `WorkflowDefinition` into a finita `Process` with `CallbackCondition` guards.
 
 ```ts
-import { WorkflowCompiler } from "@camcima/duraflows-core";
+import { WorkflowCompiler } from "@duraflows/core";
 
 const compiler = new WorkflowCompiler();
 const compiled = compiler.compile(definition);
@@ -295,7 +295,7 @@ interface CompiledWorkflow {
 Executes commands sequentially with a fail-fast policy.
 
 ```ts
-import { CommandExecutor } from "@camcima/duraflows-core";
+import { CommandExecutor } from "@duraflows/core";
 
 const executor = new CommandExecutor(commandRegistry);
 const result = await executor.execute(commands, subject, context);
@@ -340,7 +340,7 @@ interface CommandExecutionResult {
 Processes onEnter auto-transition chains. Given a starting state, it checks for `onEnter` definitions and follows the chain until reaching a state without `onEnter` (or hitting the depth limit).
 
 ```ts
-import { OnEnterExecutor } from "@camcima/duraflows-core";
+import { OnEnterExecutor } from "@duraflows/core";
 
 const executor = new OnEnterExecutor(commandExecutor);
 const result = await executor.executeChain(definition, startingState, instanceUuid, subject, context, maxDepth);
@@ -396,7 +396,7 @@ interface OnEnterHopResult {
 Orchestrates the full event lifecycle: validation, command execution, and finita state transition.
 
 ```ts
-import { EventExecutor } from "@camcima/duraflows-core";
+import { EventExecutor } from "@duraflows/core";
 
 const eventExecutor = new EventExecutor(commandExecutor);
 const result = await eventExecutor.execute(compiled, currentState, eventName, instanceUuid, subject, context);
@@ -447,7 +447,7 @@ interface EventExecutionResult {
 Computes timeout deadlines and finds timeout event names.
 
 ```ts
-import { TimeoutResolver } from "@camcima/duraflows-core";
+import { TimeoutResolver } from "@duraflows/core";
 
 const resolver = new TimeoutResolver();
 ```
@@ -586,7 +586,7 @@ interface WorkflowDefinitionRegistry {
 **InMemoryDefinitionRegistry** is the built-in implementation. It accepts an optional `WorkflowValidator` and `WorkflowCompiler` as constructor dependencies. When provided, `register()` validates and pre-compiles the definition eagerly -- so invalid definitions fail at startup, not at runtime. You can also pass `validationOptions` (e.g., `knownCommandNames`) to enable command name cross-validation.
 
 ```ts
-import { InMemoryDefinitionRegistry, WorkflowValidator, WorkflowCompiler } from "@camcima/duraflows-core";
+import { InMemoryDefinitionRegistry, WorkflowValidator, WorkflowCompiler } from "@duraflows/core";
 
 const registry = new InMemoryDefinitionRegistry({
   validator: new WorkflowValidator(),
@@ -620,7 +620,7 @@ interface WorkflowCommandRegistry {
 **InMemoryCommandRegistry** is the built-in implementation. Throws `WorkflowError` on duplicate registration or unknown lookup.
 
 ```ts
-import { InMemoryCommandRegistry } from "@camcima/duraflows-core";
+import { InMemoryCommandRegistry } from "@duraflows/core";
 
 const registry = new InMemoryCommandRegistry();
 // register() is on the concrete class, not the interface

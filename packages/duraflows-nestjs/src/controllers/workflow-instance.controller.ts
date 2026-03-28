@@ -9,7 +9,7 @@ import {
   NotFoundException,
   ParseUUIDPipe,
 } from "@nestjs/common";
-import type { WorkflowInstance } from "@camcima/duraflows-core";
+import type { WorkflowInstance } from "@duraflows/core";
 import { WorkflowService } from "../services/workflow.service.js";
 import { CreateInstanceDto } from "./dto/index.js";
 

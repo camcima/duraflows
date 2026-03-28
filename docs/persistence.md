@@ -1,10 +1,10 @@
 # Persistence
 
-The workflow runtime is decoupled from any specific database library. The core package defines three persistence interfaces. The `@camcima/duraflows-pg` package provides a built-in PostgreSQL adapter using `pg`, but you can implement these interfaces with Prisma, Drizzle, TypeORM, or any other library.
+The workflow runtime is decoupled from any specific database library. The core package defines three persistence interfaces. The `@duraflows/pg` package provides a built-in PostgreSQL adapter using `pg`, but you can implement these interfaces with Prisma, Drizzle, TypeORM, or any other library.
 
 ## Persistence Interfaces
 
-All three interfaces are defined in `@camcima/duraflows-core`:
+All three interfaces are defined in `@duraflows/core`:
 
 ```ts
 import type {
@@ -12,7 +12,7 @@ import type {
   WorkflowHistoryStore,
   WorkflowTransactionRunner,
   WorkflowPersistenceProvider,
-} from "@camcima/duraflows-core";
+} from "@duraflows/core";
 ```
 
 ### WorkflowInstanceStore
@@ -105,10 +105,10 @@ This is what `WorkflowModuleOptions.persistence` expects and what `pgWorkflowPro
 
 ### Schema Setup
 
-The `@camcima/duraflows-pg` package includes a `generateMigrationSql()` helper that returns the DDL for the workflow tables. You can choose between `gen_random_uuid()` (PG 13+) and `uuidv7()` (PG 18+) for history record UUIDs:
+The `@duraflows/pg` package includes a `generateMigrationSql()` helper that returns the DDL for the workflow tables. You can choose between `gen_random_uuid()` (PG 13+) and `uuidv7()` (PG 18+) for history record UUIDs:
 
 ```ts
-import { generateMigrationSql } from "@camcima/duraflows-pg";
+import { generateMigrationSql } from "@duraflows/pg";
 
 const { up, down } = generateMigrationSql({ uuidStrategy: "uuidv7" });
 // Paste into your migration file
@@ -121,7 +121,7 @@ A ready-made dbmate migration using `gen_random_uuid()` is also shipped at `sql/
 The simplest way to use the pg adapter:
 
 ```ts
-import { pgWorkflowProviders } from "@camcima/duraflows-pg";
+import { pgWorkflowProviders } from "@duraflows/pg";
 import { Pool } from "pg";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -142,7 +142,7 @@ import {
   PgWorkflowHistoryStore,
   PgTransactionRunner,
   PgTransactionContext,
-} from "@camcima/duraflows-pg";
+} from "@duraflows/pg";
 ```
 
 **PgTransactionRunner**
@@ -209,7 +209,7 @@ import type {
   WorkflowPersistenceProvider,
   WorkflowInstance,
   WorkflowHistoryRecord,
-} from "@camcima/duraflows-core";
+} from "@duraflows/core";
 
 // Transaction context for Prisma
 type PrismaTx = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;

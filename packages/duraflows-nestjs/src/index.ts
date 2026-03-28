@@ -74,7 +74,7 @@ export type {
   CompiledWorkflow,
   OnEnterChainResult,
   OnEnterHopResult,
-} from "@camcima/duraflows-core";
+} from "@duraflows/core";
 export {
   WorkflowError,
   WorkflowDefinitionError,
@@ -90,4 +90,4 @@ export {
   WorkflowRuntime,
   InMemoryDefinitionRegistry,
   InMemoryCommandRegistry,
-} from "@camcima/duraflows-core";
+} from "@duraflows/core";

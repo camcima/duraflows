@@ -447,7 +447,7 @@ stateDiagram-v2
 ```
 
 ```ts
-import type { WorkflowDefinition } from "@camcima/duraflows-core";
+import type { WorkflowDefinition } from "@duraflows/core";
 
 export const orderWorkflow: WorkflowDefinition = {
   name: "order",

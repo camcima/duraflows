@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { describe, it, expect, vi } from "vitest";
 import { NestCommandRegistry } from "../../src/providers/nest-command-registry.js";
-import { WorkflowError } from "@camcima/duraflows-core";
+import { WorkflowError } from "@duraflows/core";
 import type { ModuleRef } from "@nestjs/core";
 
 class StubCommandA {

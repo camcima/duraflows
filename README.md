@@ -9,7 +9,7 @@
 [![Test](https://github.com/camcima/duraflows/actions/workflows/test.yml/badge.svg)](https://github.com/camcima/duraflows/actions/workflows/test.yml)
 [![Validate](https://github.com/camcima/duraflows/actions/workflows/validate.yml/badge.svg)](https://github.com/camcima/duraflows/actions/workflows/validate.yml)
 [![codecov](https://codecov.io/gh/camcima/duraflows/graph/badge.svg)](https://codecov.io/gh/camcima/duraflows)
-[![npm version](https://img.shields.io/npm/v/@camcima/duraflows-core)](https://www.npmjs.com/package/@camcima/duraflows-core)
+[![npm version](https://img.shields.io/npm/v/@duraflows/core)](https://www.npmjs.com/package/@duraflows/core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7%2B-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-18%20%7C%2020%20%7C%2022-green.svg)](https://nodejs.org/)
@@ -22,9 +22,9 @@ Designed as a family of three packages:
 
 | Package                     | Purpose                                                                    |
 | --------------------------- | -------------------------------------------------------------------------- |
-| `@camcima/duraflows-core`   | Framework-agnostic runtime, types, and persistence interfaces              |
-| `@camcima/duraflows-pg`     | PostgreSQL persistence adapter using `pg`                                  |
-| `@camcima/duraflows-nestjs` | NestJS module integration with DI, services, and optional REST controllers |
+| `@duraflows/core`   | Framework-agnostic runtime, types, and persistence interfaces              |
+| `@duraflows/pg`     | PostgreSQL persistence adapter using `pg`                                  |
+| `@duraflows/nestjs` | NestJS module integration with DI, services, and optional REST controllers |
 
 ## Key Features
 
@@ -42,13 +42,13 @@ Designed as a family of three packages:
 
 ```bash
 # Core runtime (always required)
-npm install @camcima/duraflows-core
+npm install @duraflows/core
 
 # PostgreSQL adapter (if using pg)
-npm install @camcima/duraflows-pg pg
+npm install @duraflows/pg pg
 
 # NestJS integration (if using NestJS)
-npm install @camcima/duraflows-nestjs
+npm install @duraflows/nestjs
 ```
 
 ## Quick Example
@@ -56,7 +56,7 @@ npm install @camcima/duraflows-nestjs
 ### Define a Workflow
 
 ```ts
-import type { WorkflowDefinition } from "@camcima/duraflows-core";
+import type { WorkflowDefinition } from "@duraflows/core";
 
 const orderWorkflow: WorkflowDefinition = {
   name: "order",
@@ -116,7 +116,7 @@ const orderWorkflow: WorkflowDefinition = {
 ### Implement Command Handlers
 
 ```ts
-import type { WorkflowCommand, CommandResult, WorkflowExecutionContext } from "@camcima/duraflows-core";
+import type { WorkflowCommand, CommandResult, WorkflowExecutionContext } from "@duraflows/core";
 
 class SendOrderToWarehouseCommand implements WorkflowCommand {
   async execute(subject: unknown, ctx: WorkflowExecutionContext): Promise<CommandResult> {
@@ -143,8 +143,8 @@ class SendOrderToWarehouseCommand implements WorkflowCommand {
 ```ts
 import { Module } from "@nestjs/common";
 import { Pool } from "pg";
-import { WorkflowModule } from "@camcima/duraflows-nestjs";
-import { pgWorkflowProviders } from "@camcima/duraflows-pg";
+import { WorkflowModule } from "@duraflows/nestjs";
+import { pgWorkflowProviders } from "@duraflows/pg";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -166,7 +166,7 @@ export class AppModule {}
 
 ```ts
 import { Injectable } from "@nestjs/common";
-import { WorkflowService } from "@camcima/duraflows-nestjs";
+import { WorkflowService } from "@duraflows/nestjs";
 
 @Injectable()
 export class OrderService {
@@ -200,8 +200,8 @@ export class OrderService {
 ### Use Without NestJS
 
 ```ts
-import { WorkflowRuntime, InMemoryDefinitionRegistry, InMemoryCommandRegistry } from "@camcima/duraflows-core";
-import { pgWorkflowProviders } from "@camcima/duraflows-pg";
+import { WorkflowRuntime, InMemoryDefinitionRegistry, InMemoryCommandRegistry } from "@duraflows/core";
+import { pgWorkflowProviders } from "@duraflows/pg";
 import { Pool } from "pg";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -236,14 +236,14 @@ const result = await runtime.triggerEvent({
 
 ## Database Setup
 
-The `@camcima/duraflows-pg` package provides two ways to set up the database schema:
+The `@duraflows/pg` package provides two ways to set up the database schema:
 
 ### Option 1: Copy the reference migration
 
 A ready-made dbmate migration is shipped at:
 
 ```
-node_modules/@camcima/duraflows-pg/sql/dbmate/001_workflow_core.sql
+node_modules/@duraflows/pg/sql/dbmate/001_workflow_core.sql
 ```
 
 Copy it into your migration directory. It uses `gen_random_uuid()` (PostgreSQL 13+) for history record UUIDs.
@@ -253,7 +253,7 @@ Copy it into your migration directory. It uses `gen_random_uuid()` (PostgreSQL 1
 Use this to choose between `gen_random_uuid()` (PG 13+) and `uuidv7()` (PG 18+, time-ordered):
 
 ```ts
-import { generateMigrationSql } from "@camcima/duraflows-pg";
+import { generateMigrationSql } from "@duraflows/pg";
 
 // For PostgreSQL 18+ (time-ordered UUIDs)
 const { up, down } = generateMigrationSql({ uuidStrategy: "uuidv7" });
@@ -268,7 +268,7 @@ Both options create two tables: `workflow_instances` and `workflow_history`.
 
 ## Custom Persistence Adapters
 
-The NestJS module and the core runtime are fully decoupled from `pg`. To use Prisma, Drizzle, TypeORM, or any other library, implement three interfaces from `@camcima/duraflows-core`:
+The NestJS module and the core runtime are fully decoupled from `pg`. To use Prisma, Drizzle, TypeORM, or any other library, implement three interfaces from `@duraflows/core`:
 
 - `WorkflowInstanceStore`
 - `WorkflowHistoryStore`
@@ -291,10 +291,10 @@ See the [Persistence Guide](docs/persistence.md) for details and examples.
 
 ```mermaid
 graph TD
-    App[Application Code] --> NestJS["@camcima/duraflows-nestjs<br/>(NestJS adapter)"]
-    App --> Core["@camcima/duraflows-core<br/>(runtime + types)"]
+    App[Application Code] --> NestJS["@duraflows/nestjs<br/>(NestJS adapter)"]
+    App --> Core["@duraflows/core<br/>(runtime + types)"]
     NestJS --> Core
-    PG["@camcima/duraflows-pg<br/>(PostgreSQL adapter)"] --> Core
+    PG["@duraflows/pg<br/>(PostgreSQL adapter)"] --> Core
     Custom["Your custom adapter<br/>(Prisma, Drizzle, etc.)"] -.-> Core
 ```
 

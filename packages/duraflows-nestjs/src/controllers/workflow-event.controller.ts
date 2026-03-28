@@ -1,5 +1,5 @@
 import { Controller, Post, Param, Body, UsePipes, ValidationPipe } from "@nestjs/common";
-import type { WorkflowExecutionResult } from "@camcima/duraflows-core";
+import type { WorkflowExecutionResult } from "@duraflows/core";
 import { WorkflowService } from "../services/workflow.service.js";
 import { TriggerEventDto, TriggerEventParamsDto } from "./dto/index.js";
 

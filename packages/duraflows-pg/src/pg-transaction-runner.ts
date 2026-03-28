@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import type { WorkflowTransactionRunner } from "@camcima/duraflows-core";
+import type { WorkflowTransactionRunner } from "@duraflows/core";
 import { PgTransactionContext } from "./pg-transaction-context.js";
 
 export class PgTransactionRunner implements WorkflowTransactionRunner {

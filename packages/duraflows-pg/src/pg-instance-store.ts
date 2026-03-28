@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from "pg";
-import type { WorkflowInstanceStore, WorkflowInstance } from "@camcima/duraflows-core";
-import { WorkflowError } from "@camcima/duraflows-core";
+import type { WorkflowInstanceStore, WorkflowInstance } from "@duraflows/core";
+import { WorkflowError } from "@duraflows/core";
 import { PgTransactionContext } from "./pg-transaction-context.js";
 
 export class PgWorkflowInstanceStore implements WorkflowInstanceStore {

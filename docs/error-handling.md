@@ -265,7 +265,7 @@ import {
   InvalidEventError,
   CommandFailureError,
   OnEnterDepthExceededError,
-} from "@camcima/duraflows-core";
+} from "@duraflows/core";
 
 try {
   const result = await runtime.triggerEvent(input);
@@ -295,7 +295,7 @@ try {
 
 ```ts
 import { ExceptionFilter, Catch, ArgumentsHost, HttpStatus } from "@nestjs/common";
-import { InvalidEventError, CommandFailureError, WorkflowError } from "@camcima/duraflows-core";
+import { InvalidEventError, CommandFailureError, WorkflowError } from "@duraflows/core";
 
 @Catch(WorkflowError)
 export class WorkflowExceptionFilter implements ExceptionFilter {

@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { PgWorkflowInstanceStore } from "../../src/pg-instance-store.js";
 import { PgTransactionContext } from "../../src/pg-transaction-context.js";
-import { WorkflowError } from "@camcima/duraflows-core";
+import { WorkflowError } from "@duraflows/core";
 import type { Pool, PoolClient } from "pg";
-import type { WorkflowInstance } from "@camcima/duraflows-core";
+import type { WorkflowInstance } from "@duraflows/core";
 
 function createMockPool(queryResult = { rows: [] as Record<string, unknown>[], rowCount: 0 }) {
   return {

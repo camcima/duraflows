@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { describe, it, expect } from "vitest";
 import { mergeCommandRegistrations } from "../../src/providers/command-discovery.js";
-import { WorkflowError } from "@camcima/duraflows-core";
+import { WorkflowError } from "@duraflows/core";
 
 class CommandA {
   async execute() {

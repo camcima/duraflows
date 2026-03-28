@@ -14,7 +14,7 @@ import {
   WorkflowQueryController,
   WorkflowTimeoutController,
   type WorkflowModuleOptions,
-} from "@camcima/duraflows-nestjs";
+} from "@duraflows/nestjs";
 import {
   WorkflowRuntime,
   type WorkflowDefinition,
@@ -30,7 +30,7 @@ import {
   type WorkflowClock,
   type WorkflowDefinitionRegistry,
   type WorkflowCommandRegistry,
-} from "@camcima/duraflows-core";
+} from "@duraflows/core";
 
 // ---------------------------------------------------------------------------
 // Stubs

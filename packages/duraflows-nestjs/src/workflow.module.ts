@@ -8,13 +8,13 @@ import type {
   WorkflowHistoryStore,
   WorkflowTransactionRunner,
   WorkflowDefinitionRegistry,
-} from "@camcima/duraflows-core";
+} from "@duraflows/core";
 import {
   InMemoryDefinitionRegistry,
   WorkflowRuntime,
   WorkflowValidator,
   WorkflowCompiler,
-} from "@camcima/duraflows-core";
+} from "@duraflows/core";
 import { NestCommandRegistry, type WorkflowCommandRegistration } from "./providers/nest-command-registry.js";
 import { discoverDecoratedCommands, mergeCommandRegistrations } from "./providers/command-discovery.js";
 import {

@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import type { WorkflowPersistenceProvider } from "@camcima/duraflows-core";
+import type { WorkflowPersistenceProvider } from "@duraflows/core";
 import { PgWorkflowInstanceStore } from "./pg-instance-store.js";
 import { PgWorkflowHistoryStore } from "./pg-history-store.js";
 import { PgTransactionRunner } from "./pg-transaction-runner.js";

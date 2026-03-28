@@ -1,5 +1,5 @@
 import { Controller, Get, Param, Query, UsePipes, ValidationPipe } from "@nestjs/common";
-import type { AvailableWorkflowEvent, WorkflowHistoryRecord } from "@camcima/duraflows-core";
+import type { AvailableWorkflowEvent, WorkflowHistoryRecord } from "@duraflows/core";
 import { WorkflowService } from "../services/workflow.service.js";
 import { AvailableEventsParamsDto, HistoryQueryDto, HistoryParamsDto } from "./dto/index.js";
 

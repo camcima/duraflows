@@ -1,5 +1,5 @@
 import { Controller, Post, Query, UsePipes, ValidationPipe } from "@nestjs/common";
-import type { ProcessExpiredWorkflowsResult } from "@camcima/duraflows-core";
+import type { ProcessExpiredWorkflowsResult } from "@duraflows/core";
 import { WorkflowTimeoutService } from "../services/workflow-timeout.service.js";
 import { TimeoutProcessQueryDto } from "./dto/index.js";
 

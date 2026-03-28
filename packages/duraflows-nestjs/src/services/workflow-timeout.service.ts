@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { WorkflowRuntime, ProcessExpiredWorkflowsResult } from "@camcima/duraflows-core";
+import type { WorkflowRuntime, ProcessExpiredWorkflowsResult } from "@duraflows/core";
 import { WORKFLOW_RUNTIME } from "../providers/injection-tokens.js";
 
 @Injectable()
