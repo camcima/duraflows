@@ -1,8 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type {
-  WorkflowRuntime,
-  ProcessExpiredWorkflowsResult,
-} from "@camcima/duraflows-core";
+import type { WorkflowRuntime, ProcessExpiredWorkflowsResult } from "@camcima/duraflows-core";
 import { WORKFLOW_RUNTIME } from "../providers/injection-tokens.js";
 
 @Injectable()
@@ -12,9 +9,7 @@ export class WorkflowTimeoutService {
     private readonly runtime: WorkflowRuntime,
   ) {}
 
-  async processExpiredWorkflows(
-    limit?: number,
-  ): Promise<ProcessExpiredWorkflowsResult> {
+  async processExpiredWorkflows(limit?: number): Promise<ProcessExpiredWorkflowsResult> {
     return this.runtime.processExpiredWorkflows({ limit });
   }
 }

@@ -57,9 +57,7 @@ describe("PgTransactionRunner", () => {
       release: vi.fn(),
     } as unknown as PoolClient;
 
-    const result = await PgTransactionContext.run(existingClient, () =>
-      runner.runInTransaction(async () => "nested"),
-    );
+    const result = await PgTransactionContext.run(existingClient, () => runner.runInTransaction(async () => "nested"));
 
     expect(result).toBe("nested");
     // Pool.connect should NOT be called — we reused the existing context

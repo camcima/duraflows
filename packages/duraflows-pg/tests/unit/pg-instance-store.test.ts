@@ -110,9 +110,7 @@ describe("PgWorkflowInstanceStore", () => {
       const pool = createMockPool();
       const store = new PgWorkflowInstanceStore(pool);
 
-      await expect(store.lockByUuid("uuid")).rejects.toThrow(
-        "lockByUuid requires an active transaction",
-      );
+      await expect(store.lockByUuid("uuid")).rejects.toThrow("lockByUuid requires an active transaction");
     });
 
     it("returns instance when found within transaction", async () => {
@@ -120,9 +118,7 @@ describe("PgWorkflowInstanceStore", () => {
       const txClient = createMockClient({ rows: [sampleRow], rowCount: 1 });
       const store = new PgWorkflowInstanceStore(pool);
 
-      const result = await PgTransactionContext.run(txClient, () =>
-        store.lockByUuid("inst-uuid"),
-      );
+      const result = await PgTransactionContext.run(txClient, () => store.lockByUuid("inst-uuid"));
 
       expect(result).not.toBeNull();
       expect(result!.uuid).toBe("inst-uuid");
@@ -135,9 +131,7 @@ describe("PgWorkflowInstanceStore", () => {
       const txClient = createMockClient({ rows: [], rowCount: 0 });
       const store = new PgWorkflowInstanceStore(pool);
 
-      const result = await PgTransactionContext.run(txClient, () =>
-        store.lockByUuid("missing"),
-      );
+      const result = await PgTransactionContext.run(txClient, () => store.lockByUuid("missing"));
 
       expect(result).toBeNull();
     });
@@ -172,9 +166,7 @@ describe("PgWorkflowInstanceStore", () => {
       const pool = createMockPool();
       const store = new PgWorkflowInstanceStore(pool);
 
-      await expect(store.findExpired(10, now)).rejects.toThrow(
-        "findExpired requires an active transaction",
-      );
+      await expect(store.findExpired(10, now)).rejects.toThrow("findExpired requires an active transaction");
     });
 
     it("returns expired instances within transaction", async () => {
@@ -182,9 +174,7 @@ describe("PgWorkflowInstanceStore", () => {
       const txClient = createMockClient({ rows: [sampleRow], rowCount: 1 });
       const store = new PgWorkflowInstanceStore(pool);
 
-      const results = await PgTransactionContext.run(txClient, () =>
-        store.findExpired(10, now),
-      );
+      const results = await PgTransactionContext.run(txClient, () => store.findExpired(10, now));
 
       expect(results).toHaveLength(1);
       expect(results[0].uuid).toBe("inst-uuid");

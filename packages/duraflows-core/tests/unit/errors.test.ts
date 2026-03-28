@@ -45,9 +45,7 @@ describe("WorkflowDefinitionError", () => {
 describe("InvalidEventError", () => {
   it("stores all properties and formats message", () => {
     const err = new InvalidEventError("uuid-123", "pending", "Ship");
-    expect(err.message).toBe(
-      'Event "Ship" is not available on state "pending" for instance "uuid-123"',
-    );
+    expect(err.message).toBe('Event "Ship" is not available on state "pending" for instance "uuid-123"');
     expect(err.name).toBe("InvalidEventError");
     expect(err.workflowInstanceUuid).toBe("uuid-123");
     expect(err.currentState).toBe("pending");
@@ -82,9 +80,7 @@ describe("CommandFailureError", () => {
   it("stores all properties and formats message using result.message", () => {
     const result = { ok: false as const, code: "DECLINED", message: "Card declined" };
     const err = new CommandFailureError("uuid-789", "Pay", "chargePayment", result);
-    expect(err.message).toBe(
-      'Command "chargePayment" failed for event "Pay" on instance "uuid-789": Card declined',
-    );
+    expect(err.message).toBe('Command "chargePayment" failed for event "Pay" on instance "uuid-789": Card declined');
     expect(err.name).toBe("CommandFailureError");
     expect(err.workflowInstanceUuid).toBe("uuid-789");
     expect(err.eventName).toBe("Pay");

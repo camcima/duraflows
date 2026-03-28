@@ -18,15 +18,15 @@ new WorkflowRuntime(options: WorkflowRuntimeOptions)
 
 **WorkflowRuntimeOptions:**
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `definitionRegistry` | `WorkflowDefinitionRegistry` | Registry of workflow definitions |
-| `commandRegistry` | `WorkflowCommandRegistry` | Registry of command handlers |
-| `instanceStore` | `WorkflowInstanceStore` | Persistence for workflow instances |
-| `historyStore` | `WorkflowHistoryStore` | Persistence for history records |
-| `transactionRunner` | `WorkflowTransactionRunner` | Transaction management |
-| `clock` | `WorkflowClock` | Clock for timestamps (injectable for testing) |
-| `maxOnEnterDepth` | `number` | Maximum depth for onEnter auto-transition chains (default: 10) |
+| Property             | Type                         | Description                                                    |
+| -------------------- | ---------------------------- | -------------------------------------------------------------- |
+| `definitionRegistry` | `WorkflowDefinitionRegistry` | Registry of workflow definitions                               |
+| `commandRegistry`    | `WorkflowCommandRegistry`    | Registry of command handlers                                   |
+| `instanceStore`      | `WorkflowInstanceStore`      | Persistence for workflow instances                             |
+| `historyStore`       | `WorkflowHistoryStore`       | Persistence for history records                                |
+| `transactionRunner`  | `WorkflowTransactionRunner`  | Transaction management                                         |
+| `clock`              | `WorkflowClock`              | Clock for timestamps (injectable for testing)                  |
+| `maxOnEnterDepth`    | `number`                     | Maximum depth for onEnter auto-transition chains (default: 10) |
 
 ### createInstance()
 
@@ -38,14 +38,15 @@ async createInstance(input: CreateWorkflowInstanceInput): Promise<WorkflowInstan
 
 **Parameters:**
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `workflowName` | `string` | Yes | Must match a registered workflow definition |
-| `context` | `Record<string, unknown>` | No | Initial mutable context data. Merged with state-defined context on entry. See [Context and Metadata](./workflow-definitions.md#context-and-metadata). |
-| `metadata` | `Record<string, unknown>` | No | Immutable identity labels (e.g., `{ orderId: "..." }`). Never modified after creation. |
-| `trigger` | `{ type: TriggerType; actorUuid?: string }` | Yes | Who/what created the instance |
+| Property       | Type                                        | Required | Description                                                                                                                                           |
+| -------------- | ------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflowName` | `string`                                    | Yes      | Must match a registered workflow definition                                                                                                           |
+| `context`      | `Record<string, unknown>`                   | No       | Initial mutable context data. Merged with state-defined context on entry. See [Context and Metadata](./workflow-definitions.md#context-and-metadata). |
+| `metadata`     | `Record<string, unknown>`                   | No       | Immutable identity labels (e.g., `{ orderId: "..." }`). Never modified after creation.                                                                |
+| `trigger`      | `{ type: TriggerType; actorUuid?: string }` | Yes      | Who/what created the instance                                                                                                                         |
 
 **Behavior:**
+
 1. Resolves the workflow definition from the registry (already validated and compiled at registration time)
 2. Seeds context from the initial state's defaults first, then merges `input.context` on top (user input wins)
 3. Computes timeout deadline for the initial state (if applicable)
@@ -63,9 +64,9 @@ const instance = await runtime.createInstance({
   trigger: { type: "system" },
 });
 
-console.log(instance.uuid);          // "a1b2c3d4-..."
-console.log(instance.currentState);  // "new"
-console.log(instance.version);       // 0
+console.log(instance.uuid); // "a1b2c3d4-..."
+console.log(instance.currentState); // "new"
+console.log(instance.version); // 0
 ```
 
 ### triggerEvent()
@@ -78,14 +79,15 @@ async triggerEvent(input: TriggerWorkflowEventInput): Promise<WorkflowExecutionR
 
 **Parameters:**
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `workflowInstanceUuid` | `string` | Yes | The instance to trigger the event on |
-| `eventName` | `string` | Yes | Must be a valid event on the current state |
-| `subject` | `unknown` | No | Domain entity passed to command handlers |
-| `trigger` | `{ type: TriggerType; actorUuid?: string }` | Yes | Who/what triggered the event |
+| Property               | Type                                        | Required | Description                                |
+| ---------------------- | ------------------------------------------- | -------- | ------------------------------------------ |
+| `workflowInstanceUuid` | `string`                                    | Yes      | The instance to trigger the event on       |
+| `eventName`            | `string`                                    | Yes      | Must be a valid event on the current state |
+| `subject`              | `unknown`                                   | No       | Domain entity passed to command handlers   |
+| `trigger`              | `{ type: TriggerType; actorUuid?: string }` | Yes      | Who/what triggered the event               |
 
 **Behavior:**
+
 1. Runs inside `transactionRunner.runInTransaction()`
 2. Locks the instance via `instanceStore.lockByUuid()` (row-level lock)
 3. Builds `WorkflowExecutionContext` with the instance's `context` (mutable copy) and `metadata` (frozen)
@@ -122,11 +124,11 @@ const result = await runtime.triggerEvent({
   trigger: { type: "system" },
 });
 
-console.log(result.outcome);                   // "success" or "failure"
-console.log(result.fromState);                  // "exportable"
-console.log(result.toState);                    // "exported" or "export_failed"
-console.log(result.commandResults.length);      // 2
-console.log(result.commandResults[0].ok);       // true
+console.log(result.outcome); // "success" or "failure"
+console.log(result.fromState); // "exportable"
+console.log(result.toState); // "exported" or "export_failed"
+console.log(result.commandResults.length); // 2
+console.log(result.commandResults[0].ok); // true
 ```
 
 ### processExpiredWorkflows()
@@ -139,11 +141,12 @@ async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<Pro
 
 **Parameters:**
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `limit` | `number` | 100 | Maximum instances to process in this batch |
+| Property | Type     | Default | Description                                |
+| -------- | -------- | ------- | ------------------------------------------ |
+| `limit`  | `number` | 100     | Maximum instances to process in this batch |
 
 **Behavior:**
+
 1. Opens a single transaction and finds expired instances via `instanceStore.findExpired(limit, now)` (uses `FOR UPDATE SKIP LOCKED` in PostgreSQL). The `now` parameter comes from the injected clock rather than the database's `now()`.
 2. Within that same transaction, for each expired instance:
    - Resolves the timeout event name from the current state definition
@@ -161,10 +164,10 @@ interface ProcessExpiredWorkflowsResult {
 }
 ```
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `processed` | `number` | Number of successfully processed instances |
-| `failed` | `Array<{ uuid: string; error: string }>` | Instances that failed, with their UUIDs and error messages |
+| Property    | Type                                     | Description                                                |
+| ----------- | ---------------------------------------- | ---------------------------------------------------------- |
+| `processed` | `number`                                 | Number of successfully processed instances                 |
+| `failed`    | `Array<{ uuid: string; error: string }>` | Instances that failed, with their UUIDs and error messages |
 
 **Example:**
 
@@ -186,9 +189,9 @@ async getAvailableEvents(input: GetAvailableEventsInput): Promise<AvailableWorkf
 
 **Parameters:**
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `workflowInstanceUuid` | `string` | Yes | The instance to query |
+| Property               | Type     | Required | Description           |
+| ---------------------- | -------- | -------- | --------------------- |
+| `workflowInstanceUuid` | `string` | Yes      | The instance to query |
 
 **Returns:**
 
@@ -236,8 +239,8 @@ validate(definition: WorkflowDefinition, options?: WorkflowValidationOptions): V
 
 **WorkflowValidationOptions:**
 
-| Property | Type | Description |
-|----------|------|-------------|
+| Property            | Type          | Description                                                                         |
+| ------------------- | ------------- | ----------------------------------------------------------------------------------- |
 | `knownCommandNames` | `Set<string>` | If provided, validates that all command name references in events exist in this set |
 
 **Returns:**
@@ -249,7 +252,7 @@ interface ValidationResult {
 }
 
 interface ValidationError {
-  path: string;    // e.g. "states.new.events.Export.targetState"
+  path: string; // e.g. "states.new.events.Export.targetState"
   message: string; // e.g. 'Target state "unknown" does not exist in states'
 }
 ```
@@ -274,6 +277,7 @@ compile(definition: WorkflowDefinition): CompiledWorkflow
 ```
 
 **Compilation strategy:**
+
 - Creates a finita `State` for each workflow state
 - For each event with a `targetState`: creates a success transition guarded by `context.get("workflow:eventOutcome") === "success"`
 - For each event with an `errorState`: creates a failure transition guarded by `context.get("workflow:eventOutcome") === "failure"`
@@ -316,6 +320,7 @@ async execute(
 ```
 
 **Behavior:**
+
 1. If `commands` is empty, returns `{ outcome: "success", commandResults: [] }`
 2. For each command in order:
    - Resolves the handler from `commandRegistry.get(name)`
@@ -363,6 +368,7 @@ async executeChain(
 ```
 
 **Behavior:**
+
 1. Checks if the current state has an `onEnter` definition -- if not, returns immediately
 2. Executes commands via `CommandExecutor` (fail-fast, same pattern as events)
 3. On success + `targetState`: records hop, transitions. On failure + `errorState`: records hop, transitions. On failure + no `errorState`: throws `CommandFailureError`. On success + no `targetState`: records hop (commands ran as side effects), stops.
@@ -418,6 +424,7 @@ async execute(
 ```
 
 **Behavior:**
+
 1. Validates the event exists on the current state
 2. Executes commands via `CommandExecutor`
 3. If failure and no `errorState`, throws `CommandFailureError`
@@ -456,6 +463,7 @@ computeDeadline(definition: WorkflowDefinition, stateName: string, now: Date): D
 Returns the deadline `Date` for the timeout event on the given state, or `null` if no timeout event exists.
 
 **Duration calculation:** Sums all defined fields:
+
 ```
 totalMs = (afterMinutes * 60000) + (afterHours * 3600000) + (afterDays * 86400000)
 deadline = new Date(now.getTime() + totalMs)
@@ -475,10 +483,7 @@ Command handlers implement this interface:
 
 ```ts
 interface WorkflowCommand<TSubject = unknown> {
-  execute(
-    subject: TSubject,
-    context: WorkflowExecutionContext,
-  ): Promise<CommandResult> | CommandResult;
+  execute(subject: TSubject, context: WorkflowExecutionContext): Promise<CommandResult> | CommandResult;
 }
 ```
 
@@ -494,13 +499,13 @@ interface CommandResult {
 }
 ```
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `ok` | `boolean` | `true` if the command succeeded, `false` if it failed |
-| `code` | `string` | Machine-readable result code (e.g., `"PAYMENT_CHARGED"`, `"INSUFFICIENT_FUNDS"`) |
-| `message` | `string` | Human-readable description |
-| `metadata` | `Record<string, unknown>` | Additional command-specific data |
-| `error` | `unknown` | Error details (for failures) |
+| Property   | Type                      | Description                                                                      |
+| ---------- | ------------------------- | -------------------------------------------------------------------------------- |
+| `ok`       | `boolean`                 | `true` if the command succeeded, `false` if it failed                            |
+| `code`     | `string`                  | Machine-readable result code (e.g., `"PAYMENT_CHARGED"`, `"INSUFFICIENT_FUNDS"`) |
+| `message`  | `string`                  | Human-readable description                                                       |
+| `metadata` | `Record<string, unknown>` | Additional command-specific data                                                 |
+| `error`    | `unknown`                 | Error details (for failures)                                                     |
 
 ### WorkflowExecutionContext
 
@@ -509,7 +514,7 @@ Passed to every command during execution. Provides access to the workflow's muta
 ```ts
 interface WorkflowExecutionContext {
   trigger: {
-    type: TriggerType;  // "user" | "admin" | "system" | "timeout"
+    type: TriggerType; // "user" | "admin" | "system" | "timeout"
     actorUuid?: string;
   };
   now: Date;
@@ -518,12 +523,12 @@ interface WorkflowExecutionContext {
 }
 ```
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `trigger` | `{ type: TriggerType; actorUuid?: string }` | Who/what triggered the event |
-| `now` | `Date` | Current timestamp from the injected clock |
-| `context` | `Record<string, unknown>` | **Mutable.** The workflow's working memory. Commands can read and write. Changes are persisted after the transition. |
-| `metadata` | `Readonly<Record<string, unknown>>` | **Read-only.** The workflow's immutable identity labels set at creation. Attempting to write will be ignored (frozen object). |
+| Property   | Type                                        | Description                                                                                                                   |
+| ---------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `trigger`  | `{ type: TriggerType; actorUuid?: string }` | Who/what triggered the event                                                                                                  |
+| `now`      | `Date`                                      | Current timestamp from the injected clock                                                                                     |
+| `context`  | `Record<string, unknown>`                   | **Mutable.** The workflow's working memory. Commands can read and write. Changes are persisted after the transition.          |
+| `metadata` | `Readonly<Record<string, unknown>>`         | **Read-only.** The workflow's immutable identity labels set at creation. Attempting to write will be ignored (frozen object). |
 
 See [Context and Metadata](./workflow-definitions.md#context-and-metadata) for a full explanation of the difference.
 
@@ -586,11 +591,7 @@ interface WorkflowDefinitionRegistry {
 **InMemoryDefinitionRegistry** is the built-in implementation. It accepts an optional `WorkflowValidator` and `WorkflowCompiler` as constructor dependencies. When provided, `register()` validates and pre-compiles the definition eagerly -- so invalid definitions fail at startup, not at runtime. You can also pass `validationOptions` (e.g., `knownCommandNames`) to enable command name cross-validation.
 
 ```ts
-import {
-  InMemoryDefinitionRegistry,
-  WorkflowValidator,
-  WorkflowCompiler,
-} from "@camcima/duraflows-core";
+import { InMemoryDefinitionRegistry, WorkflowValidator, WorkflowCompiler } from "@camcima/duraflows-core";
 
 const registry = new InMemoryDefinitionRegistry({
   validator: new WorkflowValidator(),
@@ -600,12 +601,12 @@ const registry = new InMemoryDefinitionRegistry({
 });
 
 // register() is on the concrete class, not the interface
-registry.register(orderWorkflow);   // validates + compiles immediately
+registry.register(orderWorkflow); // validates + compiles immediately
 registry.register(ticketWorkflow);
 
 const def = registry.get("order"); // returns the definition
-registry.has("order");             // true
-registry.getAll();                 // [orderWorkflow, ticketWorkflow]
+registry.has("order"); // true
+registry.getAll(); // [orderWorkflow, ticketWorkflow]
 ```
 
 Throws `WorkflowDefinitionError` on duplicate registration, validation failure, or unknown lookup.

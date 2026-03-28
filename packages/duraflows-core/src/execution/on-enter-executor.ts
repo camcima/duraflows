@@ -44,11 +44,7 @@ export class OnEnterExecutor {
 
       // Execute commands (if any)
       const commands = onEnter.commands ?? [];
-      const commandExecResult = await this.commandExecutor.execute(
-        commands,
-        subject,
-        context,
-      );
+      const commandExecResult = await this.commandExecutor.execute(commands, subject, context);
 
       const outcome = commandExecResult.outcome;
 
@@ -65,16 +61,9 @@ export class OnEnterExecutor {
           continue;
         }
         // No errorState — throw CommandFailureError (same as EventExecutor)
-        const failedResult = commandExecResult.commandResults[
-          commandExecResult.commandResults.length - 1
-        ];
+        const failedResult = commandExecResult.commandResults[commandExecResult.commandResults.length - 1];
         const failedCommandName = commands[commandExecResult.commandResults.length - 1].name;
-        throw new CommandFailureError(
-          instanceUuid,
-          "onEnter",
-          failedCommandName,
-          failedResult,
-        );
+        throw new CommandFailureError(instanceUuid, "onEnter", failedCommandName, failedResult);
       }
 
       // Success

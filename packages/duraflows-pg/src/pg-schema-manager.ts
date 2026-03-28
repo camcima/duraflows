@@ -12,12 +12,8 @@ export interface MigrationSqlOptions {
  *
  * Copy the output into a dbmate migration file (or any other migration tool).
  */
-export function generateMigrationSql(
-  options?: MigrationSqlOptions,
-): { up: string; down: string } {
-  const uuidDefault = options?.uuidStrategy === "uuidv7"
-    ? "uuidv7()"
-    : "gen_random_uuid()";
+export function generateMigrationSql(options?: MigrationSqlOptions): { up: string; down: string } {
+  const uuidDefault = options?.uuidStrategy === "uuidv7" ? "uuidv7()" : "gen_random_uuid()";
 
   const up = `-- UUIDs for workflow_instances are generated application-side (randomUUID).
 -- UUIDs for workflow_history are generated database-side (${uuidDefault}).

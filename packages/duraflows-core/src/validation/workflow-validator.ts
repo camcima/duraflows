@@ -15,10 +15,7 @@ export interface WorkflowValidationOptions {
 }
 
 export class WorkflowValidator {
-  validate(
-    definition: WorkflowDefinition,
-    options?: WorkflowValidationOptions,
-  ): ValidationResult {
+  validate(definition: WorkflowDefinition, options?: WorkflowValidationOptions): ValidationResult {
     const errors: ValidationError[] = [];
 
     if (!definition.name || definition.name.trim() === "") {
@@ -134,10 +131,7 @@ export class WorkflowValidator {
     return { valid: errors.length === 0, errors };
   }
 
-  private validateOnEnterCycles(
-    definition: WorkflowDefinition,
-    errors: ValidationError[],
-  ): void {
+  private validateOnEnterCycles(definition: WorkflowDefinition, errors: ValidationError[]): void {
     // Build adjacency list from onEnter targetState and errorState edges
     const edges = new Map<string, string[]>();
     for (const [stateName, state] of Object.entries(definition.states)) {
@@ -188,16 +182,9 @@ export class WorkflowValidator {
     }
   }
 
-  private validateTimeout(
-    timeout: WorkflowTimeoutDefinition,
-    path: string,
-  ): ValidationError[] {
+  private validateTimeout(timeout: WorkflowTimeoutDefinition, path: string): ValidationError[] {
     const errors: ValidationError[] = [];
-    const fields: (keyof WorkflowTimeoutDefinition)[] = [
-      "afterMinutes",
-      "afterHours",
-      "afterDays",
-    ];
+    const fields: (keyof WorkflowTimeoutDefinition)[] = ["afterMinutes", "afterHours", "afterDays"];
 
     let hasField = false;
     for (const field of fields) {

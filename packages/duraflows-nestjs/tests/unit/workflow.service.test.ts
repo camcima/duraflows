@@ -17,11 +17,7 @@ function createMocks() {
     findByInstanceUuid: vi.fn().mockResolvedValue([{ eventName: "Created" }]),
   };
 
-  const service = new WorkflowService(
-    runtime as any,
-    instanceStore as any,
-    historyStore as any,
-  );
+  const service = new WorkflowService(runtime as any, instanceStore as any, historyStore as any);
 
   return { service, runtime, instanceStore, historyStore };
 }

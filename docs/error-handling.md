@@ -23,12 +23,13 @@ class WorkflowError extends Error {
 }
 ```
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `message` | `string` | Error description |
-| `cause` | `unknown` | Optional underlying cause (standard `Error.cause`) |
+| Property  | Type      | Description                                        |
+| --------- | --------- | -------------------------------------------------- |
+| `message` | `string`  | Error description                                  |
+| `cause`   | `unknown` | Optional underlying cause (standard `Error.cause`) |
 
 **When thrown:**
+
 - Workflow instance not found (by UUID)
 - Optimistic locking failure — the instance was modified concurrently (e.g., `'Optimistic locking failure: workflow instance "..." was modified concurrently (expected version 3)'`)
 - Command not found in registry
@@ -55,11 +56,12 @@ class WorkflowDefinitionError extends WorkflowError {
 }
 ```
 
-| Property | Type | Description |
-|----------|------|-------------|
+| Property       | Type     | Description                             |
+| -------------- | -------- | --------------------------------------- |
 | `workflowName` | `string` | The workflow name that caused the error |
 
 **When thrown:**
+
 - Registering a duplicate workflow name via `InMemoryDefinitionRegistry.register()`
 - Validation failure during `register()` (e.g., invalid state references, missing target states, unknown command names)
 - Compilation failure during `register()` (e.g., non-existent target/error state in finita process)
@@ -108,11 +110,11 @@ class InvalidEventError extends WorkflowError {
 }
 ```
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `workflowInstanceUuid` | `string` | The instance UUID |
-| `currentState` | `string` | The current state of the instance |
-| `eventName` | `string` | The event that was attempted |
+| Property               | Type     | Description                       |
+| ---------------------- | -------- | --------------------------------- |
+| `workflowInstanceUuid` | `string` | The instance UUID                 |
+| `currentState`         | `string` | The current state of the instance |
+| `eventName`            | `string` | The event that was attempted      |
 
 **When thrown:** `triggerEvent()` is called with an event name that is not defined on the instance's current state.
 
@@ -120,13 +122,13 @@ class InvalidEventError extends WorkflowError {
 try {
   await runtime.triggerEvent({
     workflowInstanceUuid: instance.uuid,
-    eventName: "Ship",        // not available in "new" state
+    eventName: "Ship", // not available in "new" state
     trigger: { type: "system" },
   });
 } catch (err) {
   if (err instanceof InvalidEventError) {
     console.error(err.currentState); // "new"
-    console.error(err.eventName);    // "Ship"
+    console.error(err.eventName); // "Ship"
   }
 }
 ```
@@ -141,21 +143,16 @@ class CommandFailureError extends WorkflowError {
   readonly eventName: string;
   readonly commandName: string;
   readonly result: CommandResult;
-  constructor(
-    workflowInstanceUuid: string,
-    eventName: string,
-    commandName: string,
-    result: CommandResult,
-  );
+  constructor(workflowInstanceUuid: string, eventName: string, commandName: string, result: CommandResult);
 }
 ```
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `workflowInstanceUuid` | `string` | The instance UUID |
-| `eventName` | `string` | The event being processed |
-| `commandName` | `string` | The command that failed |
-| `result` | `CommandResult` | The failure result from the command |
+| Property               | Type            | Description                         |
+| ---------------------- | --------------- | ----------------------------------- |
+| `workflowInstanceUuid` | `string`        | The instance UUID                   |
+| `eventName`            | `string`        | The event being processed           |
+| `commandName`          | `string`        | The command that failed             |
+| `result`               | `CommandResult` | The failure result from the command |
 
 **When thrown:** A command returns `{ ok: false }` and the event does not define an `errorState`. Since there's no error state to transition to, the failure is surfaced as an exception.
 
@@ -174,8 +171,8 @@ try {
   });
 } catch (err) {
   if (err instanceof CommandFailureError) {
-    console.error(err.commandName);   // "chargePayment"
-    console.error(err.result.code);   // "INSUFFICIENT_FUNDS"
+    console.error(err.commandName); // "chargePayment"
+    console.error(err.result.code); // "INSUFFICIENT_FUNDS"
     console.error(err.result.message); // "Card declined"
   }
 }
@@ -204,11 +201,11 @@ class OnEnterDepthExceededError extends WorkflowError {
 }
 ```
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `workflowInstanceUuid` | `string` | The instance UUID |
-| `stateName` | `string` | The state where the depth limit was reached |
-| `depth` | `number` | The maximum depth that was exceeded |
+| Property               | Type     | Description                                 |
+| ---------------------- | -------- | ------------------------------------------- |
+| `workflowInstanceUuid` | `string` | The instance UUID                           |
+| `stateName`            | `string` | The state where the depth limit was reached |
+| `depth`                | `number` | The maximum depth that was exceeded         |
 
 **When thrown:** An onEnter chain exceeds the configured `maxOnEnterDepth` (default 10). This is a safety guard against infinite loops caused by misconfigured onEnter chains.
 
@@ -222,7 +219,7 @@ try {
 } catch (err) {
   if (err instanceof OnEnterDepthExceededError) {
     console.error(err.stateName); // state where depth was exceeded
-    console.error(err.depth);     // 10
+    console.error(err.depth); // 10
   }
 }
 ```
@@ -252,13 +249,13 @@ The command throws an error. This is a **technical failure** -- the command coul
 
 ### Decision Guide
 
-| Scenario | Command should... | Event definition |
-|----------|------------------|-----------------|
-| Payment declined | Return `{ ok: false }` | Include `errorState` |
-| API timeout | Throw or return `{ ok: false }` | Include `errorState` if recoverable |
-| Database connection lost | Let the exception propagate | N/A (infrastructure failure) |
-| Validation failure | Return `{ ok: false }` | Include `errorState` |
-| Bug in command code | Let the exception propagate | N/A (fix the bug) |
+| Scenario                 | Command should...               | Event definition                    |
+| ------------------------ | ------------------------------- | ----------------------------------- |
+| Payment declined         | Return `{ ok: false }`          | Include `errorState`                |
+| API timeout              | Throw or return `{ ok: false }` | Include `errorState` if recoverable |
+| Database connection lost | Let the exception propagate     | N/A (infrastructure failure)        |
+| Validation failure       | Return `{ ok: false }`          | Include `errorState`                |
+| Bug in command code      | Let the exception propagate     | N/A (fix the bug)                   |
 
 ## Error Handling Patterns
 
@@ -301,11 +298,7 @@ try {
 
 ```ts
 import { ExceptionFilter, Catch, ArgumentsHost, HttpStatus } from "@nestjs/common";
-import {
-  InvalidEventError,
-  CommandFailureError,
-  WorkflowError,
-} from "@camcima/duraflows-core";
+import { InvalidEventError, CommandFailureError, WorkflowError } from "@camcima/duraflows-core";
 
 @Catch(WorkflowError)
 export class WorkflowExceptionFilter implements ExceptionFilter {

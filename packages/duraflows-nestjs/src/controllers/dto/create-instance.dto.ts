@@ -1,11 +1,4 @@
-import {
-  IsString,
-  IsOptional,
-  IsObject,
-  IsIn,
-  IsUUID,
-  ValidateNested,
-} from "class-validator";
+import { IsString, IsOptional, IsObject, IsIn, IsUUID, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 
 class CreateInstanceTriggerDto {

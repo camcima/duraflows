@@ -1,8 +1,5 @@
 import type { Pool, PoolClient } from "pg";
-import type {
-  WorkflowHistoryStore,
-  WorkflowHistoryRecord,
-} from "@camcima/duraflows-core";
+import type { WorkflowHistoryStore, WorkflowHistoryRecord } from "@camcima/duraflows-core";
 import { PgTransactionContext } from "./pg-transaction-context.js";
 
 export class PgWorkflowHistoryStore implements WorkflowHistoryStore {

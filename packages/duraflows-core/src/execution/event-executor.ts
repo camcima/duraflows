@@ -35,37 +35,22 @@ export class EventExecutor {
 
     // Execute commands (if any)
     const commands = eventDef.commands ?? [];
-    const commandExecResult = await this.commandExecutor.execute(
-      commands,
-      subject,
-      context,
-    );
+    const commandExecResult = await this.commandExecutor.execute(commands, subject, context);
 
     const outcome = commandExecResult.outcome;
 
     // If failure and no errorState defined, throw CommandFailureError
     if (outcome === "failure" && !eventDef.errorState) {
-      const failedResult = commandExecResult.commandResults[
-        commandExecResult.commandResults.length - 1
-      ];
+      const failedResult = commandExecResult.commandResults[commandExecResult.commandResults.length - 1];
       const failedCommandName = commands[commandExecResult.commandResults.length - 1].name;
-      throw new CommandFailureError(
-        instanceUuid,
-        eventName,
-        failedCommandName,
-        failedResult,
-      );
+      throw new CommandFailureError(instanceUuid, eventName, failedCommandName, failedResult);
     }
 
     // Build finita context and trigger event
     const finitaContext = new Map<string, unknown>();
     finitaContext.set("workflow:eventOutcome", outcome);
 
-    const statemachine = new Statemachine(
-      subject,
-      compiledWorkflow.process,
-      currentState,
-    );
+    const statemachine = new Statemachine(subject, compiledWorkflow.process, currentState);
 
     await statemachine.triggerEvent(eventName, finitaContext);
 

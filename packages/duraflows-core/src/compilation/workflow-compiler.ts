@@ -51,15 +51,10 @@ export class WorkflowCompiler {
 
           const successCondition = new CallbackCondition(
             `workflow:success:${stateName}:${eventName}`,
-            (_subject: unknown, context: Map<string, unknown>) =>
-              context.get("workflow:eventOutcome") === "success",
+            (_subject: unknown, context: Map<string, unknown>) => context.get("workflow:eventOutcome") === "success",
           );
 
-          const successTransition = new Transition(
-            targetState,
-            eventName,
-            successCondition,
-          );
+          const successTransition = new Transition(targetState, eventName, successCondition);
           sourceState.addTransition(successTransition);
         }
 
@@ -74,15 +69,10 @@ export class WorkflowCompiler {
 
           const failureCondition = new CallbackCondition(
             `workflow:failure:${stateName}:${eventName}`,
-            (_subject: unknown, context: Map<string, unknown>) =>
-              context.get("workflow:eventOutcome") === "failure",
+            (_subject: unknown, context: Map<string, unknown>) => context.get("workflow:eventOutcome") === "failure",
           );
 
-          const failureTransition = new Transition(
-            errorState,
-            eventName,
-            failureCondition,
-          );
+          const failureTransition = new Transition(errorState, eventName, failureCondition);
           sourceState.addTransition(failureTransition);
         }
       }
@@ -90,10 +80,7 @@ export class WorkflowCompiler {
 
     const initialState = states.get(definition.initialState);
     if (!initialState) {
-      throw new WorkflowDefinitionError(
-        definition.name,
-        `Initial state "${definition.initialState}" does not exist`,
-      );
+      throw new WorkflowDefinitionError(definition.name, `Initial state "${definition.initialState}" does not exist`);
     }
 
     const process = new Process(definition.name, initialState);

@@ -1,16 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { CommandExecutor } from "../../src/execution/command-executor.js";
 import type { WorkflowCommandRegistry } from "../../src/registry/command-registry.js";
-import type {
-  WorkflowCommand,
-  CommandResult,
-  WorkflowExecutionContext,
-} from "../../src/types/runtime.js";
+import type { WorkflowCommand, CommandResult, WorkflowExecutionContext } from "../../src/types/runtime.js";
 import type { WorkflowCommandRef } from "../../src/types/definition.js";
 
-function createMockRegistry(
-  commands: Record<string, WorkflowCommand>,
-): WorkflowCommandRegistry {
+function createMockRegistry(commands: Record<string, WorkflowCommand>): WorkflowCommandRegistry {
   return {
     get(name: string): WorkflowCommand {
       const command = commands[name];
@@ -62,10 +56,7 @@ describe("CommandExecutor", () => {
     });
     const executor = new CommandExecutor(registry);
 
-    const commands: WorkflowCommandRef[] = [
-      { name: "cmdA" },
-      { name: "cmdB" },
-    ];
+    const commands: WorkflowCommandRef[] = [{ name: "cmdA" }, { name: "cmdB" }];
     const result = await executor.execute(commands, {}, createContext());
 
     expect(result.outcome).toBe("success");
@@ -87,10 +78,7 @@ describe("CommandExecutor", () => {
     });
     const executor = new CommandExecutor(registry);
 
-    const commands: WorkflowCommandRef[] = [
-      { name: "cmdFail" },
-      { name: "cmdNever" },
-    ];
+    const commands: WorkflowCommandRef[] = [{ name: "cmdFail" }, { name: "cmdNever" }];
     const result = await executor.execute(commands, {}, createContext());
 
     expect(result.outcome).toBe("failure");
@@ -115,11 +103,7 @@ describe("CommandExecutor", () => {
     });
     const executor = new CommandExecutor(registry);
 
-    const commands: WorkflowCommandRef[] = [
-      { name: "cmd1" },
-      { name: "cmd2" },
-      { name: "cmd3" },
-    ];
+    const commands: WorkflowCommandRef[] = [{ name: "cmd1" }, { name: "cmd2" }, { name: "cmd3" }];
     const result = await executor.execute(commands, {}, createContext());
 
     expect(result.outcome).toBe("failure");
@@ -141,9 +125,7 @@ describe("CommandExecutor", () => {
 
     const commands: WorkflowCommandRef[] = [{ name: "cmdBoom" }];
 
-    await expect(
-      executor.execute(commands, {}, createContext()),
-    ).rejects.toThrow(error);
+    await expect(executor.execute(commands, {}, createContext())).rejects.toThrow(error);
   });
 
   it("executes commands in definition order", async () => {
@@ -171,11 +153,7 @@ describe("CommandExecutor", () => {
     });
     const executor = new CommandExecutor(registry);
 
-    const commands: WorkflowCommandRef[] = [
-      { name: "first" },
-      { name: "second" },
-      { name: "third" },
-    ];
+    const commands: WorkflowCommandRef[] = [{ name: "first" }, { name: "second" }, { name: "third" }];
     await executor.execute(commands, {}, createContext());
 
     expect(callOrder).toEqual(["first", "second", "third"]);

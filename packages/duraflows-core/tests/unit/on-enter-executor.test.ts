@@ -1,21 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { OnEnterExecutor } from "../../src/execution/on-enter-executor.js";
 import { CommandExecutor } from "../../src/execution/command-executor.js";
-import {
-  CommandFailureError,
-  OnEnterDepthExceededError,
-} from "../../src/errors/index.js";
+import { CommandFailureError, OnEnterDepthExceededError } from "../../src/errors/index.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
-import type {
-  WorkflowCommand,
-  WorkflowExecutionContext,
-  CommandResult,
-} from "../../src/types/runtime.js";
+import type { WorkflowCommand, WorkflowExecutionContext, CommandResult } from "../../src/types/runtime.js";
 import type { WorkflowCommandRegistry } from "../../src/registry/command-registry.js";
 
-function makeContext(
-  overrides: Partial<WorkflowExecutionContext> = {},
-): WorkflowExecutionContext {
+function makeContext(overrides: Partial<WorkflowExecutionContext> = {}): WorkflowExecutionContext {
   return {
     trigger: { type: "system" },
     now: new Date(),
@@ -25,9 +16,7 @@ function makeContext(
   };
 }
 
-function makeRegistry(
-  commands: Record<string, WorkflowCommand>,
-): WorkflowCommandRegistry {
+function makeRegistry(commands: Record<string, WorkflowCommand>): WorkflowCommandRegistry {
   return {
     get(name: string): WorkflowCommand {
       const cmd = commands[name];
@@ -42,17 +31,13 @@ function makeRegistry(
   };
 }
 
-function successCommand(
-  resultOverrides: Partial<CommandResult> = {},
-): WorkflowCommand {
+function successCommand(resultOverrides: Partial<CommandResult> = {}): WorkflowCommand {
   return {
     execute: async () => ({ ok: true, ...resultOverrides }),
   };
 }
 
-function failureCommand(
-  resultOverrides: Partial<CommandResult> = {},
-): WorkflowCommand {
+function failureCommand(resultOverrides: Partial<CommandResult> = {}): WorkflowCommand {
   return {
     execute: async () => ({
       ok: false,
@@ -78,14 +63,7 @@ describe("OnEnterExecutor", () => {
     const commandExecutor = new CommandExecutor(registry);
     const executor = new OnEnterExecutor(commandExecutor);
 
-    const result = await executor.executeChain(
-      definition,
-      "draft",
-      "instance-1",
-      undefined,
-      makeContext(),
-      10,
-    );
+    const result = await executor.executeChain(definition, "draft", "instance-1", undefined, makeContext(), 10);
 
     expect(result.finalState).toBe("draft");
     expect(result.hops).toHaveLength(0);
@@ -110,14 +88,7 @@ describe("OnEnterExecutor", () => {
     const commandExecutor = new CommandExecutor(registry);
     const executor = new OnEnterExecutor(commandExecutor);
 
-    const result = await executor.executeChain(
-      definition,
-      "processing",
-      "instance-2",
-      undefined,
-      makeContext(),
-      10,
-    );
+    const result = await executor.executeChain(definition, "processing", "instance-2", undefined, makeContext(), 10);
 
     expect(result.finalState).toBe("processing");
     expect(result.hops).toHaveLength(1);
@@ -149,14 +120,7 @@ describe("OnEnterExecutor", () => {
     const commandExecutor = new CommandExecutor(registry);
     const executor = new OnEnterExecutor(commandExecutor);
 
-    const result = await executor.executeChain(
-      definition,
-      "draft",
-      "instance-3",
-      undefined,
-      makeContext(),
-      10,
-    );
+    const result = await executor.executeChain(definition, "draft", "instance-3", undefined, makeContext(), 10);
 
     expect(result.finalState).toBe("active");
     expect(result.hops).toHaveLength(1);
@@ -188,14 +152,7 @@ describe("OnEnterExecutor", () => {
     const commandExecutor = new CommandExecutor(registry);
     const executor = new OnEnterExecutor(commandExecutor);
 
-    const result = await executor.executeChain(
-      definition,
-      "processing",
-      "instance-4",
-      undefined,
-      makeContext(),
-      10,
-    );
+    const result = await executor.executeChain(definition, "processing", "instance-4", undefined, makeContext(), 10);
 
     expect(result.finalState).toBe("failed");
     expect(result.hops).toHaveLength(1);
@@ -226,14 +183,7 @@ describe("OnEnterExecutor", () => {
     const executor = new OnEnterExecutor(commandExecutor);
 
     await expect(
-      executor.executeChain(
-        definition,
-        "processing",
-        "instance-5",
-        undefined,
-        makeContext(),
-        10,
-      ),
+      executor.executeChain(definition, "processing", "instance-5", undefined, makeContext(), 10),
     ).rejects.toThrow(CommandFailureError);
   });
 
@@ -265,14 +215,7 @@ describe("OnEnterExecutor", () => {
     const commandExecutor = new CommandExecutor(registry);
     const executor = new OnEnterExecutor(commandExecutor);
 
-    const result = await executor.executeChain(
-      definition,
-      "stateA",
-      "instance-6",
-      undefined,
-      makeContext(),
-      10,
-    );
+    const result = await executor.executeChain(definition, "stateA", "instance-6", undefined, makeContext(), 10);
 
     expect(result.finalState).toBe("stateC");
     expect(result.hops).toHaveLength(2);
@@ -332,14 +275,7 @@ describe("OnEnterExecutor", () => {
     const executor = new OnEnterExecutor(commandExecutor);
 
     const ctx = makeContext();
-    const result = await executor.executeChain(
-      definition,
-      "step1",
-      "instance-7",
-      undefined,
-      ctx,
-      10,
-    );
+    const result = await executor.executeChain(definition, "step1", "instance-7", undefined, ctx, 10);
 
     expect(result.finalState).toBe("step3");
     expect(capturedA).toBe("fromStep1");
@@ -410,14 +346,7 @@ describe("OnEnterExecutor", () => {
     const commandExecutor = new CommandExecutor(registry);
     const executor = new OnEnterExecutor(commandExecutor);
 
-    const result = await executor.executeChain(
-      definition,
-      "processing",
-      "instance-9",
-      undefined,
-      makeContext(),
-      10,
-    );
+    const result = await executor.executeChain(definition, "processing", "instance-9", undefined, makeContext(), 10);
 
     expect(result.finalState).toBe("escalated");
     expect(result.hops).toHaveLength(2);
@@ -451,14 +380,7 @@ describe("OnEnterExecutor", () => {
     const commandExecutor = new CommandExecutor(registry);
     const executor = new OnEnterExecutor(commandExecutor);
 
-    const result = await executor.executeChain(
-      definition,
-      "gateway",
-      "instance-10",
-      undefined,
-      makeContext(),
-      10,
-    );
+    const result = await executor.executeChain(definition, "gateway", "instance-10", undefined, makeContext(), 10);
 
     expect(result.finalState).toBe("destination");
     expect(result.hops).toHaveLength(1);

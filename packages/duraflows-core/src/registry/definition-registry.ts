@@ -29,10 +29,7 @@ export class InMemoryDefinitionRegistry implements WorkflowDefinitionRegistry {
 
   register(definition: WorkflowDefinition): void {
     if (this.definitions.has(definition.name)) {
-      throw new WorkflowDefinitionError(
-        definition.name,
-        "A workflow with this name is already registered",
-      );
+      throw new WorkflowDefinitionError(definition.name, "A workflow with this name is already registered");
     }
 
     if (this.validator) {
@@ -55,10 +52,7 @@ export class InMemoryDefinitionRegistry implements WorkflowDefinitionRegistry {
   get(workflowName: string): WorkflowDefinition {
     const definition = this.definitions.get(workflowName);
     if (!definition) {
-      throw new WorkflowDefinitionError(
-        workflowName,
-        "Workflow not found in registry",
-      );
+      throw new WorkflowDefinitionError(workflowName, "Workflow not found in registry");
     }
     return definition;
   }

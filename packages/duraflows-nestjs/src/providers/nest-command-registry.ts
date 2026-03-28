@@ -1,11 +1,7 @@
 import type { ModuleRef } from "@nestjs/core";
 import type { Type } from "@nestjs/common";
-import type {
-  WorkflowCommandRegistry,
-  WorkflowCommand,
-} from "@camcima/duraflows-core";
+import type { WorkflowCommandRegistry, WorkflowCommand } from "@camcima/duraflows-core";
 import { WorkflowError } from "@camcima/duraflows-core";
-
 
 export interface WorkflowCommandRegistration {
   name: string;
@@ -21,9 +17,7 @@ export class NestCommandRegistry implements WorkflowCommandRegistry {
   ) {
     for (const reg of registrations) {
       if (this.registrations.has(reg.name)) {
-        throw new WorkflowError(
-          `Command "${reg.name}" is already registered`,
-        );
+        throw new WorkflowError(`Command "${reg.name}" is already registered`);
       }
       this.registrations.set(reg.name, reg.useClass);
     }
@@ -32,9 +26,7 @@ export class NestCommandRegistry implements WorkflowCommandRegistry {
   get(name: string): WorkflowCommand {
     const cls = this.registrations.get(name);
     if (!cls) {
-      throw new WorkflowError(
-        `Command "${name}" not found in registry`,
-      );
+      throw new WorkflowError(`Command "${name}" not found in registry`);
     }
     return this.moduleRef.get(cls, { strict: false });
   }

@@ -2,21 +2,12 @@ import { describe, it, expect } from "vitest";
 import { EventExecutor } from "../../src/execution/event-executor.js";
 import { CommandExecutor } from "../../src/execution/command-executor.js";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
-import {
-  InvalidEventError,
-  CommandFailureError,
-} from "../../src/errors/index.js";
+import { InvalidEventError, CommandFailureError } from "../../src/errors/index.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
-import type {
-  WorkflowCommand,
-  WorkflowExecutionContext,
-  CommandResult,
-} from "../../src/types/runtime.js";
+import type { WorkflowCommand, WorkflowExecutionContext, CommandResult } from "../../src/types/runtime.js";
 import type { WorkflowCommandRegistry } from "../../src/registry/command-registry.js";
 
-function makeContext(
-  overrides: Partial<WorkflowExecutionContext> = {},
-): WorkflowExecutionContext {
+function makeContext(overrides: Partial<WorkflowExecutionContext> = {}): WorkflowExecutionContext {
   return {
     trigger: { type: "system" },
     now: new Date(),
@@ -26,9 +17,7 @@ function makeContext(
   };
 }
 
-function makeRegistry(
-  commands: Record<string, WorkflowCommand>,
-): WorkflowCommandRegistry {
+function makeRegistry(commands: Record<string, WorkflowCommand>): WorkflowCommandRegistry {
   return {
     get(name: string): WorkflowCommand {
       const cmd = commands[name];
@@ -43,17 +32,13 @@ function makeRegistry(
   };
 }
 
-function successCommand(
-  resultOverrides: Partial<CommandResult> = {},
-): WorkflowCommand {
+function successCommand(resultOverrides: Partial<CommandResult> = {}): WorkflowCommand {
   return {
     execute: async () => ({ ok: true, ...resultOverrides }),
   };
 }
 
-function failureCommand(
-  resultOverrides: Partial<CommandResult> = {},
-): WorkflowCommand {
+function failureCommand(resultOverrides: Partial<CommandResult> = {}): WorkflowCommand {
   return {
     execute: async () => ({
       ok: false,
@@ -91,14 +76,7 @@ describe("EventExecutor", () => {
     const commandExecutor = new CommandExecutor(registry);
     const executor = new EventExecutor(commandExecutor);
 
-    const result = await executor.execute(
-      compiled,
-      "draft",
-      "submit",
-      "instance-1",
-      {},
-      makeContext(),
-    );
+    const result = await executor.execute(compiled, "draft", "submit", "instance-1", {}, makeContext());
 
     expect(result.outcome).toBe("success");
     expect(result.fromState).toBe("draft");
@@ -133,14 +111,7 @@ describe("EventExecutor", () => {
     const commandExecutor = new CommandExecutor(registry);
     const executor = new EventExecutor(commandExecutor);
 
-    const result = await executor.execute(
-      compiled,
-      "draft",
-      "submit",
-      "instance-2",
-      {},
-      makeContext(),
-    );
+    const result = await executor.execute(compiled, "draft", "submit", "instance-2", {}, makeContext());
 
     expect(result.outcome).toBe("failure");
     expect(result.fromState).toBe("draft");
@@ -209,14 +180,7 @@ describe("EventExecutor", () => {
     const executor = new EventExecutor(commandExecutor);
 
     await expect(
-      executor.execute(
-        compiled,
-        "draft",
-        "nonExistentEvent",
-        "instance-6",
-        {},
-        makeContext(),
-      ),
+      executor.execute(compiled, "draft", "nonExistentEvent", "instance-6", {}, makeContext()),
     ).rejects.toThrow(InvalidEventError);
   });
 
@@ -245,16 +209,9 @@ describe("EventExecutor", () => {
     const commandExecutor = new CommandExecutor(registry);
     const executor = new EventExecutor(commandExecutor);
 
-    await expect(
-      executor.execute(
-        compiled,
-        "draft",
-        "submit",
-        "instance-7",
-        {},
-        makeContext(),
-      ),
-    ).rejects.toThrow(CommandFailureError);
+    await expect(executor.execute(compiled, "draft", "submit", "instance-7", {}, makeContext())).rejects.toThrow(
+      CommandFailureError,
+    );
   });
 
   it("should succeed with no commands and transition to targetState", async () => {
@@ -279,14 +236,7 @@ describe("EventExecutor", () => {
     const commandExecutor = new CommandExecutor(registry);
     const executor = new EventExecutor(commandExecutor);
 
-    const result = await executor.execute(
-      compiled,
-      "draft",
-      "submit",
-      "instance-8",
-      {},
-      makeContext(),
-    );
+    const result = await executor.execute(compiled, "draft", "submit", "instance-8", {}, makeContext());
 
     expect(result.outcome).toBe("success");
     expect(result.fromState).toBe("draft");
@@ -336,14 +286,7 @@ describe("EventExecutor", () => {
     const executor = new EventExecutor(commandExecutor);
 
     const ctx = makeContext();
-    const result = await executor.execute(
-      compiled,
-      "draft",
-      "enrich",
-      "instance-9",
-      {},
-      ctx,
-    );
+    const result = await executor.execute(compiled, "draft", "enrich", "instance-9", {}, ctx);
 
     expect(result.outcome).toBe("success");
     expect(capturedValue).toBe(true);

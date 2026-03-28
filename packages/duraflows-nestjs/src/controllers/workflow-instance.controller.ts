@@ -19,9 +19,7 @@ export class WorkflowInstanceController {
   constructor(private readonly workflowService: WorkflowService) {}
 
   @Post()
-  async createInstance(
-    @Body() body: CreateInstanceDto,
-  ): Promise<WorkflowInstance> {
+  async createInstance(@Body() body: CreateInstanceDto): Promise<WorkflowInstance> {
     return this.workflowService.createInstance({
       workflowName: body.workflowName,
       context: body.context,
@@ -31,9 +29,7 @@ export class WorkflowInstanceController {
   }
 
   @Get(":uuid")
-  async getInstance(
-    @Param("uuid", new ParseUUIDPipe()) uuid: string,
-  ): Promise<WorkflowInstance> {
+  async getInstance(@Param("uuid", new ParseUUIDPipe()) uuid: string): Promise<WorkflowInstance> {
     const instance = await this.workflowService.getInstance(uuid);
     if (!instance) {
       throw new NotFoundException(`Workflow instance "${uuid}" not found`);

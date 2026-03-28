@@ -40,6 +40,7 @@ export class ChargePaymentCommand implements WorkflowCommandInterface {
 ```
 
 The decorator:
+
 - Applies `@Injectable()` automatically -- you do not need both decorators
 - Associates the class with the command name string used in workflow definitions
 - Is discovered at module initialization via NestJS `DiscoveryService`
@@ -82,7 +83,7 @@ If the same command name is registered both explicitly and via decorator, the mo
 The `@WorkflowCommand` decorator and the `WorkflowCommand` interface from core share the same name. Import the interface from `@camcima/duraflows-core` directly:
 
 ```ts
-import { WorkflowCommand } from "@camcima/duraflows-nestjs";          // decorator
+import { WorkflowCommand } from "@camcima/duraflows-nestjs"; // decorator
 import type { WorkflowCommand as WorkflowCommandInterface } from "@camcima/duraflows-core"; // interface
 ```
 
@@ -104,8 +105,8 @@ import { WorkflowModule } from "@camcima/duraflows-nestjs";
         { name: "sendEmail", useClass: SendEmailCommand },
       ],
       persistence: pgWorkflowProviders(pool),
-      clock: { now: () => new Date() },    // optional, defaults to real clock
-      enableControllers: true,              // optional, defaults to false
+      clock: { now: () => new Date() }, // optional, defaults to real clock
+      enableControllers: true, // optional, defaults to false
     }),
   ],
 })
@@ -114,13 +115,13 @@ export class AppModule {}
 
 **WorkflowModuleOptions:**
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `workflows` | `WorkflowDefinition[]` | Yes | Workflow definitions to register |
-| `commands` | `WorkflowCommandRegistration[]` | No | Explicit command handler registrations. Optional if using `@WorkflowCommand` decorator. |
-| `persistence` | `WorkflowPersistenceProvider` | Yes | Persistence implementations (instance store, history store, transaction runner) |
-| `clock` | `WorkflowClock` | No | Custom clock. Defaults to `{ now: () => new Date() }` |
-| `enableControllers` | `boolean` | No | If `true`, registers REST controllers. Defaults to `false` |
+| Property            | Type                            | Required | Description                                                                             |
+| ------------------- | ------------------------------- | -------- | --------------------------------------------------------------------------------------- |
+| `workflows`         | `WorkflowDefinition[]`          | Yes      | Workflow definitions to register                                                        |
+| `commands`          | `WorkflowCommandRegistration[]` | No       | Explicit command handler registrations. Optional if using `@WorkflowCommand` decorator. |
+| `persistence`       | `WorkflowPersistenceProvider`   | Yes      | Persistence implementations (instance store, history store, transaction runner)         |
+| `clock`             | `WorkflowClock`                 | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                   |
+| `enableControllers` | `boolean`                       | No       | If `true`, registers REST controllers. Defaults to `false`                              |
 
 ### forRootAsync()
 
@@ -131,15 +132,11 @@ Asynchronous module configuration for cases where options depend on other provid
   imports: [
     WorkflowModule.forRootAsync({
       imports: [ConfigModule],
-      commands: [
-        { name: "chargePayment", useClass: ChargePaymentCommand },
-      ],
+      commands: [{ name: "chargePayment", useClass: ChargePaymentCommand }],
       enableControllers: true,
       useFactory: (config: ConfigService) => ({
         workflows: [orderWorkflow],
-        persistence: pgWorkflowProviders(
-          new Pool({ connectionString: config.get("DATABASE_URL") }),
-        ),
+        persistence: pgWorkflowProviders(new Pool({ connectionString: config.get("DATABASE_URL") })),
       }),
       inject: [ConfigService],
     }),
@@ -150,21 +147,21 @@ export class AppModule {}
 
 **WorkflowModuleAsyncOptions:**
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `imports` | `Type<unknown>[]` | No | Modules to import (for injection) |
-| `commands` | `WorkflowCommandRegistration[]` | No | Explicit command handler registrations (static, not from factory). Optional if using `@WorkflowCommand` decorator. |
-| `enableControllers` | `boolean` | No | If `true`, registers REST controllers. Defaults to `false` (static, not from factory) |
-| `useFactory` | `(...args) => WorkflowModuleFactoryConfig` | Yes | Factory returning async-resolved config |
-| `inject` | `InjectionToken[]` | No | Tokens to inject into the factory |
+| Property            | Type                                       | Required | Description                                                                                                        |
+| ------------------- | ------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `imports`           | `Type<unknown>[]`                          | No       | Modules to import (for injection)                                                                                  |
+| `commands`          | `WorkflowCommandRegistration[]`            | No       | Explicit command handler registrations (static, not from factory). Optional if using `@WorkflowCommand` decorator. |
+| `enableControllers` | `boolean`                                  | No       | If `true`, registers REST controllers. Defaults to `false` (static, not from factory)                              |
+| `useFactory`        | `(...args) => WorkflowModuleFactoryConfig` | Yes      | Factory returning async-resolved config                                                                            |
+| `inject`            | `InjectionToken[]`                         | No       | Tokens to inject into the factory                                                                                  |
 
 **WorkflowModuleFactoryConfig** (returned by `useFactory`):
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `workflows` | `WorkflowDefinition[]` | Yes | Workflow definitions to register |
-| `persistence` | `WorkflowPersistenceProvider` | Yes | Persistence implementations |
-| `clock` | `WorkflowClock` | No | Custom clock. Defaults to `{ now: () => new Date() }` |
+| Property      | Type                          | Required | Description                                           |
+| ------------- | ----------------------------- | -------- | ----------------------------------------------------- |
+| `workflows`   | `WorkflowDefinition[]`        | Yes      | Workflow definitions to register                      |
+| `persistence` | `WorkflowPersistenceProvider` | Yes      | Persistence implementations                           |
+| `clock`       | `WorkflowClock`               | No       | Custom clock. Defaults to `{ now: () => new Date() }` |
 
 ## WorkflowCommandRegistration
 
@@ -212,13 +209,13 @@ export class OrderService {
 
 **Methods:**
 
-| Method | Parameters | Returns | Description |
-|--------|-----------|---------|-------------|
-| `createInstance(input)` | `CreateWorkflowInstanceInput` | `Promise<WorkflowInstance>` | Create a new workflow instance |
-| `triggerEvent(input)` | `TriggerWorkflowEventInput` | `Promise<WorkflowExecutionResult>` | Trigger an event on an instance |
-| `getAvailableEvents(input)` | `GetAvailableEventsInput` | `Promise<AvailableWorkflowEvent[]>` | Get events available for an instance |
-| `getInstance(uuid)` | `string` | `Promise<WorkflowInstance \| null>` | Get instance by UUID |
-| `getHistory(uuid, options?)` | `string, { limit?, offset? }` | `Promise<WorkflowHistoryRecord[]>` | Get history for an instance |
+| Method                       | Parameters                    | Returns                             | Description                          |
+| ---------------------------- | ----------------------------- | ----------------------------------- | ------------------------------------ |
+| `createInstance(input)`      | `CreateWorkflowInstanceInput` | `Promise<WorkflowInstance>`         | Create a new workflow instance       |
+| `triggerEvent(input)`        | `TriggerWorkflowEventInput`   | `Promise<WorkflowExecutionResult>`  | Trigger an event on an instance      |
+| `getAvailableEvents(input)`  | `GetAvailableEventsInput`     | `Promise<AvailableWorkflowEvent[]>` | Get events available for an instance |
+| `getInstance(uuid)`          | `string`                      | `Promise<WorkflowInstance \| null>` | Get instance by UUID                 |
+| `getHistory(uuid, options?)` | `string, { limit?, offset? }` | `Promise<WorkflowHistoryRecord[]>`  | Get history for an instance          |
 
 **Example:**
 
@@ -286,8 +283,8 @@ import { WorkflowTimeoutService } from "@camcima/duraflows-nestjs";
 
 **Methods:**
 
-| Method | Parameters | Returns | Description |
-|--------|-----------|---------|-------------|
+| Method                            | Parameters          | Returns                                  | Description                                                |
+| --------------------------------- | ------------------- | ---------------------------------------- | ---------------------------------------------------------- |
 | `processExpiredWorkflows(limit?)` | `number` (optional) | `Promise<ProcessExpiredWorkflowsResult>` | Process expired instances. Returns `{ processed, failed }` |
 
 **Example with @nestjs/schedule:**
@@ -327,6 +324,7 @@ POST /workflows
 ```
 
 Request body:
+
 ```json
 {
   "workflowName": "order",
@@ -339,6 +337,7 @@ Request body:
 ```
 
 Response: `WorkflowInstance`
+
 ```json
 {
   "uuid": "a1b2c3d4-...",
@@ -371,6 +370,7 @@ POST /workflows/:workflowInstanceUuid/events/:eventName
 ```
 
 Request body:
+
 ```json
 {
   "trigger": {
@@ -382,6 +382,7 @@ Request body:
 ```
 
 Response: `WorkflowExecutionResult`
+
 ```json
 {
   "outcome": "success",
@@ -401,12 +402,13 @@ GET /workflows/:workflowInstanceUuid/events
 ```
 
 Response: `AvailableWorkflowEvent[]`
+
 ```json
 [
   {
     "eventName": "PaymentReceived",
     "targetState": "exportable",
-"hasCommands": false,
+    "hasCommands": false,
     "hasTimeout": false
   }
 ]
@@ -419,6 +421,7 @@ GET /workflows/:workflowInstanceUuid/history?limit=50&offset=0
 ```
 
 Response: `WorkflowHistoryRecord[]`
+
 ```json
 [
   {
@@ -443,6 +446,7 @@ POST /workflows/timeouts/process?limit=100
 ```
 
 Response:
+
 ```json
 {
   "processed": 5,
@@ -510,18 +514,20 @@ The NestJS module validates all workflow definitions at startup using `WorkflowV
 // This will throw WorkflowDefinitionError at module initialization
 // because "nonExistentCommand" is not registered anywhere
 WorkflowModule.forRoot({
-  workflows: [{
-    name: "broken",
-    initialState: "start",
-    states: {
-      start: {
-        events: {
-          Go: { targetState: "done", commands: [{ name: "nonExistentCommand" }] },
+  workflows: [
+    {
+      name: "broken",
+      initialState: "start",
+      states: {
+        start: {
+          events: {
+            Go: { targetState: "done", commands: [{ name: "nonExistentCommand" }] },
+          },
         },
+        done: {},
       },
-      done: {},
     },
-  }],
+  ],
   persistence: pgWorkflowProviders(pool),
 });
 ```

@@ -1,10 +1,7 @@
 export type TriggerType = "user" | "admin" | "system" | "timeout";
 
 export interface WorkflowCommand<TSubject = unknown> {
-  execute(
-    subject: TSubject,
-    context: WorkflowExecutionContext,
-  ): Promise<CommandResult> | CommandResult;
+  execute(subject: TSubject, context: WorkflowExecutionContext): Promise<CommandResult> | CommandResult;
 }
 
 export interface CommandResult {

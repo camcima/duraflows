@@ -4,9 +4,7 @@ import type { WorkflowDefinition } from "../../src/types/definition.js";
 
 const NOW = new Date("2026-01-01T00:00:00Z");
 
-function makeDefinition(
-  states: WorkflowDefinition["states"],
-): WorkflowDefinition {
+function makeDefinition(states: WorkflowDefinition["states"]): WorkflowDefinition {
   return { name: "test-workflow", initialState: "init", states };
 }
 

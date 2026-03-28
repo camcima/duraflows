@@ -11,11 +11,7 @@ import type {
   WorkflowHistoryStore,
   WorkflowHistoryRecord,
 } from "@camcima/duraflows-core";
-import {
-  WORKFLOW_RUNTIME,
-  WORKFLOW_INSTANCE_STORE,
-  WORKFLOW_HISTORY_STORE,
-} from "../providers/injection-tokens.js";
+import { WORKFLOW_RUNTIME, WORKFLOW_INSTANCE_STORE, WORKFLOW_HISTORY_STORE } from "../providers/injection-tokens.js";
 
 @Injectable()
 export class WorkflowService {
@@ -28,21 +24,15 @@ export class WorkflowService {
     private readonly historyStore: WorkflowHistoryStore,
   ) {}
 
-  async createInstance(
-    input: CreateWorkflowInstanceInput,
-  ): Promise<WorkflowInstance> {
+  async createInstance(input: CreateWorkflowInstanceInput): Promise<WorkflowInstance> {
     return this.runtime.createInstance(input);
   }
 
-  async triggerEvent(
-    input: TriggerWorkflowEventInput,
-  ): Promise<WorkflowExecutionResult> {
+  async triggerEvent(input: TriggerWorkflowEventInput): Promise<WorkflowExecutionResult> {
     return this.runtime.triggerEvent(input);
   }
 
-  async getAvailableEvents(
-    input: GetAvailableEventsInput,
-  ): Promise<AvailableWorkflowEvent[]> {
+  async getAvailableEvents(input: GetAvailableEventsInput): Promise<AvailableWorkflowEvent[]> {
     return this.runtime.getAvailableEvents(input);
   }
 
@@ -54,9 +44,6 @@ export class WorkflowService {
     workflowInstanceUuid: string,
     options?: { limit?: number; offset?: number },
   ): Promise<WorkflowHistoryRecord[]> {
-    return this.historyStore.findByInstanceUuid(
-      workflowInstanceUuid,
-      options,
-    );
+    return this.historyStore.findByInstanceUuid(workflowInstanceUuid, options);
   }
 }

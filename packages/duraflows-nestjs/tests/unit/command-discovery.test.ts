@@ -55,9 +55,7 @@ describe("mergeCommandRegistrations", () => {
     const discovered = [{ name: "cmd", useClass: CommandB }];
 
     expect(() => mergeCommandRegistrations(explicit, discovered)).toThrow(WorkflowError);
-    expect(() => mergeCommandRegistrations(explicit, discovered)).toThrow(
-      "registered both explicitly",
-    );
+    expect(() => mergeCommandRegistrations(explicit, discovered)).toThrow("registered both explicitly");
   });
 
   it("preserves order: explicit first, then discovered", () => {

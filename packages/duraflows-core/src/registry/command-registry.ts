@@ -11,9 +11,7 @@ export class InMemoryCommandRegistry implements WorkflowCommandRegistry {
 
   register(name: string, command: WorkflowCommand): void {
     if (this.commands.has(name)) {
-      throw new WorkflowError(
-        `Command "${name}" is already registered`,
-      );
+      throw new WorkflowError(`Command "${name}" is already registered`);
     }
     this.commands.set(name, command);
   }
@@ -21,9 +19,7 @@ export class InMemoryCommandRegistry implements WorkflowCommandRegistry {
   get(name: string): WorkflowCommand {
     const command = this.commands.get(name);
     if (!command) {
-      throw new WorkflowError(
-        `Command "${name}" not found in registry`,
-      );
+      throw new WorkflowError(`Command "${name}" not found in registry`);
     }
     return command;
   }

@@ -8,9 +8,7 @@ import {
   WORKFLOW_COMMAND_METADATA_KEY,
 } from "../decorators/workflow-command.decorator.js";
 
-export function discoverDecoratedCommands(
-  discoveryService: DiscoveryService,
-): WorkflowCommandRegistration[] {
+export function discoverDecoratedCommands(discoveryService: DiscoveryService): WorkflowCommandRegistration[] {
   const providers = discoveryService.getProviders({
     metadataKey: WORKFLOW_COMMAND_METADATA_KEY,
   });
@@ -18,10 +16,7 @@ export function discoverDecoratedCommands(
   const registrations: WorkflowCommandRegistration[] = [];
 
   for (const wrapper of providers) {
-    const metadata = discoveryService.getMetadataByDecorator(
-      InternalWorkflowCommandDecorator,
-      wrapper,
-    );
+    const metadata = discoveryService.getMetadataByDecorator(InternalWorkflowCommandDecorator, wrapper);
 
     // metadata is the string value passed to @WorkflowCommand("name"),
     // or undefined if not set

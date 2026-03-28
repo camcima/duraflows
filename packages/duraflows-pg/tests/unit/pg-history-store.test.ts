@@ -83,9 +83,7 @@ describe("PgWorkflowHistoryStore", () => {
       const txClient = createMockClient({ rows: [{ uuid: "tx-uuid" }] });
       const store = new PgWorkflowHistoryStore(pool);
 
-      const uuid = await PgTransactionContext.run(txClient, () =>
-        store.append(sampleEntry),
-      );
+      const uuid = await PgTransactionContext.run(txClient, () => store.append(sampleEntry));
 
       expect(uuid).toBe("tx-uuid");
       expect(txClient.query).toHaveBeenCalledOnce();
@@ -108,7 +106,7 @@ describe("PgWorkflowHistoryStore", () => {
 
       const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1];
       expect(params[1]).toBe(50); // default limit
-      expect(params[2]).toBe(0);  // default offset
+      expect(params[2]).toBe(0); // default offset
     });
 
     it("uses custom limit and offset", async () => {

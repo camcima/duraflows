@@ -75,9 +75,7 @@ export class WorkflowRuntime {
     this.maxOnEnterDepth = options.maxOnEnterDepth ?? DEFAULT_MAX_ON_ENTER_DEPTH;
   }
 
-  async createInstance(
-    input: CreateWorkflowInstanceInput,
-  ): Promise<WorkflowInstance> {
+  async createInstance(input: CreateWorkflowInstanceInput): Promise<WorkflowInstance> {
     const definition = this.definitionRegistry.get(input.workflowName);
 
     const now = this.clock.now();
@@ -90,11 +88,7 @@ export class WorkflowRuntime {
     };
 
     // Compute timeout deadline for initial state
-    const expiresAt = this.timeoutResolver.computeDeadline(
-      definition,
-      definition.initialState,
-      now,
-    );
+    const expiresAt = this.timeoutResolver.computeDeadline(definition, definition.initialState, now);
 
     const instance: WorkflowInstance = {
       uuid: randomUUID(),
@@ -121,12 +115,7 @@ export class WorkflowRuntime {
           metadata: deepFreeze({ ...instance.metadata }),
         };
 
-        await this.processOnEnterChain(
-          instance,
-          definition,
-          executionContext,
-          undefined,
-        );
+        await this.processOnEnterChain(instance, definition, executionContext, undefined);
 
         return instance;
       });
@@ -136,17 +125,11 @@ export class WorkflowRuntime {
     return instance;
   }
 
-  async triggerEvent(
-    input: TriggerWorkflowEventInput,
-  ): Promise<WorkflowExecutionResult> {
+  async triggerEvent(input: TriggerWorkflowEventInput): Promise<WorkflowExecutionResult> {
     return this.transactionRunner.runInTransaction(async () => {
-      const instance = await this.instanceStore.lockByUuid(
-        input.workflowInstanceUuid,
-      );
+      const instance = await this.instanceStore.lockByUuid(input.workflowInstanceUuid);
       if (!instance) {
-        throw new WorkflowError(
-          `Workflow instance "${input.workflowInstanceUuid}" not found`,
-        );
+        throw new WorkflowError(`Workflow instance "${input.workflowInstanceUuid}" not found`);
       }
 
       const definition = this.definitionRegistry.get(instance.workflowName);
@@ -184,11 +167,7 @@ export class WorkflowRuntime {
       };
 
       // Compute timeout deadline for new state
-      instance.expiresAt = this.timeoutResolver.computeDeadline(
-        definition,
-        result.toState,
-        now,
-      );
+      instance.expiresAt = this.timeoutResolver.computeDeadline(definition, result.toState, now);
 
       await this.instanceStore.update(instance);
 
@@ -218,12 +197,7 @@ export class WorkflowRuntime {
       executionContext.context = { ...instance.context };
 
       // Process onEnter chain on the new state
-      const onEnterResult = await this.processOnEnterChain(
-        instance,
-        definition,
-        executionContext,
-        input.subject,
-      );
+      const onEnterResult = await this.processOnEnterChain(instance, definition, executionContext, input.subject);
 
       const allCommandResults = [...result.commandResults, ...onEnterResult.commandResults];
       if (onEnterResult.lastHistoryUuid) {
@@ -250,9 +224,7 @@ export class WorkflowRuntime {
     });
   }
 
-  async processExpiredWorkflows(
-    input?: ProcessExpiredWorkflowsInput,
-  ): Promise<ProcessExpiredWorkflowsResult> {
+  async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<ProcessExpiredWorkflowsResult> {
     const limit = input?.limit ?? 100;
     const now = this.clock.now();
 
@@ -263,13 +235,8 @@ export class WorkflowRuntime {
 
       for (const instance of expired) {
         try {
-          const definition = this.definitionRegistry.get(
-            instance.workflowName,
-          );
-          const eventName = this.timeoutResolver.getTimeoutEventName(
-            definition,
-            instance.currentState,
-          );
+          const definition = this.definitionRegistry.get(instance.workflowName);
+          const eventName = this.timeoutResolver.getTimeoutEventName(definition, instance.currentState);
 
           if (!eventName) {
             instance.expiresAt = null;
@@ -282,8 +249,7 @@ export class WorkflowRuntime {
           await this.processTimeoutEvent(instance, definition, eventName);
           processed++;
         } catch (error: unknown) {
-          const message =
-            error instanceof Error ? error.message : String(error);
+          const message = error instanceof Error ? error.message : String(error);
           failed.push({ uuid: instance.uuid, error: message });
         }
       }
@@ -328,22 +294,16 @@ export class WorkflowRuntime {
       ...(newStateDef?.context ?? {}),
     };
 
-    instance.expiresAt = this.timeoutResolver.computeDeadline(
-      definition,
-      result.toState,
-      now,
-    );
+    instance.expiresAt = this.timeoutResolver.computeDeadline(definition, result.toState, now);
 
     await this.instanceStore.update(instance);
 
     // Extract error message
     let errorMessage: string | undefined;
     if (result.outcome === "failure" && result.commandResults.length > 0) {
-      const lastResult =
-        result.commandResults[result.commandResults.length - 1];
+      const lastResult = result.commandResults[result.commandResults.length - 1];
       if (!lastResult.ok) {
-        errorMessage =
-          lastResult.message ?? lastResult.code ?? "Command failed";
+        errorMessage = lastResult.message ?? lastResult.code ?? "Command failed";
       }
     }
 
@@ -363,12 +323,7 @@ export class WorkflowRuntime {
     executionContext.context = { ...instance.context };
 
     // Process onEnter chain on the new state
-    await this.processOnEnterChain(
-      instance,
-      definition,
-      executionContext,
-      undefined,
-    );
+    await this.processOnEnterChain(instance, definition, executionContext, undefined);
   }
 
   private async processOnEnterChain(
@@ -408,11 +363,7 @@ export class WorkflowRuntime {
       executionContext.context = { ...instance.context };
 
       // Compute timeout deadline for this hop's state
-      instance.expiresAt = this.timeoutResolver.computeDeadline(
-        definition,
-        hop.toState,
-        now,
-      );
+      instance.expiresAt = this.timeoutResolver.computeDeadline(definition, hop.toState, now);
 
       await this.instanceStore.update(instance);
 
@@ -444,16 +395,10 @@ export class WorkflowRuntime {
     return { commandResults: allCommandResults, lastHistoryUuid };
   }
 
-  async getAvailableEvents(
-    input: GetAvailableEventsInput,
-  ): Promise<AvailableWorkflowEvent[]> {
-    const instance = await this.instanceStore.findByUuid(
-      input.workflowInstanceUuid,
-    );
+  async getAvailableEvents(input: GetAvailableEventsInput): Promise<AvailableWorkflowEvent[]> {
+    const instance = await this.instanceStore.findByUuid(input.workflowInstanceUuid);
     if (!instance) {
-      throw new WorkflowError(
-        `Workflow instance "${input.workflowInstanceUuid}" not found`,
-      );
+      throw new WorkflowError(`Workflow instance "${input.workflowInstanceUuid}" not found`);
     }
 
     const definition = this.definitionRegistry.get(instance.workflowName);

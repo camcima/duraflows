@@ -52,17 +52,13 @@ describe("InMemoryCommandRegistry", () => {
     const registry = new InMemoryCommandRegistry();
     registry.register("cmd", stubCommand);
     expect(() => registry.register("cmd", stubCommand)).toThrow(WorkflowError);
-    expect(() => registry.register("cmd", stubCommand)).toThrow(
-      'Command "cmd" is already registered',
-    );
+    expect(() => registry.register("cmd", stubCommand)).toThrow('Command "cmd" is already registered');
   });
 
   it("throws WorkflowError when getting unknown command", () => {
     const registry = new InMemoryCommandRegistry();
     expect(() => registry.get("missing")).toThrow(WorkflowError);
-    expect(() => registry.get("missing")).toThrow(
-      'Command "missing" not found in registry',
-    );
+    expect(() => registry.get("missing")).toThrow('Command "missing" not found in registry');
   });
 });
 
@@ -107,9 +103,7 @@ describe("InMemoryDefinitionRegistry", () => {
     const registry = new InMemoryDefinitionRegistry();
     registry.register(minimalDefinition);
     expect(() => registry.register(minimalDefinition)).toThrow(WorkflowDefinitionError);
-    expect(() => registry.register(minimalDefinition)).toThrow(
-      "already registered",
-    );
+    expect(() => registry.register(minimalDefinition)).toThrow("already registered");
   });
 
   it("throws WorkflowDefinitionError when getting unknown definition", () => {
@@ -165,9 +159,6 @@ describe("InMemoryDefinitionRegistry", () => {
     });
 
     registry.register(minimalDefinition);
-    expect(mockValidator.validate).toHaveBeenCalledWith(
-      minimalDefinition,
-      { knownCommandNames: knownCommands },
-    );
+    expect(mockValidator.validate).toHaveBeenCalledWith(minimalDefinition, { knownCommandNames: knownCommands });
   });
 });

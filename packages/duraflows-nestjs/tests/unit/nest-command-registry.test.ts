@@ -25,9 +25,7 @@ function createMockModuleRef(): ModuleRef {
 describe("NestCommandRegistry", () => {
   it("has() returns true for registered command", () => {
     const moduleRef = createMockModuleRef();
-    const registry = new NestCommandRegistry(moduleRef, [
-      { name: "cmdA", useClass: StubCommandA },
-    ]);
+    const registry = new NestCommandRegistry(moduleRef, [{ name: "cmdA", useClass: StubCommandA }]);
     expect(registry.has("cmdA")).toBe(true);
   });
 
@@ -39,9 +37,7 @@ describe("NestCommandRegistry", () => {
 
   it("get() resolves command via moduleRef", () => {
     const moduleRef = createMockModuleRef();
-    const registry = new NestCommandRegistry(moduleRef, [
-      { name: "cmdA", useClass: StubCommandA },
-    ]);
+    const registry = new NestCommandRegistry(moduleRef, [{ name: "cmdA", useClass: StubCommandA }]);
 
     const cmd = registry.get("cmdA");
 

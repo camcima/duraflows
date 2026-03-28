@@ -62,9 +62,7 @@ describe("WorkflowCompiler", () => {
     expect(transitions).toHaveLength(1);
     expect(transitions[0].getTargetState().getName()).toBe("approved");
     expect(transitions[0].getEventName()).toBe("approve");
-    expect(transitions[0].getConditionName()).toBe(
-      "workflow:success:pending:approve",
-    );
+    expect(transitions[0].getConditionName()).toBe("workflow:success:pending:approve");
   });
 
   it("creates a failure transition when errorState is defined", () => {
@@ -88,9 +86,7 @@ describe("WorkflowCompiler", () => {
     expect(transitions).toHaveLength(1);
     expect(transitions[0].getTargetState().getName()).toBe("failed");
     expect(transitions[0].getEventName()).toBe("approve");
-    expect(transitions[0].getConditionName()).toBe(
-      "workflow:failure:pending:approve",
-    );
+    expect(transitions[0].getConditionName()).toBe("workflow:failure:pending:approve");
   });
 
   it("creates both transitions when both targetState and errorState are defined", () => {
@@ -114,12 +110,8 @@ describe("WorkflowCompiler", () => {
 
     expect(transitions).toHaveLength(2);
 
-    const successTransition = transitions.find(
-      (t) => t.getConditionName() === "workflow:success:pending:approve",
-    );
-    const failureTransition = transitions.find(
-      (t) => t.getConditionName() === "workflow:failure:pending:approve",
-    );
+    const successTransition = transitions.find((t) => t.getConditionName() === "workflow:success:pending:approve");
+    const failureTransition = transitions.find((t) => t.getConditionName() === "workflow:failure:pending:approve");
 
     expect(successTransition).toBeDefined();
     expect(successTransition!.getTargetState().getName()).toBe("approved");
@@ -184,12 +176,8 @@ describe("WorkflowCompiler", () => {
       },
     };
 
-    expect(() => compiler.compile(definition)).toThrow(
-      WorkflowDefinitionError,
-    );
-    expect(() => compiler.compile(definition)).toThrow(
-      /Target state "nonexistent"/,
-    );
+    expect(() => compiler.compile(definition)).toThrow(WorkflowDefinitionError);
+    expect(() => compiler.compile(definition)).toThrow(/Target state "nonexistent"/);
   });
 
   it("throws WorkflowDefinitionError for non-existent error state", () => {
@@ -205,12 +193,8 @@ describe("WorkflowCompiler", () => {
       },
     };
 
-    expect(() => compiler.compile(definition)).toThrow(
-      WorkflowDefinitionError,
-    );
-    expect(() => compiler.compile(definition)).toThrow(
-      /Error state "nonexistent"/,
-    );
+    expect(() => compiler.compile(definition)).toThrow(WorkflowDefinitionError);
+    expect(() => compiler.compile(definition)).toThrow(/Error state "nonexistent"/);
   });
 
   it("throws WorkflowDefinitionError for non-existent initial state", () => {
@@ -222,11 +206,7 @@ describe("WorkflowCompiler", () => {
       },
     };
 
-    expect(() => compiler.compile(definition)).toThrow(
-      WorkflowDefinitionError,
-    );
-    expect(() => compiler.compile(definition)).toThrow(
-      /Initial state "nonexistent" does not exist/,
-    );
+    expect(() => compiler.compile(definition)).toThrow(WorkflowDefinitionError);
+    expect(() => compiler.compile(definition)).toThrow(/Initial state "nonexistent" does not exist/);
   });
 });

@@ -76,20 +76,14 @@ const stubPersistence: WorkflowPersistenceProvider = {
 
 @WorkflowCommand("decorated-approve")
 class DecoratedApproveCommand implements WorkflowCommandInterface {
-  async execute(
-    _subject: unknown,
-    _context: WorkflowExecutionContext,
-  ): Promise<CommandResult> {
+  async execute(_subject: unknown, _context: WorkflowExecutionContext): Promise<CommandResult> {
     return { ok: true, code: "APPROVED" };
   }
 }
 
 @WorkflowCommand("decorated-reject")
 class DecoratedRejectCommand implements WorkflowCommandInterface {
-  async execute(
-    _subject: unknown,
-    _context: WorkflowExecutionContext,
-  ): Promise<CommandResult> {
+  async execute(_subject: unknown, _context: WorkflowExecutionContext): Promise<CommandResult> {
     return { ok: true, code: "REJECTED" };
   }
 }
@@ -97,10 +91,7 @@ class DecoratedRejectCommand implements WorkflowCommandInterface {
 // Explicit (non-decorated) command
 @Injectable()
 class ExplicitShipCommand implements WorkflowCommandInterface {
-  async execute(
-    _subject: unknown,
-    _context: WorkflowExecutionContext,
-  ): Promise<CommandResult> {
+  async execute(_subject: unknown, _context: WorkflowExecutionContext): Promise<CommandResult> {
     return { ok: true, code: "SHIPPED" };
   }
 }

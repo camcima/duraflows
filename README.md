@@ -20,10 +20,10 @@ A durable workflow runtime for TypeScript built on top of [@camcima/finita](http
 
 Designed as a family of three packages:
 
-| Package | Purpose |
-|---------|---------|
-| `@camcima/duraflows-core` | Framework-agnostic runtime, types, and persistence interfaces |
-| `@camcima/duraflows-pg` | PostgreSQL persistence adapter using `pg` |
+| Package                     | Purpose                                                                    |
+| --------------------------- | -------------------------------------------------------------------------- |
+| `@camcima/duraflows-core`   | Framework-agnostic runtime, types, and persistence interfaces              |
+| `@camcima/duraflows-pg`     | PostgreSQL persistence adapter using `pg`                                  |
 | `@camcima/duraflows-nestjs` | NestJS module integration with DI, services, and optional REST controllers |
 
 ## Key Features
@@ -79,10 +79,7 @@ const orderWorkflow: WorkflowDefinition = {
         Export: {
           targetState: "exported",
           errorState: "export_failed",
-          commands: [
-            { name: "sendOrderToWarehouse" },
-            { name: "notifyCustomer" },
-          ],
+          commands: [{ name: "sendOrderToWarehouse" }, { name: "notifyCustomer" }],
         },
       },
     },
@@ -204,11 +201,7 @@ export class OrderService {
 ### Use Without NestJS
 
 ```ts
-import {
-  WorkflowRuntime,
-  InMemoryDefinitionRegistry,
-  InMemoryCommandRegistry,
-} from "@camcima/duraflows-core";
+import { WorkflowRuntime, InMemoryDefinitionRegistry, InMemoryCommandRegistry } from "@camcima/duraflows-core";
 import { pgWorkflowProviders } from "@camcima/duraflows-pg";
 import { Pool } from "pg";
 
@@ -288,14 +281,14 @@ See the [Persistence Guide](docs/persistence.md) for details and examples.
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [Getting Started](docs/getting-started.md) | Installation, database setup, first workflow |
+| Document                                             | Description                                              |
+| ---------------------------------------------------- | -------------------------------------------------------- |
+| [Getting Started](docs/getting-started.md)           | Installation, database setup, first workflow             |
 | [Workflow Definitions](docs/workflow-definitions.md) | States, events, commands, timeouts, context and metadata |
-| [Core Runtime API](docs/core-runtime.md) | WorkflowRuntime, compiler, validator, executors |
-| [Persistence](docs/persistence.md) | Interfaces, pg adapter, custom adapters |
-| [NestJS Integration](docs/nestjs-integration.md) | Module, services, controllers, DI tokens |
-| [Error Handling](docs/error-handling.md) | Error types, when they occur, how to handle them |
+| [Core Runtime API](docs/core-runtime.md)             | WorkflowRuntime, compiler, validator, executors          |
+| [Persistence](docs/persistence.md)                   | Interfaces, pg adapter, custom adapters                  |
+| [NestJS Integration](docs/nestjs-integration.md)     | Module, services, controllers, DI tokens                 |
+| [Error Handling](docs/error-handling.md)             | Error types, when they occur, how to handle them         |
 
 ## Architecture
 

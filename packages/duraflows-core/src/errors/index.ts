@@ -22,14 +22,8 @@ export class InvalidEventError extends WorkflowError {
   public readonly currentState: string;
   public readonly eventName: string;
 
-  constructor(
-    workflowInstanceUuid: string,
-    currentState: string,
-    eventName: string,
-  ) {
-    super(
-      `Event "${eventName}" is not available on state "${currentState}" for instance "${workflowInstanceUuid}"`,
-    );
+  constructor(workflowInstanceUuid: string, currentState: string, eventName: string) {
+    super(`Event "${eventName}" is not available on state "${currentState}" for instance "${workflowInstanceUuid}"`);
     this.name = "InvalidEventError";
     this.workflowInstanceUuid = workflowInstanceUuid;
     this.currentState = currentState;
@@ -42,11 +36,7 @@ export class OnEnterDepthExceededError extends WorkflowError {
   public readonly stateName: string;
   public readonly depth: number;
 
-  constructor(
-    workflowInstanceUuid: string,
-    stateName: string,
-    depth: number,
-  ) {
+  constructor(workflowInstanceUuid: string, stateName: string, depth: number) {
     super(
       `onEnter chain exceeded maximum depth of ${depth} at state "${stateName}" for instance "${workflowInstanceUuid}"`,
     );
@@ -63,12 +53,7 @@ export class CommandFailureError extends WorkflowError {
   public readonly commandName: string;
   public readonly result: CommandResult;
 
-  constructor(
-    workflowInstanceUuid: string,
-    eventName: string,
-    commandName: string,
-    result: CommandResult,
-  ) {
+  constructor(workflowInstanceUuid: string, eventName: string, commandName: string, result: CommandResult) {
     super(
       `Command "${commandName}" failed for event "${eventName}" on instance "${workflowInstanceUuid}": ${result.message ?? result.code ?? "unknown"}`,
     );

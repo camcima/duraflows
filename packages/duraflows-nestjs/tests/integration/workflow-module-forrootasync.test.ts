@@ -81,10 +81,7 @@ const stubPersistence: WorkflowPersistenceProvider = {
 
 @Injectable()
 class TestShipCommand implements WorkflowCommand {
-  async execute(
-    _subject: unknown,
-    _context: WorkflowExecutionContext,
-  ): Promise<CommandResult> {
+  async execute(_subject: unknown, _context: WorkflowExecutionContext): Promise<CommandResult> {
     return { ok: true, code: "SHIPPED" };
   }
 }
@@ -123,10 +120,7 @@ class ConfigService {
 }
 
 @Module({
-  providers: [
-    ConfigService,
-    { provide: DB_URL, useValue: "postgres://localhost/test" },
-  ],
+  providers: [ConfigService, { provide: DB_URL, useValue: "postgres://localhost/test" }],
   exports: [ConfigService, DB_URL],
 })
 class ConfigModule {}
@@ -135,9 +129,7 @@ class ConfigModule {}
 // Helper: default async options
 // ---------------------------------------------------------------------------
 
-function defaultAsyncOptions(
-  overrides?: Partial<WorkflowModuleAsyncOptions>,
-): WorkflowModuleAsyncOptions {
+function defaultAsyncOptions(overrides?: Partial<WorkflowModuleAsyncOptions>): WorkflowModuleAsyncOptions {
   return {
     commands: [{ name: "test-ship", useClass: TestShipCommand }],
     enableControllers: true,
@@ -191,9 +183,7 @@ describe("WorkflowModule.forRootAsync()", () => {
     });
 
     it("resolves commands through the command registry", () => {
-      const registry = moduleRef.get<WorkflowCommandRegistry>(
-        WORKFLOW_COMMAND_REGISTRY,
-      );
+      const registry = moduleRef.get<WorkflowCommandRegistry>(WORKFLOW_COMMAND_REGISTRY);
       expect(registry.has("test-ship")).toBe(true);
 
       const command = registry.get("test-ship");
@@ -204,11 +194,7 @@ describe("WorkflowModule.forRootAsync()", () => {
   describe("C2 fix: controllers conditionally registered", () => {
     it("registers controllers when enableControllers is true", async () => {
       const mod = await Test.createTestingModule({
-        imports: [
-          WorkflowModule.forRootAsync(
-            defaultAsyncOptions({ enableControllers: true }),
-          ),
-        ],
+        imports: [WorkflowModule.forRootAsync(defaultAsyncOptions({ enableControllers: true }))],
       }).compile();
 
       const instanceCtrl = mod.get(WorkflowInstanceController);
@@ -224,11 +210,7 @@ describe("WorkflowModule.forRootAsync()", () => {
 
     it("does NOT register controllers when enableControllers is false", async () => {
       const mod = await Test.createTestingModule({
-        imports: [
-          WorkflowModule.forRootAsync(
-            defaultAsyncOptions({ enableControllers: false }),
-          ),
-        ],
+        imports: [WorkflowModule.forRootAsync(defaultAsyncOptions({ enableControllers: false }))],
       }).compile();
 
       expect(() => mod.get(WorkflowInstanceController)).toThrow();
@@ -239,11 +221,7 @@ describe("WorkflowModule.forRootAsync()", () => {
 
     it("does NOT register controllers when enableControllers is omitted (defaults to falsy)", async () => {
       const mod = await Test.createTestingModule({
-        imports: [
-          WorkflowModule.forRootAsync(
-            defaultAsyncOptions({ enableControllers: undefined }),
-          ),
-        ],
+        imports: [WorkflowModule.forRootAsync(defaultAsyncOptions({ enableControllers: undefined }))],
       }).compile();
 
       expect(() => mod.get(WorkflowInstanceController)).toThrow();

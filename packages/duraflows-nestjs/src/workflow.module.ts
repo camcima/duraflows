@@ -15,14 +15,8 @@ import {
   WorkflowValidator,
   WorkflowCompiler,
 } from "@camcima/duraflows-core";
-import {
-  NestCommandRegistry,
-  type WorkflowCommandRegistration,
-} from "./providers/nest-command-registry.js";
-import {
-  discoverDecoratedCommands,
-  mergeCommandRegistrations,
-} from "./providers/command-discovery.js";
+import { NestCommandRegistry, type WorkflowCommandRegistration } from "./providers/nest-command-registry.js";
+import { discoverDecoratedCommands, mergeCommandRegistrations } from "./providers/command-discovery.js";
 import {
   WORKFLOW_RUNTIME,
   WORKFLOW_INSTANCE_STORE,
@@ -57,9 +51,7 @@ export interface WorkflowModuleAsyncOptions {
   imports?: Type<unknown>[];
   commands?: WorkflowCommandRegistration[];
   enableControllers?: boolean;
-  useFactory: (
-    ...args: any[]
-  ) => Promise<WorkflowModuleFactoryConfig> | WorkflowModuleFactoryConfig;
+  useFactory: (...args: any[]) => Promise<WorkflowModuleFactoryConfig> | WorkflowModuleFactoryConfig;
   inject?: InjectionToken[];
 }
 
@@ -213,26 +205,22 @@ export class WorkflowModule {
       },
       {
         provide: WORKFLOW_INSTANCE_STORE,
-        useFactory: (config: WorkflowModuleFactoryConfig) =>
-          config.persistence.instanceStore,
+        useFactory: (config: WorkflowModuleFactoryConfig) => config.persistence.instanceStore,
         inject: ["WORKFLOW_MODULE_OPTIONS"],
       },
       {
         provide: WORKFLOW_HISTORY_STORE,
-        useFactory: (config: WorkflowModuleFactoryConfig) =>
-          config.persistence.historyStore,
+        useFactory: (config: WorkflowModuleFactoryConfig) => config.persistence.historyStore,
         inject: ["WORKFLOW_MODULE_OPTIONS"],
       },
       {
         provide: WORKFLOW_TRANSACTION_RUNNER,
-        useFactory: (config: WorkflowModuleFactoryConfig) =>
-          config.persistence.transactionRunner,
+        useFactory: (config: WorkflowModuleFactoryConfig) => config.persistence.transactionRunner,
         inject: ["WORKFLOW_MODULE_OPTIONS"],
       },
       {
         provide: WORKFLOW_CLOCK,
-        useFactory: (config: WorkflowModuleFactoryConfig): WorkflowClock =>
-          config.clock ?? { now: () => new Date() },
+        useFactory: (config: WorkflowModuleFactoryConfig): WorkflowClock => config.clock ?? { now: () => new Date() },
         inject: ["WORKFLOW_MODULE_OPTIONS"],
       },
       {

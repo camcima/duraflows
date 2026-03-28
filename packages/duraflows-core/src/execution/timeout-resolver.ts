@@ -1,14 +1,7 @@
-import type {
-  WorkflowDefinition,
-  WorkflowTimeoutDefinition,
-} from "../types/definition.js";
+import type { WorkflowDefinition, WorkflowTimeoutDefinition } from "../types/definition.js";
 
 export class TimeoutResolver {
-  computeDeadline(
-    definition: WorkflowDefinition,
-    stateName: string,
-    now: Date,
-  ): Date | null {
+  computeDeadline(definition: WorkflowDefinition, stateName: string, now: Date): Date | null {
     const timeout = this.findTimeout(definition, stateName);
     if (!timeout) return null;
 
@@ -18,10 +11,7 @@ export class TimeoutResolver {
     return new Date(now.getTime() + totalMs);
   }
 
-  getTimeoutEventName(
-    definition: WorkflowDefinition,
-    stateName: string,
-  ): string | null {
+  getTimeoutEventName(definition: WorkflowDefinition, stateName: string): string | null {
     const stateDef = definition.states[stateName];
     if (!stateDef?.events) return null;
 
@@ -31,10 +21,7 @@ export class TimeoutResolver {
     return null;
   }
 
-  private findTimeout(
-    definition: WorkflowDefinition,
-    stateName: string,
-  ): WorkflowTimeoutDefinition | null {
+  private findTimeout(definition: WorkflowDefinition, stateName: string): WorkflowTimeoutDefinition | null {
     const stateDef = definition.states[stateName];
     if (!stateDef?.events) return null;
 

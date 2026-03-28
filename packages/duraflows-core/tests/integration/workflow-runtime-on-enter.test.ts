@@ -65,9 +65,7 @@ class InMemoryHistoryStore implements WorkflowHistoryStore {
     workflowInstanceUuid: string,
     options?: { limit?: number; offset?: number },
   ): Promise<WorkflowHistoryRecord[]> {
-    const matching = this.records.filter(
-      (r) => r.workflowInstanceUuid === workflowInstanceUuid,
-    );
+    const matching = this.records.filter((r) => r.workflowInstanceUuid === workflowInstanceUuid);
     const offset = options?.offset ?? 0;
     const limit = options?.limit ?? matching.length;
     return matching.slice(offset, offset + limit);

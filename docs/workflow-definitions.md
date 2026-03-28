@@ -12,11 +12,11 @@ interface WorkflowDefinition {
 }
 ```
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `name` | `string` | Yes | Unique identifier for the workflow. Must be non-empty. |
-| `initialState` | `string` | Yes | Name of the starting state. Must exist in `states`. |
-| `states` | `Record<string, WorkflowStateDefinition>` | Yes | Map of state names to state definitions. At least one state required. |
+| Property       | Type                                      | Required | Description                                                           |
+| -------------- | ----------------------------------------- | -------- | --------------------------------------------------------------------- |
+| `name`         | `string`                                  | Yes      | Unique identifier for the workflow. Must be non-empty.                |
+| `initialState` | `string`                                  | Yes      | Name of the starting state. Must exist in `states`.                   |
+| `states`       | `Record<string, WorkflowStateDefinition>` | Yes      | Map of state names to state definitions. At least one state required. |
 
 ### Example
 
@@ -25,8 +25,12 @@ const workflow: WorkflowDefinition = {
   name: "order",
   initialState: "new",
   states: {
-    new: { /* ... */ },
-    processing: { /* ... */ },
+    new: {
+      /* ... */
+    },
+    processing: {
+      /* ... */
+    },
     completed: {},
   },
 };
@@ -43,12 +47,12 @@ interface WorkflowStateDefinition {
 }
 ```
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `context` | `Record<string, unknown>` | No | Values merged into workflow context when entering this state |
-| `events` | `Record<string, WorkflowEventDefinition>` | No | Events available from this state |
-| `onEnter` | `WorkflowOnEnterDefinition` | No | Auto-fire behavior when this state is entered |
-| `metadata` | `Record<string, unknown>` | No | Arbitrary state metadata |
+| Property   | Type                                      | Required | Description                                                  |
+| ---------- | ----------------------------------------- | -------- | ------------------------------------------------------------ |
+| `context`  | `Record<string, unknown>`                 | No       | Values merged into workflow context when entering this state |
+| `events`   | `Record<string, WorkflowEventDefinition>` | No       | Events available from this state                             |
+| `onEnter`  | `WorkflowOnEnterDefinition`               | No       | Auto-fire behavior when this state is entered                |
+| `metadata` | `Record<string, unknown>`                 | No       | Arbitrary state metadata                                     |
 
 A state with no `events` is a **terminal state** -- the workflow cannot progress further from it.
 
@@ -85,22 +89,22 @@ interface WorkflowOnEnterDefinition {
 }
 ```
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `targetState` | `string` | No | State to transition to after commands succeed. Must reference a valid state name. |
-| `errorState` | `string` | No | State to transition to if a command fails. Must reference a valid state name. |
-| `commands` | `WorkflowCommandRef[]` | No | Ordered list of commands to execute on entry. |
-| `metadata` | `Record<string, unknown>` | No | Arbitrary metadata. |
+| Property      | Type                      | Required | Description                                                                       |
+| ------------- | ------------------------- | -------- | --------------------------------------------------------------------------------- |
+| `targetState` | `string`                  | No       | State to transition to after commands succeed. Must reference a valid state name. |
+| `errorState`  | `string`                  | No       | State to transition to if a command fails. Must reference a valid state name.     |
+| `commands`    | `WorkflowCommandRef[]`    | No       | Ordered list of commands to execute on entry.                                     |
+| `metadata`    | `Record<string, unknown>` | No       | Arbitrary metadata.                                                               |
 
 ### onEnter Behavior
 
-| Scenario | Outcome |
-|----------|---------|
-| Commands succeed + `targetState` defined | Transitions to `targetState` |
-| Commands succeed + no `targetState` | Stays in current state (commands ran as side effects) |
-| Command fails + `errorState` defined | Transitions to `errorState` |
-| Command fails + no `errorState` | Throws `CommandFailureError`, transaction rolls back |
-| No commands + `targetState` defined | Transitions to `targetState` immediately |
+| Scenario                                 | Outcome                                               |
+| ---------------------------------------- | ----------------------------------------------------- |
+| Commands succeed + `targetState` defined | Transitions to `targetState`                          |
+| Commands succeed + no `targetState`      | Stays in current state (commands ran as side effects) |
+| Command fails + `errorState` defined     | Transitions to `errorState`                           |
+| Command fails + no `errorState`          | Throws `CommandFailureError`, transaction rolls back  |
+| No commands + `targetState` defined      | Transitions to `targetState` immediately              |
 
 ### Chaining
 
@@ -187,25 +191,25 @@ interface WorkflowEventDefinition {
 }
 ```
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `targetState` | `string` | Yes* | State to transition to on success. Must reference a valid state name. |
-| `errorState` | `string` | No | State to transition to on command failure. Must reference a valid state name. |
-| `commands` | `WorkflowCommandRef[]` | No | Ordered list of commands to execute when the event is triggered. |
-| `timeout` | `WorkflowTimeoutDefinition` | No | Timeout configuration for automatic triggering. At most one event per state may define a timeout. |
-| `metadata` | `Record<string, unknown>` | No | Arbitrary event metadata. |
+| Property      | Type                        | Required | Description                                                                                       |
+| ------------- | --------------------------- | -------- | ------------------------------------------------------------------------------------------------- |
+| `targetState` | `string`                    | Yes\*    | State to transition to on success. Must reference a valid state name.                             |
+| `errorState`  | `string`                    | No       | State to transition to on command failure. Must reference a valid state name.                     |
+| `commands`    | `WorkflowCommandRef[]`      | No       | Ordered list of commands to execute when the event is triggered.                                  |
+| `timeout`     | `WorkflowTimeoutDefinition` | No       | Timeout configuration for automatic triggering. At most one event per state may define a timeout. |
+| `metadata`    | `Record<string, unknown>`   | No       | Arbitrary event metadata.                                                                         |
 
-*`targetState` is required for any event that changes state.
+\*`targetState` is required for any event that changes state.
 
 ### Event Outcome Rules
 
-| Scenario | Outcome | Transition |
-|----------|---------|------------|
-| No commands defined | `success` | Transitions to `targetState` |
-| All commands return `{ ok: true }` | `success` | Transitions to `targetState` |
-| Any command returns `{ ok: false }` | `failure` | Transitions to `errorState` (if defined) |
-| Any command returns `{ ok: false }`, no `errorState` | -- | Throws `CommandFailureError`, no transition |
-| Any command throws an exception | -- | Exception propagates, no transition, transaction rolls back |
+| Scenario                                             | Outcome   | Transition                                                  |
+| ---------------------------------------------------- | --------- | ----------------------------------------------------------- |
+| No commands defined                                  | `success` | Transitions to `targetState`                                |
+| All commands return `{ ok: true }`                   | `success` | Transitions to `targetState`                                |
+| Any command returns `{ ok: false }`                  | `failure` | Transitions to `errorState` (if defined)                    |
+| Any command returns `{ ok: false }`, no `errorState` | --        | Throws `CommandFailureError`, no transition                 |
+| Any command throws an exception                      | --        | Exception propagates, no transition, transaction rolls back |
 
 ### Examples
 
@@ -251,18 +255,15 @@ interface WorkflowCommandRef {
 }
 ```
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `name` | `string` | Yes | Stable name that maps to a registered `WorkflowCommand` implementation. In NestJS, use the [`@WorkflowCommand` decorator](nestjs-integration.md#workflowcommand-decorator) or explicit `commands` array to register implementations. Without NestJS, use `InMemoryCommandRegistry.register()`. |
-| `metadata` | `Record<string, unknown>` | No | Arbitrary per-invocation metadata (not passed to the command handler automatically). |
+| Property   | Type                      | Required | Description                                                                                                                                                                                                                                                                                    |
+| ---------- | ------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`     | `string`                  | Yes      | Stable name that maps to a registered `WorkflowCommand` implementation. In NestJS, use the [`@WorkflowCommand` decorator](nestjs-integration.md#workflowcommand-decorator) or explicit `commands` array to register implementations. Without NestJS, use `InMemoryCommandRegistry.register()`. |
+| `metadata` | `Record<string, unknown>` | No       | Arbitrary per-invocation metadata (not passed to the command handler automatically).                                                                                                                                                                                                           |
 
 ### Example
 
 ```ts
-commands: [
-  { name: "chargePayment" },
-  { name: "sendReceipt", metadata: { template: "premium" } },
-]
+commands: [{ name: "chargePayment" }, { name: "sendReceipt", metadata: { template: "premium" } }];
 ```
 
 ## WorkflowTimeoutDefinition
@@ -277,15 +278,16 @@ interface WorkflowTimeoutDefinition {
 
 All fields are **additive**. The total timeout duration is the sum of all defined fields.
 
-| Property | Type | Multiplier | Description |
-|----------|------|------------|-------------|
-| `afterMinutes` | `number` | 60,000 | Minutes |
-| `afterHours` | `number` | 3,600,000 | Hours |
-| `afterDays` | `number` | 86,400,000 | Days |
+| Property       | Type     | Multiplier | Description |
+| -------------- | -------- | ---------- | ----------- |
+| `afterMinutes` | `number` | 60,000     | Minutes     |
+| `afterHours`   | `number` | 3,600,000  | Hours       |
+| `afterDays`    | `number` | 86,400,000 | Days        |
 
 The minimum granularity is minutes. Timeout processing depends on an external scheduler (cron job, NestJS `@Cron`, etc.) polling for expired instances, so sub-minute precision is not meaningful.
 
 **Rules:**
+
 - At least one field must be defined.
 - All defined fields must be positive numbers.
 - At most **one event per state** may define a timeout.
@@ -309,7 +311,7 @@ Every workflow instance carries two data stores. Understanding the difference is
 
 ### Metadata -- Immutable Identity
 
-**Metadata** is set once at instance creation and never modified by the runtime. It answers: *"What domain entity does this workflow belong to?"*
+**Metadata** is set once at instance creation and never modified by the runtime. It answers: _"What domain entity does this workflow belong to?"_
 
 ```ts
 const instance = await runtime.createInstance({
@@ -366,6 +368,7 @@ class ChargePaymentCommand implements WorkflowCommand<Order> {
 ```
 
 **Merge order during a transition:**
+
 1. Commands run and may mutate `context`
 2. Workflow transitions to the new state
 3. The new state's `context` values are merged on top
@@ -376,14 +379,14 @@ Persisted in `workflow_instances.context_json`.
 
 ### Comparison
 
-| | Metadata | Context |
-|---|----------|---------|
-| **Purpose** | Identity / lookup keys | Working memory |
-| **Set at creation** | Yes | Yes |
-| **Modified by state transitions** | No | Yes (state context merged) |
-| **Writable by commands** | No (read-only) | Yes |
-| **Typical contents** | `orderId`, `customerId`, `tenantId` | `paymentStatus`, `chargeId`, `retryCount` |
-| **Persisted in** | `metadata_json` | `context_json` |
+|                                   | Metadata                            | Context                                   |
+| --------------------------------- | ----------------------------------- | ----------------------------------------- |
+| **Purpose**                       | Identity / lookup keys              | Working memory                            |
+| **Set at creation**               | Yes                                 | Yes                                       |
+| **Modified by state transitions** | No                                  | Yes (state context merged)                |
+| **Writable by commands**          | No (read-only)                      | Yes                                       |
+| **Typical contents**              | `orderId`, `customerId`, `tenantId` | `paymentStatus`, `chargeId`, `retryCount` |
+| **Persisted in**                  | `metadata_json`                     | `context_json`                            |
 
 ### Accessing from Commands
 
@@ -469,10 +472,7 @@ export const orderWorkflow: WorkflowDefinition = {
         Export: {
           targetState: "exported",
           errorState: "export_failed",
-          commands: [
-            { name: "exportToWarehouse" },
-            { name: "issueVoucher" },
-          ],
+          commands: [{ name: "exportToWarehouse" }, { name: "issueVoucher" }],
         },
       },
     },

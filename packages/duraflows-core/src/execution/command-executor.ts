@@ -1,8 +1,4 @@
-import type {
-  CommandResult,
-  WorkflowCommand,
-  WorkflowExecutionContext,
-} from "../types/runtime.js";
+import type { CommandResult, WorkflowCommand, WorkflowExecutionContext } from "../types/runtime.js";
 import type { WorkflowCommandRef } from "../types/definition.js";
 import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
 

@@ -83,10 +83,7 @@ const stubPersistence: WorkflowPersistenceProvider = {
 
 @Injectable()
 class TestApproveCommand implements WorkflowCommand {
-  async execute(
-    _subject: unknown,
-    _context: WorkflowExecutionContext,
-  ): Promise<CommandResult> {
+  async execute(_subject: unknown, _context: WorkflowExecutionContext): Promise<CommandResult> {
     return { ok: true, code: "APPROVED" };
   }
 }
@@ -115,9 +112,7 @@ const testWorkflow: WorkflowDefinition = {
 // Helper: default module options
 // ---------------------------------------------------------------------------
 
-function defaultOptions(
-  overrides?: Partial<WorkflowModuleOptions>,
-): WorkflowModuleOptions {
+function defaultOptions(overrides?: Partial<WorkflowModuleOptions>): WorkflowModuleOptions {
   return {
     workflows: [testWorkflow],
     commands: [{ name: "test-approve", useClass: TestApproveCommand }],
@@ -161,18 +156,14 @@ describe("WorkflowModule.forRoot()", () => {
   });
 
   it("resolves WORKFLOW_DEFINITION_REGISTRY containing registered workflows", () => {
-    const registry = moduleRef.get<WorkflowDefinitionRegistry>(
-      WORKFLOW_DEFINITION_REGISTRY,
-    );
+    const registry = moduleRef.get<WorkflowDefinitionRegistry>(WORKFLOW_DEFINITION_REGISTRY);
     expect(registry).toBeDefined();
     expect(registry.has("test-order")).toBe(true);
     expect(registry.get("test-order")).toEqual(testWorkflow);
   });
 
   it("resolves WORKFLOW_COMMAND_REGISTRY that can find registered commands", () => {
-    const registry = moduleRef.get<WorkflowCommandRegistry>(
-      WORKFLOW_COMMAND_REGISTRY,
-    );
+    const registry = moduleRef.get<WorkflowCommandRegistry>(WORKFLOW_COMMAND_REGISTRY);
     expect(registry).toBeDefined();
     expect(registry.has("test-approve")).toBe(true);
 
@@ -183,9 +174,7 @@ describe("WorkflowModule.forRoot()", () => {
   describe("controller registration", () => {
     it("registers controllers when enableControllers is true", async () => {
       const mod = await Test.createTestingModule({
-        imports: [
-          WorkflowModule.forRoot(defaultOptions({ enableControllers: true })),
-        ],
+        imports: [WorkflowModule.forRoot(defaultOptions({ enableControllers: true }))],
       }).compile();
 
       const instanceCtrl = mod.get(WorkflowInstanceController);
@@ -201,9 +190,7 @@ describe("WorkflowModule.forRoot()", () => {
 
     it("does NOT register controllers when enableControllers is false", async () => {
       const mod = await Test.createTestingModule({
-        imports: [
-          WorkflowModule.forRoot(defaultOptions({ enableControllers: false })),
-        ],
+        imports: [WorkflowModule.forRoot(defaultOptions({ enableControllers: false }))],
       }).compile();
 
       expect(() => mod.get(WorkflowInstanceController)).toThrow();

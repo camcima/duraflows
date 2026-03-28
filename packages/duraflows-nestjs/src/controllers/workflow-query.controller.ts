@@ -1,14 +1,7 @@
 import { Controller, Get, Param, Query, UsePipes, ValidationPipe } from "@nestjs/common";
-import type {
-  AvailableWorkflowEvent,
-  WorkflowHistoryRecord,
-} from "@camcima/duraflows-core";
+import type { AvailableWorkflowEvent, WorkflowHistoryRecord } from "@camcima/duraflows-core";
 import { WorkflowService } from "../services/workflow.service.js";
-import {
-  AvailableEventsParamsDto,
-  HistoryQueryDto,
-  HistoryParamsDto,
-} from "./dto/index.js";
+import { AvailableEventsParamsDto, HistoryQueryDto, HistoryParamsDto } from "./dto/index.js";
 
 @Controller("workflows")
 @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
@@ -16,9 +9,7 @@ export class WorkflowQueryController {
   constructor(private readonly workflowService: WorkflowService) {}
 
   @Get(":workflowInstanceUuid/events")
-  async getAvailableEvents(
-    @Param() params: AvailableEventsParamsDto,
-  ): Promise<AvailableWorkflowEvent[]> {
+  async getAvailableEvents(@Param() params: AvailableEventsParamsDto): Promise<AvailableWorkflowEvent[]> {
     return this.workflowService.getAvailableEvents({
       workflowInstanceUuid: params.workflowInstanceUuid,
     });
