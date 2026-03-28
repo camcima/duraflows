@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 100" role="img" aria-label="duraflows logo">
+  <defs>
+    <style>
+      @media (prefers-color-scheme: dark) {
+        .logo-text { fill: #e6edf3; }
+        .node-stroke { stroke: #2dd4bf; fill: none; }
+        .node-fill { fill: #2dd4bf; }
+        .arrow { stroke: #2dd4bf; fill: #2dd4bf; }
+      }
+      @media (prefers-color-scheme: light) {
+        .logo-text { fill: #24292f; }
+        .node-stroke { stroke: #0f766e; fill: none; }
+        .node-fill { fill: #0f766e; }
+        .arrow { stroke: #0f766e; fill: #0f766e; }
+      }
+    </style>
+    <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path class="arrow" d="M0,0 L8,3 L0,6 Z" stroke="none"/>
+    </marker>
+  </defs>
+
+  <!-- Start state (record block) -->
+  <rect class="node-fill" x="7" y="43" width="22" height="14" rx="3" opacity="0.06"/>
+  <rect class="node-stroke" x="7" y="43" width="22" height="14" rx="3" stroke-width="2" opacity="0.4"/>
+
+  <!-- Process state (record block) -->
+  <rect class="node-fill" x="44" y="43" width="22" height="14" rx="3" opacity="0.1"/>
+  <rect class="node-stroke" x="44" y="43" width="22" height="14" rx="3" stroke-width="2" opacity="0.7"/>
+
+  <!-- Success state (record block) -->
+  <rect class="node-fill" x="81" y="27" width="22" height="14" rx="3" opacity="0.15"/>
+  <rect class="node-stroke" x="81" y="27" width="22" height="14" rx="3" stroke-width="2"/>
+
+  <!-- Error state (record block) -->
+  <rect class="node-fill" x="81" y="59" width="22" height="14" rx="3" opacity="0.08"/>
+  <rect class="node-stroke" x="81" y="59" width="22" height="14" rx="3" stroke-width="2" opacity="0.5"/>
+
+  <!-- Arrow: start → process -->
+  <line class="arrow" x1="29" y1="50" x2="43" y2="50" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)" opacity="0.5"/>
+
+  <!-- Arrow: process → success -->
+  <line class="arrow" x1="66" y1="46" x2="80" y2="36" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)" opacity="0.8"/>
+
+  <!-- Arrow: process → error -->
+  <line class="arrow" x1="66" y1="54" x2="80" y2="63" stroke-width="1.5" fill="none" marker-end="url(#arrowhead)" opacity="0.5"/>
+
+  <!-- Logo text -->
+  <text class="logo-text" x="120" y="66" font-family="Georgia, 'Times New Roman', serif" font-size="60" font-weight="bold" letter-spacing="6">duraflows</text>
+</svg>

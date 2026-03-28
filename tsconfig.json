@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/duraflows-core" },
+    { "path": "packages/duraflows-pg" },
+    { "path": "packages/duraflows-nestjs" }
+  ]
+}

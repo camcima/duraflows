@@ -1,0 +1,29 @@
+{
+  "name": "@camcima/duraflows",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/duraflows-core",
+    "packages/duraflows-pg",
+    "packages/duraflows-nestjs"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "lint": "eslint packages/*/src/",
+    "release": "release-it"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@release-it/conventional-changelog": "^10.0.6",
+    "@vitest/coverage-v8": "^3.2.4",
+    "eslint": "^10.1.0",
+    "release-it": "^19.2.4",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.57.2",
+    "vitest": "^3.0.0"
+  }
+}

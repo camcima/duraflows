@@ -1,0 +1,89 @@
+export type TriggerType = "user" | "admin" | "system" | "timeout";
+
+export interface WorkflowCommand<TSubject = unknown> {
+  execute(
+    subject: TSubject,
+    context: WorkflowExecutionContext,
+  ): Promise<CommandResult> | CommandResult;
+}
+
+export interface CommandResult {
+  ok: boolean;
+  code?: string;
+  message?: string;
+  metadata?: Record<string, unknown>;
+  error?: unknown;
+}
+
+export interface WorkflowExecutionContext {
+  trigger: {
+    type: TriggerType;
+    actorUuid?: string;
+  };
+  now: Date;
+  context: Record<string, unknown>;
+  metadata: Readonly<Record<string, unknown>>;
+}
+
+export interface WorkflowInstance {
+  uuid: string;
+  workflowName: string;
+  currentState: string;
+  version: number;
+  expiresAt: Date | null;
+  lastTransitionAt: Date;
+  context: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface WorkflowExecutionResult {
+  outcome: "success" | "failure";
+  fromState: string;
+  toState: string;
+  commandResults: CommandResult[];
+  historyUuid: string;
+}
+
+export interface AvailableWorkflowEvent {
+  eventName: string;
+  targetState?: string;
+  errorState?: string;
+  hasCommands: boolean;
+  hasTimeout: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CreateWorkflowInstanceInput {
+  workflowName: string;
+  context?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  trigger: {
+    type: TriggerType;
+    actorUuid?: string;
+  };
+}
+
+export interface TriggerWorkflowEventInput {
+  workflowInstanceUuid: string;
+  eventName: string;
+  subject?: unknown;
+  trigger: {
+    type: TriggerType;
+    actorUuid?: string;
+  };
+}
+
+export interface ProcessExpiredWorkflowsInput {
+  limit?: number;
+}
+
+export interface ProcessExpiredWorkflowsResult {
+  processed: number;
+  failed: Array<{ uuid: string; error: string }>;
+}
+
+export interface GetAvailableEventsInput {
+  workflowInstanceUuid: string;
+}
