@@ -86,16 +86,13 @@ export class OrderService {
   }
 
   async receivePayment(instanceUuid: string, order: Order) {
-    const result = await this.workflowService.triggerEvent({
-      workflowInstanceUuid: instanceUuid,
-      eventName: "PaymentReceived",
-      subject: order,
-    });
-    return result;
+    const handle = this.workflowService.getHandle(instanceUuid);
+    return handle.triggerEvent("PaymentReceived", { subject: order });
   }
 
   async getAvailableActions(instanceUuid: string) {
-    return this.workflowService.getAvailableEvents({ workflowInstanceUuid: instanceUuid });
+    const handle = this.workflowService.getHandle(instanceUuid);
+    return handle.getAvailableEvents();
   }
 }
 ```

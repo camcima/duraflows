@@ -1,4 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { WorkflowHandle } from "@duraflows/core";
 import type {
   WorkflowRuntime,
   CreateWorkflowInstanceInput,
@@ -45,5 +46,9 @@ export class WorkflowService {
     options?: { limit?: number; offset?: number },
   ): Promise<WorkflowHistoryRecord[]> {
     return this.historyStore.findByInstanceUuid(workflowInstanceUuid, options);
+  }
+
+  getHandle(uuid: string): WorkflowHandle {
+    return new WorkflowHandle(uuid, this);
   }
 }

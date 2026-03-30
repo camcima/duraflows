@@ -74,6 +74,7 @@ export type {
   CompiledWorkflow,
   OnEnterChainResult,
   OnEnterHopResult,
+  WorkflowRuntimeClient,
 } from "@duraflows/core";
 export {
   WorkflowError,
@@ -88,6 +89,7 @@ export {
   OnEnterExecutor,
   TimeoutResolver,
   WorkflowRuntime,
+  WorkflowHandle,
   InMemoryDefinitionRegistry,
   InMemoryCommandRegistry,
 } from "@duraflows/core";

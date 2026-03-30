@@ -268,10 +268,11 @@ const instance = await runtime.createInstance({
 });
 // instance.currentState === "open"
 
+// Get a handle — binds the UUID, no DB call
+const handle = runtime.getHandle(instance.uuid);
+
 // Assign the ticket
-const result = await runtime.triggerEvent({
-  workflowInstanceUuid: instance.uuid,
-  eventName: "Assign",
+const result = await handle.triggerEvent("Assign", {
   subject: ticket,
   triggerMetadata: { source: "user", actor: agentUuid },
 });
@@ -279,9 +280,7 @@ const result = await runtime.triggerEvent({
 // result.toState === "in_progress"
 
 // Resolve it (executes sendResolutionEmail command)
-const resolveResult = await runtime.triggerEvent({
-  workflowInstanceUuid: instance.uuid,
-  eventName: "Resolve",
+const resolveResult = await handle.triggerEvent("Resolve", {
   subject: ticket,
   triggerMetadata: { source: "user", actor: agentUuid },
 });

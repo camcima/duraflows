@@ -209,20 +209,25 @@ export class OrderService {
 
 **Methods:**
 
-| Method                       | Parameters                    | Returns                             | Description                          |
-| ---------------------------- | ----------------------------- | ----------------------------------- | ------------------------------------ |
-| `createInstance(input)`      | `CreateWorkflowInstanceInput` | `Promise<WorkflowInstance>`         | Create a new workflow instance       |
-| `triggerEvent(input)`        | `TriggerWorkflowEventInput`   | `Promise<WorkflowExecutionResult>`  | Trigger an event on an instance      |
-| `getAvailableEvents(input)`  | `GetAvailableEventsInput`     | `Promise<AvailableWorkflowEvent[]>` | Get events available for an instance |
-| `getInstance(uuid)`          | `string`                      | `Promise<WorkflowInstance \| null>` | Get instance by UUID                 |
-| `getHistory(uuid, options?)` | `string, { limit?, offset? }` | `Promise<WorkflowHistoryRecord[]>`  | Get history for an instance          |
+| Method                       | Parameters                    | Returns                             | Description                                      |
+| ---------------------------- | ----------------------------- | ----------------------------------- | ------------------------------------------------ |
+| `createInstance(input)`      | `CreateWorkflowInstanceInput` | `Promise<WorkflowInstance>`         | Create a new workflow instance                   |
+| `triggerEvent(input)`        | `TriggerWorkflowEventInput`   | `Promise<WorkflowExecutionResult>`  | Trigger an event on an instance                  |
+| `getAvailableEvents(input)`  | `GetAvailableEventsInput`     | `Promise<AvailableWorkflowEvent[]>` | Get events available for an instance             |
+| `getInstance(uuid)`          | `string`                      | `Promise<WorkflowInstance \| null>` | Get instance by UUID                             |
+| `getHistory(uuid, options?)` | `string, { limit?, offset? }` | `Promise<WorkflowHistoryRecord[]>`  | Get history for an instance                      |
+| `getHandle(uuid)`            | `string`                      | `WorkflowHandle`                    | Get a thin proxy handle (sync, no DB call) |
 
-**Example:**
+**Example using WorkflowHandle (recommended):**
 
 ```ts
 @Injectable()
 export class OrderService {
   constructor(private readonly workflowService: WorkflowService) {}
+
+  private getWorkflowHandle(order: Order): WorkflowHandle {
+    return this.workflowService.getHandle(order.workflowInstanceUuid);
+  }
 
   async createOrder(data: CreateOrderDto) {
     const order = await this.orderRepo.create(data);
@@ -238,35 +243,31 @@ export class OrderService {
 
   async processPayment(orderUuid: string) {
     const order = await this.orderRepo.findByUuid(orderUuid);
+    const handle = this.getWorkflowHandle(order);
 
-    const result = await this.workflowService.triggerEvent({
-      workflowInstanceUuid: order.workflowInstanceUuid,
-      eventName: "PaymentReceived",
-      subject: order,
-    });
-
-    return result;
+    return handle.triggerEvent("PaymentReceived", { subject: order });
   }
 
   async getOrderStatus(orderUuid: string) {
     const order = await this.orderRepo.findByUuid(orderUuid);
-    const instance = await this.workflowService.getInstance(order.workflowInstanceUuid);
+    const handle = this.getWorkflowHandle(order);
+
+    const instance = await handle.getInstance();
     return instance?.currentState;
   }
 
   async getOrderHistory(orderUuid: string) {
     const order = await this.orderRepo.findByUuid(orderUuid);
-    return this.workflowService.getHistory(order.workflowInstanceUuid, {
-      limit: 50,
-      offset: 0,
-    });
+    const handle = this.getWorkflowHandle(order);
+
+    return handle.getHistory({ limit: 50, offset: 0 });
   }
 
   async getAvailableActions(orderUuid: string) {
     const order = await this.orderRepo.findByUuid(orderUuid);
-    return this.workflowService.getAvailableEvents({
-      workflowInstanceUuid: order.workflowInstanceUuid,
-    });
+    const handle = this.getWorkflowHandle(order);
+
+    return handle.getAvailableEvents();
   }
 }
 ```

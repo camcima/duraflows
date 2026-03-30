@@ -184,15 +184,20 @@ export class OrderService {
   }
 
   async receivePayment(workflowInstanceUuid: string, order: Order) {
-    const result = await this.workflowService.triggerEvent({
-      workflowInstanceUuid,
-      eventName: "PaymentReceived",
+    // Get a handle — binds the UUID, no DB call
+    const handle = this.workflowService.getHandle(workflowInstanceUuid);
+
+    const result = await handle.triggerEvent("PaymentReceived", {
       subject: order,
       triggerMetadata: { source: "user", actor: order.customerUuid },
     });
 
     console.log(result.outcome); // "success"
     console.log(result.toState); // "exportable"
+
+    // All operations go through the handle — no UUID repetition
+    const events = await handle.getAvailableEvents();
+    const history = await handle.getHistory({ limit: 10 });
   }
 }
 ```
@@ -226,12 +231,18 @@ const instance = await runtime.createInstance({
   workflowName: "order",
 });
 
-// Trigger an event
-const result = await runtime.triggerEvent({
-  workflowInstanceUuid: instance.uuid,
-  eventName: "PaymentReceived",
+// Get a handle — binds the UUID, no DB call
+const handle = runtime.getHandle(instance.uuid);
+
+// Trigger an event through the handle
+const result = await handle.triggerEvent("PaymentReceived", {
   subject: orderEntity,
 });
+
+// All operations go through the handle
+const events = await handle.getAvailableEvents();
+const current = await handle.getInstance();
+const history = await handle.getHistory();
 ```
 
 ## Database Setup

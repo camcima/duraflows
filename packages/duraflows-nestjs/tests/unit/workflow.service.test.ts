@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { describe, it, expect, vi } from "vitest";
 import { WorkflowService } from "../../src/services/workflow.service.js";
+import { WorkflowHandle } from "@duraflows/core";
 
 function createMocks() {
   const runtime = {
@@ -83,5 +84,14 @@ describe("WorkflowService", () => {
     await service.getHistory("inst-uuid");
 
     expect(historyStore.findByInstanceUuid).toHaveBeenCalledWith("inst-uuid", undefined);
+  });
+
+  it("getHandle() returns a WorkflowHandle with the correct uuid", () => {
+    const { service } = createMocks();
+
+    const handle = service.getHandle("my-uuid");
+
+    expect(handle).toBeInstanceOf(WorkflowHandle);
+    expect(handle.uuid).toBe("my-uuid");
   });
 });

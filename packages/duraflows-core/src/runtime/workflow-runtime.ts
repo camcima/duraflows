@@ -14,6 +14,7 @@ function deepFreeze<T extends Record<string, unknown>>(obj: T): Readonly<T> {
 import type {
   WorkflowInstanceStore,
   WorkflowHistoryStore,
+  WorkflowHistoryRecord,
   WorkflowTransactionRunner,
   WorkflowClock,
 } from "../types/persistence.js";
@@ -36,6 +37,7 @@ import { OnEnterExecutor } from "../execution/on-enter-executor.js";
 import { TimeoutResolver } from "../execution/timeout-resolver.js";
 import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
 import { WorkflowError } from "../errors/index.js";
+import { WorkflowHandle } from "./workflow-handle.js";
 
 const DEFAULT_MAX_ON_ENTER_DEPTH = 10;
 
@@ -416,5 +418,20 @@ export class WorkflowRuntime {
     }
 
     return events;
+  }
+
+  async getInstance(uuid: string): Promise<WorkflowInstance | null> {
+    return this.instanceStore.findByUuid(uuid);
+  }
+
+  async getHistory(
+    workflowInstanceUuid: string,
+    options?: { limit?: number; offset?: number },
+  ): Promise<WorkflowHistoryRecord[]> {
+    return this.historyStore.findByInstanceUuid(workflowInstanceUuid, options);
+  }
+
+  getHandle(uuid: string): WorkflowHandle {
+    return new WorkflowHandle(uuid, this);
   }
 }

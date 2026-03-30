@@ -99,11 +99,15 @@ const runtime = new WorkflowRuntime({
 });
 
 const instance = await runtime.createInstance({ workflowName: "order" });
-const result = await runtime.triggerEvent({
-  workflowInstanceUuid: instance.uuid,
-  eventName: "PaymentReceived",
-  subject: orderEntity,
-});
+
+// Get a handle — binds the UUID, no DB call
+const handle = runtime.getHandle(instance.uuid);
+
+// All operations go through the handle
+const result = await handle.triggerEvent("PaymentReceived", { subject: orderEntity });
+const events = await handle.getAvailableEvents();
+const current = await handle.getInstance();
+const history = await handle.getHistory();
 ```
 
 ## Persistence Adapters

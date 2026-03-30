@@ -212,6 +212,132 @@ const events = await runtime.getAvailableEvents({
 });
 ```
 
+### getInstance()
+
+Returns a workflow instance by UUID, or `null` if not found.
+
+```ts
+async getInstance(uuid: string): Promise<WorkflowInstance | null>
+```
+
+**Example:**
+
+```ts
+const instance = await runtime.getInstance("a1b2c3d4-...");
+if (instance) {
+  console.log(instance.currentState); // "exportable"
+  console.log(instance.context); // { paymentStatus: "paid" }
+}
+```
+
+### getHistory()
+
+Returns the transition history for a workflow instance.
+
+```ts
+async getHistory(
+  workflowInstanceUuid: string,
+  options?: { limit?: number; offset?: number },
+): Promise<WorkflowHistoryRecord[]>
+```
+
+**Parameters:**
+
+| Property               | Type     | Required | Description                            |
+| ---------------------- | -------- | -------- | -------------------------------------- |
+| `workflowInstanceUuid` | `string` | Yes      | The instance to query                  |
+| `options.limit`        | `number` | No       | Maximum number of records to return    |
+| `options.offset`       | `number` | No       | Number of records to skip (pagination) |
+
+**Example:**
+
+```ts
+const history = await runtime.getHistory(instance.uuid, { limit: 50 });
+for (const record of history) {
+  console.log(`${record.fromState} → ${record.toState} via ${record.eventName}`);
+}
+```
+
+### getHandle()
+
+Returns a `WorkflowHandle` -- a thin proxy that binds the instance UUID and delegates all operations to the runtime. The handle caches nothing; every method is a fresh call.
+
+```ts
+getHandle(uuid: string): WorkflowHandle
+```
+
+This method is **synchronous** -- it does not hit the database. It simply creates a `WorkflowHandle` that holds the UUID and a reference to the runtime.
+
+**Example:**
+
+```ts
+const handle = runtime.getHandle(instance.uuid);
+// Now use the handle instead of passing the UUID everywhere
+```
+
+See [WorkflowHandle](#workflowhandle) below for the full API.
+
+## WorkflowHandle
+
+A lightweight proxy that binds a workflow instance UUID and delegates all operations to the runtime. Inspired by Temporal's workflow handle pattern.
+
+The handle is the recommended way to interact with an existing workflow instance. It eliminates UUID repetition and provides a discoverable API.
+
+```ts
+import { WorkflowHandle } from "@duraflows/core";
+```
+
+**Key properties:**
+
+- **No cached state** -- every method call hits the persistence layer
+- **Synchronous creation** -- `getHandle()` does not query the database
+- **Safe to pass around** -- the handle is just a UUID + a runtime reference
+
+### API
+
+| Method                              | Returns                             | Description                           |
+| ----------------------------------- | ----------------------------------- | ------------------------------------- |
+| `getInstance()`                     | `Promise<WorkflowInstance \| null>` | Get the current instance data         |
+| `triggerEvent(eventName, options?)`  | `Promise<WorkflowExecutionResult>`  | Trigger an event on the instance      |
+| `getAvailableEvents()`              | `Promise<AvailableWorkflowEvent[]>` | Get events available in current state |
+| `getHistory(options?)`              | `Promise<WorkflowHistoryRecord[]>`  | Get transition history                |
+
+**`triggerEvent` options:**
+
+| Property          | Type                      | Required | Description                          |
+| ----------------- | ------------------------- | -------- | ------------------------------------ |
+| `subject`         | `unknown`                 | No       | Domain entity passed to commands     |
+| `triggerMetadata` | `Record<string, unknown>` | No       | Metadata about who/what triggered it |
+
+### Example
+
+```ts
+// Create an instance, then get a handle
+const instance = await runtime.createInstance({
+  workflowName: "order",
+  metadata: { orderId: "ORD-123" },
+});
+const handle = runtime.getHandle(instance.uuid);
+
+// Read current state
+const current = await handle.getInstance();
+console.log(current?.currentState); // "new"
+
+// Check what events are available
+const events = await handle.getAvailableEvents();
+console.log(events.map((e) => e.eventName)); // ["PaymentReceived", "Cancel"]
+
+// Trigger an event
+const result = await handle.triggerEvent("PaymentReceived", {
+  subject: orderEntity,
+  triggerMetadata: { source: "webhook" },
+});
+console.log(result.toState); // "exportable"
+
+// View history
+const history = await handle.getHistory({ limit: 10 });
+```
+
 ## WorkflowValidator
 
 Validates a workflow definition for structural correctness.
