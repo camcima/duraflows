@@ -26,12 +26,9 @@ class CommandC {
 // discoverDecoratedCommands
 // ---------------------------------------------------------------------------
 
-function createMockDiscoveryService(
-  providers: Array<{ metadata: unknown; metatype: unknown }>,
-) {
+function createMockDiscoveryService(providers: Array<{ metadata: unknown; metatype: unknown }>) {
   return {
-    getProviders: () =>
-      providers.map((p) => ({ metatype: p.metatype })),
+    getProviders: () => providers.map((p) => ({ metatype: p.metatype })),
     getMetadataByDecorator: (_decorator: unknown, wrapper: any) => {
       const match = providers.find((p) => p.metatype === wrapper.metatype);
       return match?.metadata;
@@ -55,9 +52,7 @@ describe("discoverDecoratedCommands", () => {
 
   it("handles array metadata by extracting first element", () => {
     const result = discoverDecoratedCommands(
-      createMockDiscoveryService([
-        { metadata: ["array-cmd"], metatype: CommandA },
-      ]) as any,
+      createMockDiscoveryService([{ metadata: ["array-cmd"], metatype: CommandA }]) as any,
     );
 
     expect(result).toHaveLength(1);
@@ -77,18 +72,14 @@ describe("discoverDecoratedCommands", () => {
 
   it("skips providers with null metatype", () => {
     const result = discoverDecoratedCommands(
-      createMockDiscoveryService([
-        { metadata: "cmd-a", metatype: null },
-      ]) as any,
+      createMockDiscoveryService([{ metadata: "cmd-a", metatype: null }]) as any,
     );
 
     expect(result).toHaveLength(0);
   });
 
   it("returns empty array when no providers match", () => {
-    const result = discoverDecoratedCommands(
-      createMockDiscoveryService([]) as any,
-    );
+    const result = discoverDecoratedCommands(createMockDiscoveryService([]) as any);
 
     expect(result).toHaveLength(0);
   });

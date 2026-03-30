@@ -1,9 +1,6 @@
 import "reflect-metadata";
 import { describe, it, expect } from "vitest";
-import {
-  WorkflowCommand,
-  WORKFLOW_COMMAND_METADATA_KEY,
-} from "../../src/decorators/workflow-command.decorator.js";
+import { WorkflowCommand, WORKFLOW_COMMAND_METADATA_KEY } from "../../src/decorators/workflow-command.decorator.js";
 
 describe("WorkflowCommand decorator", () => {
   it("applies @Injectable metadata to the target class", () => {

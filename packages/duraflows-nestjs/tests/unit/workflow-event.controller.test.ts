@@ -16,10 +16,10 @@ describe("WorkflowEventController", () => {
   it("triggerEvent() delegates to workflowService.triggerEvent()", async () => {
     const { controller, workflowService } = createMocks();
 
-    const result = await controller.triggerEvent(
-      { workflowInstanceUuid: "uuid-1", eventName: "approve" },
-      { subject: { amount: 100 }, triggerMetadata: { actor: "admin" } } as any,
-    );
+    const result = await controller.triggerEvent({ workflowInstanceUuid: "uuid-1", eventName: "approve" }, {
+      subject: { amount: 100 },
+      triggerMetadata: { actor: "admin" },
+    } as any);
 
     expect(workflowService.triggerEvent).toHaveBeenCalledWith({
       workflowInstanceUuid: "uuid-1",
@@ -33,10 +33,7 @@ describe("WorkflowEventController", () => {
   it("triggerEvent() passes undefined for optional body fields", async () => {
     const { controller, workflowService } = createMocks();
 
-    await controller.triggerEvent(
-      { workflowInstanceUuid: "uuid-1", eventName: "approve" },
-      {} as any,
-    );
+    await controller.triggerEvent({ workflowInstanceUuid: "uuid-1", eventName: "approve" }, {} as any);
 
     expect(workflowService.triggerEvent).toHaveBeenCalledWith({
       workflowInstanceUuid: "uuid-1",
