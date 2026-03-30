@@ -55,6 +55,25 @@ npm install @duraflows/nestjs
 
 ### Define a Workflow
 
+```mermaid
+stateDiagram-v2
+    [*] --> new
+    new --> exportable : PaymentReceived
+    new --> cancelled : Cancel
+
+    exportable --> exported : Export
+    exportable --> export_failed : Export (error)
+
+    exported --> delivered : Deliver
+
+    delivered --> closed : ⏰ TimeOut (14 days)
+
+    export_failed --> exportable : RetryExport
+
+    closed --> [*]
+    cancelled --> [*]
+```
+
 ```ts
 import type { WorkflowDefinition } from "@duraflows/core";
 
