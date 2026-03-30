@@ -120,12 +120,12 @@ export class SendToWarehouseCommand implements IWorkflowCommand {
 
 When `enableControllers: true` is set, the following endpoints are registered:
 
-| Controller | Endpoints |
-| --- | --- |
+| Controller                   | Endpoints                              |
+| ---------------------------- | -------------------------------------- |
 | `WorkflowInstanceController` | Create and retrieve workflow instances |
-| `WorkflowEventController` | Trigger events on instances |
-| `WorkflowQueryController` | Query available events and history |
-| `WorkflowTimeoutController` | Process expired workflows |
+| `WorkflowEventController`    | Trigger events on instances            |
+| `WorkflowQueryController`    | Query available events and history     |
+| `WorkflowTimeoutController`  | Process expired workflows              |
 
 ## Documentation
 

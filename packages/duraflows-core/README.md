@@ -77,11 +77,7 @@ class SendToWarehouseCommand implements WorkflowCommand {
 ### Wire It Up
 
 ```ts
-import {
-  WorkflowRuntime,
-  InMemoryDefinitionRegistry,
-  InMemoryCommandRegistry,
-} from "@duraflows/core";
+import { WorkflowRuntime, InMemoryDefinitionRegistry, InMemoryCommandRegistry } from "@duraflows/core";
 
 const definitionRegistry = new InMemoryDefinitionRegistry();
 definitionRegistry.register(orderWorkflow);
@@ -92,9 +88,9 @@ commandRegistry.register("sendToWarehouse", new SendToWarehouseCommand());
 const runtime = new WorkflowRuntime({
   definitionRegistry,
   commandRegistry,
-  instanceStore,       // implements WorkflowInstanceStore
-  historyStore,        // implements WorkflowHistoryStore
-  transactionRunner,   // implements WorkflowTransactionRunner
+  instanceStore, // implements WorkflowInstanceStore
+  historyStore, // implements WorkflowHistoryStore
+  transactionRunner, // implements WorkflowTransactionRunner
   clock: { now: () => new Date() },
 });
 
@@ -114,9 +110,9 @@ const history = await handle.getHistory();
 
 The core package defines the persistence interfaces. Use one of the official adapters or build your own:
 
-| Package | Description |
-| --- | --- |
-| [`@duraflows/pg`](https://www.npmjs.com/package/@duraflows/pg) | PostgreSQL adapter using `pg` |
+| Package                                                                | Description                                                    |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------- |
+| [`@duraflows/pg`](https://www.npmjs.com/package/@duraflows/pg)         | PostgreSQL adapter using `pg`                                  |
 | [`@duraflows/nestjs`](https://www.npmjs.com/package/@duraflows/nestjs) | NestJS module with DI, services, and optional REST controllers |
 
 To build a custom adapter, implement these interfaces:

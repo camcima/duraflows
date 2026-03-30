@@ -209,13 +209,13 @@ export class OrderService {
 
 **Methods:**
 
-| Method                       | Parameters                    | Returns                             | Description                                      |
-| ---------------------------- | ----------------------------- | ----------------------------------- | ------------------------------------------------ |
-| `createInstance(input)`      | `CreateWorkflowInstanceInput` | `Promise<WorkflowInstance>`         | Create a new workflow instance                   |
-| `triggerEvent(input)`        | `TriggerWorkflowEventInput`   | `Promise<WorkflowExecutionResult>`  | Trigger an event on an instance                  |
-| `getAvailableEvents(input)`  | `GetAvailableEventsInput`     | `Promise<AvailableWorkflowEvent[]>` | Get events available for an instance             |
-| `getInstance(uuid)`          | `string`                      | `Promise<WorkflowInstance \| null>` | Get instance by UUID                             |
-| `getHistory(uuid, options?)` | `string, { limit?, offset? }` | `Promise<WorkflowHistoryRecord[]>`  | Get history for an instance                      |
+| Method                       | Parameters                    | Returns                             | Description                                |
+| ---------------------------- | ----------------------------- | ----------------------------------- | ------------------------------------------ |
+| `createInstance(input)`      | `CreateWorkflowInstanceInput` | `Promise<WorkflowInstance>`         | Create a new workflow instance             |
+| `triggerEvent(input)`        | `TriggerWorkflowEventInput`   | `Promise<WorkflowExecutionResult>`  | Trigger an event on an instance            |
+| `getAvailableEvents(input)`  | `GetAvailableEventsInput`     | `Promise<AvailableWorkflowEvent[]>` | Get events available for an instance       |
+| `getInstance(uuid)`          | `string`                      | `Promise<WorkflowInstance \| null>` | Get instance by UUID                       |
+| `getHistory(uuid, options?)` | `string, { limit?, offset? }` | `Promise<WorkflowHistoryRecord[]>`  | Get history for an instance                |
 | `getHandle(uuid)`            | `string`                      | `WorkflowHandle`                    | Get a thin proxy handle (sync, no DB call) |
 
 **Example using WorkflowHandle (recommended):**

@@ -20,8 +20,8 @@ A durable workflow runtime for TypeScript built on top of [@camcima/finita](http
 
 Designed as a family of three packages:
 
-| Package                     | Purpose                                                                    |
-| --------------------------- | -------------------------------------------------------------------------- |
+| Package             | Purpose                                                                    |
+| ------------------- | -------------------------------------------------------------------------- |
 | `@duraflows/core`   | Framework-agnostic runtime, types, and persistence interfaces              |
 | `@duraflows/pg`     | PostgreSQL persistence adapter using `pg`                                  |
 | `@duraflows/nestjs` | NestJS module integration with DI, services, and optional REST controllers |
@@ -327,13 +327,13 @@ npx skills add camcima/duraflows-skills
 
 This installs 5 skills that automatically activate when the agent detects duraflows-related code or workflow-building requests:
 
-| Skill | Description |
-|-------|-------------|
-| `duraflows-developer` | API patterns, deterministic guardrails, and anti-patterns |
-| `duraflows-builder` | Translates natural-language requirements into workflow implementations |
-| `duraflows-tester` | Testing patterns: clock injection, in-memory stores, command mocking |
-| `duraflows-persistence-adapter` | Guide for implementing custom persistence adapters |
-| `duraflows-reviewer` | Code review checklist for workflow definitions and commands |
+| Skill                           | Description                                                            |
+| ------------------------------- | ---------------------------------------------------------------------- |
+| `duraflows-developer`           | API patterns, deterministic guardrails, and anti-patterns              |
+| `duraflows-builder`             | Translates natural-language requirements into workflow implementations |
+| `duraflows-tester`              | Testing patterns: clock injection, in-memory stores, command mocking   |
+| `duraflows-persistence-adapter` | Guide for implementing custom persistence adapters                     |
+| `duraflows-reviewer`            | Code review checklist for workflow definitions and commands            |
 
 ## Architecture
 

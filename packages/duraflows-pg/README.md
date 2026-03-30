@@ -101,6 +101,7 @@ Factory function that creates all required persistence providers from a `pg` Poo
 Generates SQL for creating/dropping the schema.
 
 Options:
+
 - `uuidStrategy` -- `"gen_random_uuid"` (default, PG 13+) or `"uuidv7"` (PG 18+)
 
 ## Documentation

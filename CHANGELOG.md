@@ -4,7 +4,7 @@
 
 ### Features
 
-* add WorkflowHandle thin-proxy pattern ([c1fd11b](https://github.com/camcima/duraflows/commit/c1fd11b925058a493faa80412a4827042a81bc99))
+- add WorkflowHandle thin-proxy pattern ([c1fd11b](https://github.com/camcima/duraflows/commit/c1fd11b925058a493faa80412a4827042a81bc99))
 
 ## [0.0.2](https://github.com/camcima/duraflows/compare/v0.0.1...v0.0.2) (2026-03-28)
 

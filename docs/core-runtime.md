@@ -298,7 +298,7 @@ import { WorkflowHandle } from "@duraflows/core";
 | Method                              | Returns                             | Description                           |
 | ----------------------------------- | ----------------------------------- | ------------------------------------- |
 | `getInstance()`                     | `Promise<WorkflowInstance \| null>` | Get the current instance data         |
-| `triggerEvent(eventName, options?)`  | `Promise<WorkflowExecutionResult>`  | Trigger an event on the instance      |
+| `triggerEvent(eventName, options?)` | `Promise<WorkflowExecutionResult>`  | Trigger an event on the instance      |
 | `getAvailableEvents()`              | `Promise<AvailableWorkflowEvent[]>` | Get events available in current state |
 | `getHistory(options?)`              | `Promise<WorkflowHistoryRecord[]>`  | Get transition history                |
 
