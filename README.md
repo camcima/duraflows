@@ -317,6 +317,24 @@ See the [Persistence Guide](docs/persistence.md) for details and examples.
 | [NestJS Integration](docs/nestjs-integration.md)     | Module, services, controllers, DI tokens                 |
 | [Error Handling](docs/error-handling.md)             | Error types, when they occur, how to handle them         |
 
+## AI Agent Skills
+
+If you use AI coding agents (Claude Code, Cursor, Copilot, etc.), install the [duraflows agent skills](https://github.com/camcima/duraflows-skills) to give your agent domain knowledge about duraflows APIs, patterns, and best practices:
+
+```bash
+npx skills add camcima/duraflows-skills
+```
+
+This installs 5 skills that automatically activate when the agent detects duraflows-related code or workflow-building requests:
+
+| Skill | Description |
+|-------|-------------|
+| `duraflows-developer` | API patterns, deterministic guardrails, and anti-patterns |
+| `duraflows-builder` | Translates natural-language requirements into workflow implementations |
+| `duraflows-tester` | Testing patterns: clock injection, in-memory stores, command mocking |
+| `duraflows-persistence-adapter` | Guide for implementing custom persistence adapters |
+| `duraflows-reviewer` | Code review checklist for workflow definitions and commands |
+
 ## Architecture
 
 ```mermaid
