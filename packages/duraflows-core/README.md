@@ -14,6 +14,7 @@ Part of the [duraflows](https://github.com/camcima/duraflows) monorepo.
 - Immutable metadata for identity labels that never change after creation
 - Full audit history of every transition with command results
 - Persistence-agnostic -- bring your own database adapter
+- Mermaid diagram generation from workflow definitions
 
 ## Installation
 

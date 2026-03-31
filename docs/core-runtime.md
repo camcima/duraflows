@@ -601,6 +601,64 @@ getTimeoutEventName(definition: WorkflowDefinition, stateName: string): string |
 
 Returns the name of the event that has a `timeout` definition on the given state, or `null`.
 
+## toMermaidDiagram
+
+Generates a [Mermaid](https://mermaid.js.org/) flowchart diagram from a workflow definition. The output visualizes states, events, error paths, timeouts, onEnter auto-transitions, and optionally command names.
+
+```ts
+import { toMermaidDiagram } from "@duraflows/core";
+```
+
+### Signature
+
+```ts
+function toMermaidDiagram(definition: WorkflowDefinition, options?: MermaidDiagramOptions): string;
+```
+
+### MermaidDiagramOptions
+
+| Option               | Type           | Default | Description                                 |
+| -------------------- | -------------- | ------- | ------------------------------------------- |
+| `showCommands`       | `boolean`      | `false` | Show command names on event nodes           |
+| `showTimeouts`       | `boolean`      | `true`  | Show timeout durations with hourglass icon  |
+| `showOnEnter`        | `boolean`      | `true`  | Show onEnter auto-transition nodes          |
+| `showTerminalStates` | `boolean`      | `true`  | Show terminal state markers (end node)      |
+| `direction`          | `"TB" \| "LR"` | `"TB"`  | Diagram direction: top-bottom or left-right |
+
+### Visual encoding
+
+- **States** are rendered as rectangles with bold text and a light grey background
+- **Events** are rendered as stadium (rounded) nodes between the source state and target state
+- **Success paths** (event → targetState) use green arrows
+- **Error paths** (event → errorState) use red dashed arrows
+- **Timeouts** show an hourglass icon with the duration (e.g., `fa:fa-hourglass 14d`)
+- **onEnter** auto-transitions are rendered as `fa:fa-bolt` nodes
+- **Terminal states** (no outbound events or onEnter targets) connect to an end node
+
+### Examples
+
+```ts
+// Default — clean overview
+const diagram = toMermaidDiagram(orderWorkflow);
+
+// Show command names
+const detailed = toMermaidDiagram(orderWorkflow, { showCommands: true });
+
+// Left-to-right layout, hide terminal markers
+const compact = toMermaidDiagram(orderWorkflow, {
+  direction: "LR",
+  showTerminalStates: false,
+});
+
+// Hide auto-transitions and timeouts
+const minimal = toMermaidDiagram(orderWorkflow, {
+  showOnEnter: false,
+  showTimeouts: false,
+});
+```
+
+The returned string is valid Mermaid `flowchart` syntax. Paste it into any Mermaid-compatible renderer (GitHub markdown, mermaid.live, Docusaurus, etc.).
+
 ## WorkflowCommand Interface
 
 Command handlers implement this interface:

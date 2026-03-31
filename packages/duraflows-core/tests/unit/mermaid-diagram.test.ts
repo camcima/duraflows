@@ -77,46 +77,80 @@ const orderWorkflow: WorkflowDefinition = {
 describe("toMermaidDiagram", () => {
   it("renders a minimal single-state workflow", () => {
     const result = toMermaidDiagram(minimalWorkflow);
-    expect(result).toBe(["stateDiagram-v2", "", "    [*] --> only", "", "    only --> [*]", ""].join("\n"));
+    expect(result).toContain("flowchart TB");
+    expect(result).toContain("_start@{ shape: sm-circ }");
+    expect(result).toContain('only["<b>only</b>"]:::stateNode');
+    expect(result).toContain("_start --> only");
+    expect(result).toContain("only --> _end");
+    expect(result).toContain("_end@{ shape: framed-circle }");
   });
 
-  it("renders a simple two-state workflow", () => {
+  it("renders a simple two-state workflow with event nodes", () => {
     const result = toMermaidDiagram(twoStateWorkflow);
-    expect(result).toBe(
-      ["stateDiagram-v2", "", "    [*] --> open", "", "    open --> closed : Close", "", "    closed --> [*]", ""].join(
-        "\n",
-      ),
-    );
+    expect(result).toContain('open["<b>open</b>"]:::stateNode');
+    expect(result).toContain('closed["<b>closed</b>"]:::stateNode');
+    expect(result).toContain('open__Close(["Close"])');
+    expect(result).toContain("open --> open__Close");
+    expect(result).toContain("open__Close --> closed");
+    expect(result).toContain("closed --> _end");
   });
 
   it("renders the full order workflow (golden-file test)", () => {
     const result = toMermaidDiagram(orderWorkflow);
     expect(result).toBe(
       [
-        "stateDiagram-v2",
+        "flowchart TB",
         "",
-        "    [*] --> new",
+        "    classDef stateNode fill:#f1f5f9,stroke:#64748b,stroke-width:2px,color:#1e293b,font-size:20px",
         "",
-        "    new --> exportable : PaymentReceived",
-        "    new --> cancelled : Cancel",
+        "    _start@{ shape: sm-circ }",
+        '    new["<b>new</b>"]:::stateNode',
+        '    exportable["<b>exportable</b>"]:::stateNode',
+        '    exported["<b>exported</b>"]:::stateNode',
+        '    delivered["<b>delivered</b>"]:::stateNode',
+        '    closed["<b>closed</b>"]:::stateNode',
+        '    cancelled["<b>cancelled</b>"]:::stateNode',
+        '    export_failed["<b>export_failed</b>"]:::stateNode',
+        "    _end@{ shape: framed-circle }",
         "",
-        "    exportable --> exported : Export",
-        "    exportable --> export_failed : Export [error]",
+        "    _start --> new",
         "",
-        "    exported --> delivered : Deliver",
+        '    new__PaymentReceived(["PaymentReceived"])',
+        "    new --> new__PaymentReceived",
+        "    new__PaymentReceived --> exportable",
+        '    new__Cancel(["Cancel"])',
+        "    new --> new__Cancel",
+        "    new__Cancel --> cancelled",
         "",
-        "    delivered --> closed : TimeOut (14d)",
+        '    exportable__Export(["Export"])',
+        "    exportable --> exportable__Export",
+        "    exportable__Export --> exported",
+        "    exportable__Export --> export_failed",
         "",
-        "    export_failed --> exportable : RetryExport",
+        '    exported__Deliver(["Deliver"])',
+        "    exported --> exported__Deliver",
+        "    exported__Deliver --> delivered",
         "",
-        "    closed --> [*]",
-        "    cancelled --> [*]",
+        '    delivered__TimeOut(["TimeOut fa:fa-hourglass 14d"])',
+        "    delivered --> delivered__TimeOut",
+        "    delivered__TimeOut --> closed",
+        "",
+        '    export_failed__RetryExport(["RetryExport"])',
+        "    export_failed --> export_failed__RetryExport",
+        "    export_failed__RetryExport --> exportable",
+        "",
+        "    closed --> _end",
+        "    cancelled --> _end",
+        "",
+        "    linkStyle 0,1,3,5,8,10,12,14,15 stroke-width:3px",
+        "    linkStyle 2,4,6,9,11,13 stroke:#22c55e,stroke-width:3px",
+        "    linkStyle 7 stroke:#dc3545,stroke-width:3px,stroke-dasharray:5",
         "",
       ].join("\n"),
     );
   });
 
-  it("shows error transitions with [error] suffix", () => {
+  it("uses separate arrows for success and error paths", () => {
     const def: WorkflowDefinition = {
       name: "error-test",
       initialState: "a",
@@ -131,8 +165,12 @@ describe("toMermaidDiagram", () => {
       },
     };
     const result = toMermaidDiagram(def);
-    expect(result).toContain("a --> b : Go");
-    expect(result).toContain("a --> c : Go [error]");
+    expect(result).toContain('a__Go(["Go"])');
+    expect(result).toContain("a --> a__Go");
+    expect(result).toContain("a__Go --> b");
+    expect(result).toContain("a__Go --> c");
+    expect(result).toContain("stroke:#22c55e");
+    expect(result).toContain("stroke:#dc3545");
   });
 
   it("renders event with only errorState (no targetState)", () => {
@@ -149,13 +187,58 @@ describe("toMermaidDiagram", () => {
       },
     };
     const result = toMermaidDiagram(def);
-    expect(result).toContain("a --> err : Fail [error]");
-    expect(result).not.toContain("a --> undefined");
+    expect(result).toContain("a__Fail --> err");
+    expect(result).toContain("stroke:#dc3545");
+    expect(result).not.toContain("stroke:#22c55e");
+  });
+});
+
+describe("edge coloring", () => {
+  it("applies green linkStyle to success edges and red to error edges", () => {
+    const def: WorkflowDefinition = {
+      name: "multi-error",
+      initialState: "a",
+      states: {
+        a: {
+          events: {
+            Go: { targetState: "b", errorState: "c" },
+            Try: { targetState: "d", errorState: "e" },
+          },
+        },
+        b: {},
+        c: {},
+        d: {},
+        e: {},
+      },
+    };
+    const result = toMermaidDiagram(def);
+    // Edge 0: _start --> a (plain)
+    // Edge 1: a --> a__Go (plain)
+    // Edge 2: a__Go --> b (green)
+    // Edge 3: a__Go --> c (red)
+    // Edge 4: a --> a__Try (plain)
+    // Edge 5: a__Try --> d (green)
+    // Edge 6: a__Try --> e (red)
+    // Edge 7: b --> _end (plain)
+    // Edge 8: c --> _end (plain)
+    // Edge 9: d --> _end (plain)
+    // Edge 10: e --> _end (plain)
+    expect(result).toContain("linkStyle 0,1,4,7,8,9,10 stroke-width:3px");
+    expect(result).toContain("linkStyle 2,5 stroke:#22c55e,stroke-width:3px");
+    expect(result).toContain("linkStyle 3,6 stroke:#dc3545,stroke-width:3px,stroke-dasharray:5");
+  });
+
+  it("omits colored linkStyle when there are no events with targets", () => {
+    const result = toMermaidDiagram(minimalWorkflow);
+    expect(result).not.toContain("stroke:#22c55e");
+    expect(result).not.toContain("stroke:#dc3545");
+    // But still has plain linkStyle
+    expect(result).toContain("linkStyle");
   });
 });
 
 describe("timeout formatting", () => {
-  it("formats days only", () => {
+  it("formats days with hourglass emoji", () => {
     const def: WorkflowDefinition = {
       name: "t",
       initialState: "a",
@@ -168,7 +251,7 @@ describe("timeout formatting", () => {
         b: {},
       },
     };
-    expect(toMermaidDiagram(def)).toContain("Expire (14d)");
+    expect(toMermaidDiagram(def)).toContain("Expire fa:fa-hourglass 14d");
   });
 
   it("formats hours and minutes", () => {
@@ -187,7 +270,7 @@ describe("timeout formatting", () => {
         b: {},
       },
     };
-    expect(toMermaidDiagram(def)).toContain("Expire (2h 30m)");
+    expect(toMermaidDiagram(def)).toContain("Expire fa:fa-hourglass 2h 30m");
   });
 
   it("formats days and hours", () => {
@@ -206,7 +289,7 @@ describe("timeout formatting", () => {
         b: {},
       },
     };
-    expect(toMermaidDiagram(def)).toContain("Expire (1d 12h)");
+    expect(toMermaidDiagram(def)).toContain("Expire fa:fa-hourglass 1d 12h");
   });
 
   it("hides timeout when showTimeouts is false", () => {
@@ -223,8 +306,8 @@ describe("timeout formatting", () => {
       },
     };
     const result = toMermaidDiagram(def, { showTimeouts: false });
-    expect(result).toContain("a --> b : Expire");
-    expect(result).not.toContain("7d");
+    expect(result).toContain('(["Expire"])');
+    expect(result).not.toContain("fa:fa-hourglass");
   });
 });
 
@@ -247,18 +330,18 @@ describe("showCommands option", () => {
 
   it("hides commands by default", () => {
     const result = toMermaidDiagram(def);
-    expect(result).toContain("a --> b : Go");
+    expect(result).toContain('(["Go"])');
     expect(result).not.toContain("doX");
   });
 
-  it("shows commands when enabled", () => {
+  it("shows commands on separate lines in small italic when enabled", () => {
     const result = toMermaidDiagram(def, { showCommands: true });
-    expect(result).toContain("a --> b : Go<br/>doX, doY");
+    expect(result).toContain("Go<br/><small><i>doX<br/>doY</i></small>");
   });
 });
 
 describe("onEnter transitions", () => {
-  it("renders onEnter auto-transition with &#171;auto&#187; label", () => {
+  it("renders onEnter as fa:fa-bolt event node", () => {
     const def: WorkflowDefinition = {
       name: "on-enter",
       initialState: "a",
@@ -273,10 +356,12 @@ describe("onEnter transitions", () => {
       },
     };
     const result = toMermaidDiagram(def);
-    expect(result).toContain("b --> c : &#171;auto&#187;");
+    expect(result).toContain('b__onEnter(["fa:fa-bolt"])');
+    expect(result).toContain("b --> b__onEnter");
+    expect(result).toContain("b__onEnter --> c");
   });
 
-  it("renders onEnter error transition", () => {
+  it("renders onEnter error as red arrow from event node", () => {
     const def: WorkflowDefinition = {
       name: "on-enter-err",
       initialState: "a",
@@ -296,8 +381,10 @@ describe("onEnter transitions", () => {
       },
     };
     const result = toMermaidDiagram(def);
-    expect(result).toContain("b --> c : &#171;auto&#187;");
-    expect(result).toContain("b --> d : &#171;auto&#187; [error]");
+    expect(result).toContain("b__onEnter --> c");
+    expect(result).toContain("b__onEnter --> d");
+    expect(result).toContain("stroke:#22c55e");
+    expect(result).toContain("stroke:#dc3545");
   });
 
   it("hides onEnter when showOnEnter is false", () => {
@@ -315,11 +402,11 @@ describe("onEnter transitions", () => {
       },
     };
     const result = toMermaidDiagram(def, { showOnEnter: false });
-    expect(result).not.toContain("&#171;auto&#187;");
-    expect(result).not.toContain("b --> c");
+    expect(result).not.toContain("fa:fa-bolt");
+    expect(result).not.toContain("b__onEnter");
   });
 
-  it("shows commands on onEnter when showCommands is true", () => {
+  it("shows commands on separate lines in small italic on onEnter when showCommands is true", () => {
     const def: WorkflowDefinition = {
       name: "on-enter-cmds",
       initialState: "a",
@@ -334,19 +421,19 @@ describe("onEnter transitions", () => {
       },
     };
     const result = toMermaidDiagram(def, { showCommands: true });
-    expect(result).toContain("a --> b : &#171;auto&#187;<br/>init, setup");
+    expect(result).toContain("fa:fa-bolt<br/><small><i>init<br/>setup</i></small>");
   });
 });
 
 describe("terminal state detection", () => {
   it("marks states with no events and no onEnter targetState as terminal", () => {
     const result = toMermaidDiagram(twoStateWorkflow);
-    expect(result).toContain("closed --> [*]");
+    expect(result).toContain("closed --> _end");
   });
 
   it("does not mark states with events as terminal", () => {
     const result = toMermaidDiagram(twoStateWorkflow);
-    expect(result).not.toContain("open --> [*]");
+    expect(result).not.toContain("open --> _end");
   });
 
   it("does not mark states with onEnter targetState as terminal", () => {
@@ -361,32 +448,59 @@ describe("terminal state detection", () => {
       },
     };
     const result = toMermaidDiagram(def);
-    expect(result).not.toContain("a --> [*]");
-    expect(result).toContain("b --> [*]");
+    expect(result).not.toContain("a --> _end");
+    expect(result).toContain("b --> _end");
   });
 
   it("hides terminal markers when showTerminalStates is false", () => {
     const result = toMermaidDiagram(twoStateWorkflow, {
       showTerminalStates: false,
     });
-    expect(result).not.toContain("--> [*]");
+    expect(result).not.toContain("_end");
   });
 });
 
 describe("direction option", () => {
-  it("omits direction line for default TB", () => {
+  it("uses TB by default", () => {
     const result = toMermaidDiagram(minimalWorkflow);
-    expect(result).not.toContain("direction");
+    expect(result).toContain("flowchart TB");
   });
 
-  it("emits direction LR when specified", () => {
+  it("uses LR when specified", () => {
     const result = toMermaidDiagram(minimalWorkflow, { direction: "LR" });
-    expect(result).toContain("    direction LR");
+    expect(result).toContain("flowchart LR");
+  });
+});
+
+describe("node shapes", () => {
+  it("uses styled rectangles with bold text for states", () => {
+    const result = toMermaidDiagram(twoStateWorkflow);
+    expect(result).toContain('open["<b>open</b>"]:::stateNode');
+    expect(result).toContain('closed["<b>closed</b>"]:::stateNode');
+    expect(result).toContain(
+      "classDef stateNode fill:#f1f5f9,stroke:#64748b,stroke-width:2px,color:#1e293b,font-size:20px",
+    );
+  });
+
+  it("uses stadium (rounded) shape for event nodes", () => {
+    const result = toMermaidDiagram(twoStateWorkflow);
+    expect(result).toContain('open__Close(["Close"])');
+  });
+
+  it("uses sm-circ for start and framed-circle for end", () => {
+    const result = toMermaidDiagram(minimalWorkflow);
+    expect(result).toContain("_start@{ shape: sm-circ }");
+    expect(result).toContain("_end@{ shape: framed-circle }");
+  });
+
+  it("omits end node when showTerminalStates is false", () => {
+    const result = toMermaidDiagram(minimalWorkflow, { showTerminalStates: false });
+    expect(result).not.toContain("_end");
   });
 });
 
 describe("state with both events and onEnter", () => {
-  it("emits onEnter transitions before event transitions", () => {
+  it("emits onEnter node before event nodes", () => {
     const def: WorkflowDefinition = {
       name: "mixed",
       initialState: "a",
@@ -402,8 +516,8 @@ describe("state with both events and onEnter", () => {
       },
     };
     const result = toMermaidDiagram(def);
-    const autoIdx = result.indexOf("&#171;auto&#187;");
-    const skipIdx = result.indexOf("Skip");
+    const autoIdx = result.indexOf("a__onEnter");
+    const skipIdx = result.indexOf("a__Skip");
     expect(autoIdx).toBeLessThan(skipIdx);
   });
 });

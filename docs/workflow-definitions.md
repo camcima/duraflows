@@ -430,20 +430,62 @@ The cycle detection (rule 10) builds a directed graph from each state's `onEnter
 ## Complete Example
 
 ```mermaid
-stateDiagram-v2
-    [*] --> new
-    new --> exportable : PaymentReceived
-    new --> cancelled : Cancel
-    exportable --> exported : Export ✓
-    exportable --> export_failed : Export ✗
-    exported --> delivered : Deliver
-    delivered --> closed : AutoClose ⏱ 14d
-    delivered --> return_in_progress : ReturnRequested
-    export_failed --> exportable : RetryExport
-    return_in_progress --> returned : ReturnCompleted
-    closed --> [*]
-    cancelled --> [*]
-    returned --> [*]
+flowchart TB
+
+    classDef stateNode fill:#f1f5f9,stroke:#64748b,stroke-width:2px,color:#1e293b,font-size:20px
+
+    _start@{ shape: sm-circ }
+    new["<b>new</b>"]:::stateNode
+    exportable["<b>exportable</b>"]:::stateNode
+    exported["<b>exported</b>"]:::stateNode
+    delivered["<b>delivered</b>"]:::stateNode
+    closed["<b>closed</b>"]:::stateNode
+    cancelled["<b>cancelled</b>"]:::stateNode
+    export_failed["<b>export_failed</b>"]:::stateNode
+    return_in_progress["<b>return_in_progress</b>"]:::stateNode
+    returned["<b>returned</b>"]:::stateNode
+    _end@{ shape: framed-circle }
+
+    _start --> new
+
+    new__PaymentReceived(["PaymentReceived"])
+    new --> new__PaymentReceived
+    new__PaymentReceived --> exportable
+    new__Cancel(["Cancel"])
+    new --> new__Cancel
+    new__Cancel --> cancelled
+
+    exportable__Export(["Export"])
+    exportable --> exportable__Export
+    exportable__Export --> exported
+    exportable__Export --> export_failed
+
+    exported__Deliver(["Deliver"])
+    exported --> exported__Deliver
+    exported__Deliver --> delivered
+
+    delivered__AutoClose(["AutoClose fa:fa-hourglass 14d"])
+    delivered --> delivered__AutoClose
+    delivered__AutoClose --> closed
+    delivered__ReturnRequested(["ReturnRequested"])
+    delivered --> delivered__ReturnRequested
+    delivered__ReturnRequested --> return_in_progress
+
+    export_failed__RetryExport(["RetryExport"])
+    export_failed --> export_failed__RetryExport
+    export_failed__RetryExport --> exportable
+
+    return_in_progress__ReturnCompleted(["ReturnCompleted"])
+    return_in_progress --> return_in_progress__ReturnCompleted
+    return_in_progress__ReturnCompleted --> returned
+
+    closed --> _end
+    cancelled --> _end
+    returned --> _end
+
+    linkStyle 0,1,3,5,8,10,12,14,16,18,19,20 stroke-width:3px
+    linkStyle 2,4,6,9,11,13,15,17 stroke:#22c55e,stroke-width:3px
+    linkStyle 7 stroke:#dc3545,stroke-width:3px,stroke-dasharray:5
 ```
 
 ```ts

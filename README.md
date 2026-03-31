@@ -37,6 +37,7 @@ Designed as a family of three packages:
 - **Row-level locking** for concurrent access safety
 - **Persistence-agnostic core** -- bring your own database library (pg, Prisma, Drizzle, TypeORM)
 - **NestJS integration** with dependency injection, services, and optional REST controllers
+- **Mermaid diagram generation** from workflow definitions with customizable options
 
 ## Installation
 
@@ -56,23 +57,55 @@ npm install @duraflows/nestjs
 ### Define a Workflow
 
 ```mermaid
-stateDiagram-v2
-    [*] --> new
-    new --> exportable : PaymentReceived
-    new --> cancelled : Cancel
+flowchart TB
 
-    exportable --> exported : Export
-    exportable --> export_failed : Export (error)
+    classDef stateNode fill:#f1f5f9,stroke:#64748b,stroke-width:2px,color:#1e293b,font-size:20px
 
-    exported --> delivered : Deliver
+    _start@{ shape: sm-circ }
+    new["<b>new</b>"]:::stateNode
+    exportable["<b>exportable</b>"]:::stateNode
+    exported["<b>exported</b>"]:::stateNode
+    delivered["<b>delivered</b>"]:::stateNode
+    closed["<b>closed</b>"]:::stateNode
+    cancelled["<b>cancelled</b>"]:::stateNode
+    export_failed["<b>export_failed</b>"]:::stateNode
+    _end@{ shape: framed-circle }
 
-    delivered --> closed : ⏰ TimeOut (14 days)
+    _start --> new
 
-    export_failed --> exportable : RetryExport
+    new__PaymentReceived(["PaymentReceived"])
+    new --> new__PaymentReceived
+    new__PaymentReceived --> exportable
+    new__Cancel(["Cancel"])
+    new --> new__Cancel
+    new__Cancel --> cancelled
 
-    closed --> [*]
-    cancelled --> [*]
+    exportable__Export(["Export"])
+    exportable --> exportable__Export
+    exportable__Export --> exported
+    exportable__Export --> export_failed
+
+    exported__Deliver(["Deliver"])
+    exported --> exported__Deliver
+    exported__Deliver --> delivered
+
+    delivered__TimeOut(["TimeOut fa:fa-hourglass 14d"])
+    delivered --> delivered__TimeOut
+    delivered__TimeOut --> closed
+
+    export_failed__RetryExport(["RetryExport"])
+    export_failed --> export_failed__RetryExport
+    export_failed__RetryExport --> exportable
+
+    closed --> _end
+    cancelled --> _end
+
+    linkStyle 0,1,3,5,8,10,12,14,15 stroke-width:3px
+    linkStyle 2,4,6,9,11,13 stroke:#22c55e,stroke-width:3px
+    linkStyle 7 stroke:#dc3545,stroke-width:3px,stroke-dasharray:5
 ```
+
+> **Tip:** This diagram was generated with `toMermaidDiagram(orderWorkflow)` from `@duraflows/core`. See [Diagram Generation](#diagram-generation) below.
 
 ```ts
 import type { WorkflowDefinition } from "@duraflows/core";
@@ -264,6 +297,35 @@ const current = await handle.getInstance();
 const history = await handle.getHistory();
 ```
 
+## Diagram Generation
+
+Generate Mermaid diagrams from any workflow definition:
+
+```ts
+import { toMermaidDiagram } from "@duraflows/core";
+
+// Default options — clean overview
+const diagram = toMermaidDiagram(orderWorkflow);
+
+// Show command names and use left-to-right layout
+const detailed = toMermaidDiagram(orderWorkflow, {
+  showCommands: true,
+  direction: "LR",
+});
+```
+
+**Options:**
+
+| Option               | Default | Description                                      |
+| -------------------- | ------- | ------------------------------------------------ |
+| `showCommands`       | `false` | Show command names on event nodes                |
+| `showTimeouts`       | `true`  | Show timeout durations with hourglass icon       |
+| `showOnEnter`        | `true`  | Show onEnter auto-transition nodes               |
+| `showTerminalStates` | `true`  | Show terminal state markers (end node)           |
+| `direction`          | `"TB"`  | Diagram direction: `"TB"` (top-bottom) or `"LR"` |
+
+The output is valid Mermaid `flowchart` syntax. Paste it into any Mermaid renderer (GitHub markdown, mermaid.live, documentation tools) to visualize your workflow.
+
 ## Database Setup
 
 The `@duraflows/pg` package provides two ways to set up the database schema:
@@ -312,7 +374,7 @@ See the [Persistence Guide](docs/persistence.md) for details and examples.
 | ---------------------------------------------------- | -------------------------------------------------------- |
 | [Getting Started](docs/getting-started.md)           | Installation, database setup, first workflow             |
 | [Workflow Definitions](docs/workflow-definitions.md) | States, events, commands, timeouts, context and metadata |
-| [Core Runtime API](docs/core-runtime.md)             | WorkflowRuntime, compiler, validator, executors          |
+| [Core Runtime API](docs/core-runtime.md)             | WorkflowRuntime, compiler, validator, executors, diagram |
 | [Persistence](docs/persistence.md)                   | Interfaces, pg adapter, custom adapters                  |
 | [NestJS Integration](docs/nestjs-integration.md)     | Module, services, controllers, DI tokens                 |
 | [Error Handling](docs/error-handling.md)             | Error types, when they occur, how to handle them         |
