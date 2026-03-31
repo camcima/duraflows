@@ -65,6 +65,10 @@ export { OnEnterExecutor } from "./execution/on-enter-executor.js";
 export type { OnEnterChainResult, OnEnterHopResult } from "./execution/on-enter-executor.js";
 export { TimeoutResolver } from "./execution/timeout-resolver.js";
 
+// Diagram
+export { toMermaidDiagram } from "./diagram/mermaid-diagram.js";
+export type { MermaidDiagramOptions } from "./diagram/mermaid-diagram.js";
+
 // Runtime
 export { WorkflowRuntime } from "./runtime/workflow-runtime.js";
 export type { WorkflowRuntimeOptions } from "./runtime/workflow-runtime.js";
