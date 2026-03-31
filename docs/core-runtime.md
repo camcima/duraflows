@@ -620,7 +620,6 @@ function toMermaidDiagram(definition: WorkflowDefinition, options?: MermaidDiagr
 | Option               | Type           | Default | Description                                 |
 | -------------------- | -------------- | ------- | ------------------------------------------- |
 | `showCommands`       | `boolean`      | `false` | Show command names on event nodes           |
-| `showTimeouts`       | `boolean`      | `true`  | Show timeout durations with hourglass icon  |
 | `showOnEnter`        | `boolean`      | `true`  | Show onEnter auto-transition nodes          |
 | `showTerminalStates` | `boolean`      | `true`  | Show terminal state markers (end node)      |
 | `direction`          | `"TB" \| "LR"` | `"TB"`  | Diagram direction: top-bottom or left-right |
@@ -650,10 +649,9 @@ const compact = toMermaidDiagram(orderWorkflow, {
   showTerminalStates: false,
 });
 
-// Hide auto-transitions and timeouts
+// Hide auto-transitions
 const minimal = toMermaidDiagram(orderWorkflow, {
   showOnEnter: false,
-  showTimeouts: false,
 });
 ```
 

@@ -319,7 +319,6 @@ const detailed = toMermaidDiagram(orderWorkflow, {
 | Option               | Default | Description                                      |
 | -------------------- | ------- | ------------------------------------------------ |
 | `showCommands`       | `false` | Show command names on event nodes                |
-| `showTimeouts`       | `true`  | Show timeout durations with hourglass icon       |
 | `showOnEnter`        | `true`  | Show onEnter auto-transition nodes               |
 | `showTerminalStates` | `true`  | Show terminal state markers (end node)           |
 | `direction`          | `"TB"`  | Diagram direction: `"TB"` (top-bottom) or `"LR"` |

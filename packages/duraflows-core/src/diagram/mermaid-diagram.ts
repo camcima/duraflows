@@ -9,8 +9,6 @@ import type {
 export interface MermaidDiagramOptions {
   /** Include command names on event nodes. Default: false */
   showCommands?: boolean;
-  /** Include timeout durations on event nodes. Default: true */
-  showTimeouts?: boolean;
   /** Show onEnter auto-transitions. Default: true */
   showOnEnter?: boolean;
   /** Mark terminal states with end nodes. Default: true */
@@ -24,7 +22,6 @@ const INDENT = "    ";
 export function toMermaidDiagram(definition: WorkflowDefinition, options?: MermaidDiagramOptions): string {
   const opts: Required<MermaidDiagramOptions> = {
     showCommands: false,
-    showTimeouts: true,
     showOnEnter: true,
     showTerminalStates: true,
     direction: "TB",
@@ -149,7 +146,7 @@ function formatEventNodeLabel(
 ): string {
   let label = eventName;
 
-  if (opts.showTimeouts && eventDef.timeout) {
+  if (eventDef.timeout) {
     label += ` fa:fa-hourglass ${formatTimeout(eventDef.timeout)}`;
   }
 

@@ -291,24 +291,6 @@ describe("timeout formatting", () => {
     };
     expect(toMermaidDiagram(def)).toContain("Expire fa:fa-hourglass 1d 12h");
   });
-
-  it("hides timeout when showTimeouts is false", () => {
-    const def: WorkflowDefinition = {
-      name: "t",
-      initialState: "a",
-      states: {
-        a: {
-          events: {
-            Expire: { targetState: "b", timeout: { afterDays: 7 } },
-          },
-        },
-        b: {},
-      },
-    };
-    const result = toMermaidDiagram(def, { showTimeouts: false });
-    expect(result).toContain('(["Expire"])');
-    expect(result).not.toContain("fa:fa-hourglass");
-  });
 });
 
 describe("showCommands option", () => {
