@@ -131,7 +131,7 @@ describe("toMermaidDiagram", () => {
         "    exported --> exported__Deliver",
         "    exported__Deliver --> delivered",
         "",
-        '    delivered__TimeOut(["TimeOut fa:fa-hourglass 14d"])',
+        '    delivered__TimeOut(["TimeOut ⏳14d"])',
         "    delivered --> delivered__TimeOut",
         "    delivered__TimeOut --> closed",
         "",
@@ -251,7 +251,7 @@ describe("timeout formatting", () => {
         b: {},
       },
     };
-    expect(toMermaidDiagram(def)).toContain("Expire fa:fa-hourglass 14d");
+    expect(toMermaidDiagram(def)).toContain("Expire ⏳14d");
   });
 
   it("formats hours and minutes", () => {
@@ -270,7 +270,7 @@ describe("timeout formatting", () => {
         b: {},
       },
     };
-    expect(toMermaidDiagram(def)).toContain("Expire fa:fa-hourglass 2h 30m");
+    expect(toMermaidDiagram(def)).toContain("Expire ⏳2h 30m");
   });
 
   it("formats days and hours", () => {
@@ -289,7 +289,7 @@ describe("timeout formatting", () => {
         b: {},
       },
     };
-    expect(toMermaidDiagram(def)).toContain("Expire fa:fa-hourglass 1d 12h");
+    expect(toMermaidDiagram(def)).toContain("Expire ⏳1d 12h");
   });
 });
 
@@ -323,7 +323,7 @@ describe("showCommands option", () => {
 });
 
 describe("onEnter transitions", () => {
-  it("renders onEnter as fa:fa-bolt event node", () => {
+  it("renders onEnter as ⚡ event node", () => {
     const def: WorkflowDefinition = {
       name: "on-enter",
       initialState: "a",
@@ -338,7 +338,7 @@ describe("onEnter transitions", () => {
       },
     };
     const result = toMermaidDiagram(def);
-    expect(result).toContain('b__onEnter(["fa:fa-bolt"])');
+    expect(result).toContain('b__onEnter(["⚡"])');
     expect(result).toContain("b --> b__onEnter");
     expect(result).toContain("b__onEnter --> c");
   });
@@ -384,7 +384,7 @@ describe("onEnter transitions", () => {
       },
     };
     const result = toMermaidDiagram(def, { showCommands: true });
-    expect(result).toContain("fa:fa-bolt<br/><small><i>init<br/>setup</i></small>");
+    expect(result).toContain("⚡<br/><small><i>init<br/>setup</i></small>");
   });
 });
 

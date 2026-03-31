@@ -464,7 +464,7 @@ flowchart TB
     exported --> exported__Deliver
     exported__Deliver --> delivered
 
-    delivered__AutoClose(["AutoClose fa:fa-hourglass 14d"])
+    delivered__AutoClose(["AutoClose ⏳14d"])
     delivered --> delivered__AutoClose
     delivered__AutoClose --> closed
     delivered__ReturnRequested(["ReturnRequested"])
