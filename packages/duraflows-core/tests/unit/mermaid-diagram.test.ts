@@ -369,25 +369,6 @@ describe("onEnter transitions", () => {
     expect(result).toContain("stroke:#dc3545");
   });
 
-  it("hides onEnter when showOnEnter is false", () => {
-    const def: WorkflowDefinition = {
-      name: "on-enter-hidden",
-      initialState: "a",
-      states: {
-        a: {
-          events: { Go: { targetState: "b" } },
-        },
-        b: {
-          onEnter: { targetState: "c" },
-        },
-        c: {},
-      },
-    };
-    const result = toMermaidDiagram(def, { showOnEnter: false });
-    expect(result).not.toContain("fa:fa-bolt");
-    expect(result).not.toContain("b__onEnter");
-  });
-
   it("shows commands on separate lines in small italic on onEnter when showCommands is true", () => {
     const def: WorkflowDefinition = {
       name: "on-enter-cmds",
@@ -433,13 +414,6 @@ describe("terminal state detection", () => {
     expect(result).not.toContain("a --> _end");
     expect(result).toContain("b --> _end");
   });
-
-  it("hides terminal markers when showTerminalStates is false", () => {
-    const result = toMermaidDiagram(twoStateWorkflow, {
-      showTerminalStates: false,
-    });
-    expect(result).not.toContain("_end");
-  });
 });
 
 describe("direction option", () => {
@@ -473,11 +447,6 @@ describe("node shapes", () => {
     const result = toMermaidDiagram(minimalWorkflow);
     expect(result).toContain("_start@{ shape: sm-circ }");
     expect(result).toContain("_end@{ shape: framed-circle }");
-  });
-
-  it("omits end node when showTerminalStates is false", () => {
-    const result = toMermaidDiagram(minimalWorkflow, { showTerminalStates: false });
-    expect(result).not.toContain("_end");
   });
 });
 

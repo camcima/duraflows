@@ -316,12 +316,10 @@ const detailed = toMermaidDiagram(orderWorkflow, {
 
 **Options:**
 
-| Option               | Default | Description                                      |
-| -------------------- | ------- | ------------------------------------------------ |
-| `showCommands`       | `false` | Show command names on event nodes                |
-| `showOnEnter`        | `true`  | Show onEnter auto-transition nodes               |
-| `showTerminalStates` | `true`  | Show terminal state markers (end node)           |
-| `direction`          | `"TB"`  | Diagram direction: `"TB"` (top-bottom) or `"LR"` |
+| Option         | Default | Description                                      |
+| -------------- | ------- | ------------------------------------------------ |
+| `showCommands` | `false` | Show command names on event nodes                |
+| `direction`    | `"TB"`  | Diagram direction: `"TB"` (top-bottom) or `"LR"` |
 
 The output is valid Mermaid `flowchart` syntax. Paste it into any Mermaid renderer (GitHub markdown, mermaid.live, documentation tools) to visualize your workflow.
 

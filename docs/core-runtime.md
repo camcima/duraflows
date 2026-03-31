@@ -617,12 +617,10 @@ function toMermaidDiagram(definition: WorkflowDefinition, options?: MermaidDiagr
 
 ### MermaidDiagramOptions
 
-| Option               | Type           | Default | Description                                 |
-| -------------------- | -------------- | ------- | ------------------------------------------- |
-| `showCommands`       | `boolean`      | `false` | Show command names on event nodes           |
-| `showOnEnter`        | `boolean`      | `true`  | Show onEnter auto-transition nodes          |
-| `showTerminalStates` | `boolean`      | `true`  | Show terminal state markers (end node)      |
-| `direction`          | `"TB" \| "LR"` | `"TB"`  | Diagram direction: top-bottom or left-right |
+| Option         | Type           | Default | Description                                 |
+| -------------- | -------------- | ------- | ------------------------------------------- |
+| `showCommands` | `boolean`      | `false` | Show command names on event nodes           |
+| `direction`    | `"TB" \| "LR"` | `"TB"`  | Diagram direction: top-bottom or left-right |
 
 ### Visual encoding
 
@@ -643,16 +641,8 @@ const diagram = toMermaidDiagram(orderWorkflow);
 // Show command names
 const detailed = toMermaidDiagram(orderWorkflow, { showCommands: true });
 
-// Left-to-right layout, hide terminal markers
-const compact = toMermaidDiagram(orderWorkflow, {
-  direction: "LR",
-  showTerminalStates: false,
-});
-
-// Hide auto-transitions
-const minimal = toMermaidDiagram(orderWorkflow, {
-  showOnEnter: false,
-});
+// Left-to-right layout
+const horizontal = toMermaidDiagram(orderWorkflow, { direction: "LR" });
 ```
 
 The returned string is valid Mermaid `flowchart` syntax. Paste it into any Mermaid-compatible renderer (GitHub markdown, mermaid.live, Docusaurus, etc.).

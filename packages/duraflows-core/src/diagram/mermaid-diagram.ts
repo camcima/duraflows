@@ -9,10 +9,6 @@ import type {
 export interface MermaidDiagramOptions {
   /** Include command names on event nodes. Default: false */
   showCommands?: boolean;
-  /** Show onEnter auto-transitions. Default: true */
-  showOnEnter?: boolean;
-  /** Mark terminal states with end nodes. Default: true */
-  showTerminalStates?: boolean;
   /** Diagram direction: "TB" (top-to-bottom) or "LR" (left-to-right). Default: "TB" */
   direction?: "TB" | "LR";
 }
@@ -22,8 +18,6 @@ const INDENT = "    ";
 export function toMermaidDiagram(definition: WorkflowDefinition, options?: MermaidDiagramOptions): string {
   const opts: Required<MermaidDiagramOptions> = {
     showCommands: false,
-    showOnEnter: true,
-    showTerminalStates: true,
     direction: "TB",
     ...options,
   };
@@ -47,7 +41,7 @@ export function toMermaidDiagram(definition: WorkflowDefinition, options?: Merma
   for (const stateName of Object.keys(definition.states)) {
     lines.push(`${INDENT}${stateName}["<b>${stateName}</b>"]:::stateNode`);
   }
-  const hasTerminals = opts.showTerminalStates && Object.values(definition.states).some((sd) => isTerminalState(sd));
+  const hasTerminals = Object.values(definition.states).some((sd) => isTerminalState(sd));
   if (hasTerminals) {
     lines.push(`${INDENT}_end@{ shape: framed-circle }`);
   }
@@ -64,7 +58,7 @@ export function toMermaidDiagram(definition: WorkflowDefinition, options?: Merma
     const stateLines: string[] = [];
 
     // onEnter
-    if (opts.showOnEnter && stateDef.onEnter && (stateDef.onEnter.targetState || stateDef.onEnter.errorState)) {
+    if (stateDef.onEnter && (stateDef.onEnter.targetState || stateDef.onEnter.errorState)) {
       const nodeId = `${stateName}__onEnter`;
       const label = formatOnEnterNodeLabel(stateDef.onEnter, opts);
       stateLines.push(`${INDENT}${nodeId}${label}`);
@@ -112,7 +106,7 @@ export function toMermaidDiagram(definition: WorkflowDefinition, options?: Merma
     }
   }
 
-  // Terminal state edges (plain)
+  // Terminal state edges
   if (hasTerminals) {
     for (const [stateName, stateDef] of Object.entries(definition.states)) {
       if (isTerminalState(stateDef)) {
