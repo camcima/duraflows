@@ -65,6 +65,7 @@ flowchart TB
     new["<b>new</b>"]:::stateNode
     exportable["<b>exportable</b>"]:::stateNode
     exported["<b>exported</b>"]:::stateNode
+    in_transit["<b>in_transit</b>"]:::stateNode
     delivered["<b>delivered</b>"]:::stateNode
     closed["<b>closed</b>"]:::stateNode
     cancelled["<b>cancelled</b>"]:::stateNode
@@ -85,9 +86,13 @@ flowchart TB
     exportable__Export --> exported
     exportable__Export --> export_failed
 
-    exported__Deliver(["Deliver"])
-    exported --> exported__Deliver
-    exported__Deliver --> delivered
+    exported__onEnter(["🗲"])
+    exported --> exported__onEnter
+    exported__onEnter --> in_transit
+
+    in_transit__Deliver(["Deliver"])
+    in_transit --> in_transit__Deliver
+    in_transit__Deliver --> delivered
 
     delivered__TimeOut(["TimeOut ⧖14d"])
     delivered --> delivered__TimeOut
@@ -100,8 +105,8 @@ flowchart TB
     closed --> _end
     cancelled --> _end
 
-    linkStyle 0,1,3,5,8,10,12,14,15 stroke-width:3px
-    linkStyle 2,4,6,9,11,13 stroke:#22c55e,stroke-width:3px
+    linkStyle 0,1,3,5,8,10,12,14,16,17 stroke-width:3px
+    linkStyle 2,4,6,9,11,13,15 stroke:#22c55e,stroke-width:3px
     linkStyle 7 stroke:#dc3545,stroke-width:3px,stroke-dasharray:5
 ```
 
@@ -131,12 +136,18 @@ const orderWorkflow: WorkflowDefinition = {
         Export: {
           targetState: "exported",
           errorState: "export_failed",
-          commands: [{ name: "sendOrderToWarehouse" }, { name: "notifyCustomer" }],
+          commands: [{ name: "sendOrderToWarehouse" }],
         },
       },
     },
     exported: {
       context: { shipmentStatus: "shipped" },
+      onEnter: {
+        targetState: "in_transit",
+        commands: [{ name: "notifyCustomer" }],
+      },
+    },
+    in_transit: {
       events: {
         Deliver: { targetState: "delivered" },
       },
