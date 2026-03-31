@@ -89,7 +89,7 @@ flowchart TB
     exported --> exported__Deliver
     exported__Deliver --> delivered
 
-    delivered__TimeOut(["TimeOut ⏳14d"])
+    delivered__TimeOut(["TimeOut ⧖14d"])
     delivered --> delivered__TimeOut
     delivered__TimeOut --> closed
 

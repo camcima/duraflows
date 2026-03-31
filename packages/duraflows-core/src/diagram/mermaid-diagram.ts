@@ -141,7 +141,7 @@ function formatEventNodeLabel(
   let label = eventName;
 
   if (eventDef.timeout) {
-    label += ` ⏳${formatTimeout(eventDef.timeout)}`;
+    label += ` ⧖${formatTimeout(eventDef.timeout)}`;
   }
 
   if (opts.showCommands && eventDef.commands && eventDef.commands.length > 0) {
@@ -153,7 +153,7 @@ function formatEventNodeLabel(
 }
 
 function formatOnEnterNodeLabel(onEnterDef: WorkflowOnEnterDefinition, opts: Required<MermaidDiagramOptions>): string {
-  let label = "⚡";
+  let label = "🗲";
 
   if (opts.showCommands && onEnterDef.commands && onEnterDef.commands.length > 0) {
     const cmdLines = onEnterDef.commands.map((c) => c.name).join("<br/>");

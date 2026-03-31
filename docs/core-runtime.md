@@ -628,8 +628,8 @@ function toMermaidDiagram(definition: WorkflowDefinition, options?: MermaidDiagr
 - **Events** are rendered as stadium (rounded) nodes between the source state and target state
 - **Success paths** (event → targetState) use green arrows
 - **Error paths** (event → errorState) use red dashed arrows
-- **Timeouts** show a hourglass emoji with the duration (e.g., `⏳14d`)
-- **onEnter** auto-transitions are rendered as `⚡` nodes
+- **Timeouts** show a hourglass emoji with the duration (e.g., `⧖14d`)
+- **onEnter** auto-transitions are rendered as `🗲` nodes
 - **Terminal states** (no outbound events or onEnter targets) connect to an end node
 
 ### Examples
