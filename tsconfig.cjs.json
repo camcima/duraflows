@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/duraflows-core/tsconfig.cjs.json" },
+    { "path": "packages/duraflows-pg/tsconfig.cjs.json" },
+    { "path": "packages/duraflows-nestjs/tsconfig.cjs.json" }
+  ]
+}

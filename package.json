@@ -8,8 +8,8 @@
     "packages/duraflows-nestjs"
   ],
   "scripts": {
-    "build": "tsc --build",
-    "clean": "tsc --build --clean",
+    "build": "tsc --build && tsc --build tsconfig.cjs.json && sh scripts/add-cjs-package-json.sh",
+    "clean": "tsc --build --clean && tsc --build --clean tsconfig.cjs.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
