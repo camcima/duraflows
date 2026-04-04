@@ -1,2 +1,1 @@
-// Barrel exports — filled in subsequent tasks
-export {};
+export type { WorkflowDatabase, WorkflowInstancesTable, WorkflowHistoryTable } from "./kysely-database.js";
