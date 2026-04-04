@@ -12,4 +12,6 @@ Thumbs.db
 coverage/
 *.tsbuildinfo
 .claude/
+.codex
 .specify/
+docs/superpowers/
