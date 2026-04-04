@@ -16,7 +16,7 @@ type JsonObjectColumn = ColumnType<Record<string, unknown>, string, string>;
 type JsonArrayColumn = ColumnType<Record<string, unknown>[], string, string>;
 
 export interface WorkflowInstancesTable {
-  uuid: Generated<string>;
+  uuid: string;
   workflow_name: string;
   current_state: string;
   version: number;

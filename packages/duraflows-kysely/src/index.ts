@@ -12,16 +12,33 @@ export { KyselyWorkflowInstanceStore } from "./kysely-instance-store.js";
 export { KyselyWorkflowHistoryStore } from "./kysely-history-store.js";
 export type { WorkflowDatabase, WorkflowInstancesTable, WorkflowHistoryTable } from "./kysely-database.js";
 
-export function kyselyWorkflowProviders(db: Kysely<WorkflowDatabase>): WorkflowPersistenceProvider {
-  const transactionRunner = new KyselyTransactionRunner(db);
-  const instanceStore = new KyselyWorkflowInstanceStore(db);
-  const historyStore = new KyselyWorkflowHistoryStore(db);
+/**
+ * Creates long-lived persistence providers from a Kysely instance.
+ *
+ * Generic so callers can pass `Kysely<MyDb & WorkflowDatabase>`.
+ * Internally narrows to `Kysely<WorkflowDatabase>` (safe — stores
+ * only access workflow tables; the `unknown` cast is needed because
+ * Kysely is invariant in its DB type parameter).
+ */
+export function kyselyWorkflowProviders<DB extends WorkflowDatabase>(
+  db: Kysely<DB>,
+): WorkflowPersistenceProvider {
+  const narrowed = db as unknown as Kysely<WorkflowDatabase>;
+  const transactionRunner = new KyselyTransactionRunner(narrowed);
+  const instanceStore = new KyselyWorkflowInstanceStore(narrowed);
+  const historyStore = new KyselyWorkflowHistoryStore(narrowed);
   return { instanceStore, historyStore, transactionRunner };
 }
 
-export function kyselyWorkflowProvidersFromTransaction(
-  trx: Transaction<WorkflowDatabase>,
+/**
+ * Creates providers pre-bound to an existing Kysely transaction.
+ *
+ * Generic so callers can pass `Transaction<MyDb & WorkflowDatabase>`.
+ */
+export function kyselyWorkflowProvidersFromTransaction<DB extends WorkflowDatabase>(
+  trx: Transaction<DB>,
 ): WorkflowPersistenceProvider {
+  const narrowed = trx as unknown as Kysely<WorkflowDatabase>;
   const transactionRunner: WorkflowPersistenceProvider["transactionRunner"] = {
     async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
       const existing = KyselyTransactionContext.getTransaction();
@@ -31,7 +48,7 @@ export function kyselyWorkflowProvidersFromTransaction(
       return KyselyTransactionContext.run(trx, callback);
     },
   };
-  const instanceStore = new KyselyWorkflowInstanceStore(trx);
-  const historyStore = new KyselyWorkflowHistoryStore(trx);
+  const instanceStore = new KyselyWorkflowInstanceStore(narrowed);
+  const historyStore = new KyselyWorkflowHistoryStore(narrowed);
   return { instanceStore, historyStore, transactionRunner };
 }
