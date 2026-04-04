@@ -5,7 +5,8 @@
   "workspaces": [
     "packages/duraflows-core",
     "packages/duraflows-pg",
-    "packages/duraflows-nestjs"
+    "packages/duraflows-nestjs",
+    "packages/duraflows-kysely"
   ],
   "scripts": {
     "build": "tsc --build && tsc --build tsconfig.cjs.json && sh scripts/add-cjs-package-json.sh",

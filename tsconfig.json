@@ -3,6 +3,7 @@
   "references": [
     { "path": "packages/duraflows-core" },
     { "path": "packages/duraflows-pg" },
-    { "path": "packages/duraflows-nestjs" }
+    { "path": "packages/duraflows-nestjs" },
+    { "path": "packages/duraflows-kysely" }
   ]
 }
