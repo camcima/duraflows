@@ -31,7 +31,7 @@ export function kyselyWorkflowProvidersFromTransaction(
       return KyselyTransactionContext.run(trx, callback);
     },
   };
-  const instanceStore = new KyselyWorkflowInstanceStore(trx as unknown as Kysely<WorkflowDatabase>);
-  const historyStore = new KyselyWorkflowHistoryStore(trx as unknown as Kysely<WorkflowDatabase>);
+  const instanceStore = new KyselyWorkflowInstanceStore(trx);
+  const historyStore = new KyselyWorkflowHistoryStore(trx);
   return { instanceStore, historyStore, transactionRunner };
 }

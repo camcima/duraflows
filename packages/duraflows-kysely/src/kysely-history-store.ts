@@ -1,4 +1,4 @@
-import type { Kysely, Transaction } from "kysely";
+import type { Kysely } from "kysely";
 import type { WorkflowHistoryStore, WorkflowHistoryRecord } from "@duraflows/core";
 import type { WorkflowDatabase } from "./kysely-database.js";
 import { KyselyTransactionContext } from "./kysely-transaction-context.js";
@@ -6,7 +6,7 @@ import { KyselyTransactionContext } from "./kysely-transaction-context.js";
 export class KyselyWorkflowHistoryStore implements WorkflowHistoryStore {
   constructor(private readonly db: Kysely<WorkflowDatabase>) {}
 
-  private getExecutor(): Kysely<WorkflowDatabase> | Transaction<WorkflowDatabase> {
+  private getExecutor() {
     return KyselyTransactionContext.getTransaction() ?? this.db;
   }
 

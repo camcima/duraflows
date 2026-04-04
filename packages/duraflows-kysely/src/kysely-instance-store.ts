@@ -1,13 +1,13 @@
-import type { Kysely, Transaction } from "kysely";
+import type { Kysely, Selectable } from "kysely";
 import type { WorkflowInstanceStore, WorkflowInstance } from "@duraflows/core";
 import { WorkflowError } from "@duraflows/core";
-import type { WorkflowDatabase } from "./kysely-database.js";
+import type { WorkflowDatabase, WorkflowInstancesTable } from "./kysely-database.js";
 import { KyselyTransactionContext } from "./kysely-transaction-context.js";
 
 export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
   constructor(private readonly db: Kysely<WorkflowDatabase>) {}
 
-  private getExecutor(): Kysely<WorkflowDatabase> | Transaction<WorkflowDatabase> {
+  private getExecutor() {
     return KyselyTransactionContext.getTransaction() ?? this.db;
   }
 
@@ -99,29 +99,18 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
     return rows.map((row) => this.mapRow(row));
   }
 
-  private mapRow(row: {
-    uuid: string;
-    workflow_name: string;
-    current_state: string;
-    version: number;
-    expires_at: Date | null;
-    last_transition_at: Date;
-    context_json: unknown;
-    metadata_json: unknown;
-    created_at: Date;
-    updated_at: Date;
-  }): WorkflowInstance {
+  private mapRow(row: Selectable<WorkflowInstancesTable>): WorkflowInstance {
     return {
       uuid: row.uuid,
       workflowName: row.workflow_name,
       currentState: row.current_state,
       version: row.version,
-      expiresAt: row.expires_at ? new Date(row.expires_at as unknown as string) : null,
-      lastTransitionAt: new Date(row.last_transition_at as unknown as string),
-      context: row.context_json as Record<string, unknown>,
-      metadata: row.metadata_json as Record<string, unknown>,
-      createdAt: new Date(row.created_at as unknown as string),
-      updatedAt: new Date(row.updated_at as unknown as string),
+      expiresAt: row.expires_at,
+      lastTransitionAt: row.last_transition_at,
+      context: row.context_json,
+      metadata: row.metadata_json,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
     };
   }
 }
