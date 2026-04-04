@@ -114,6 +114,7 @@ The core package defines the persistence interfaces. Use one of the official ada
 | Package                                                                | Description                                                    |
 | ---------------------------------------------------------------------- | -------------------------------------------------------------- |
 | [`@duraflows/pg`](https://www.npmjs.com/package/@duraflows/pg)         | PostgreSQL adapter using `pg`                                  |
+| [`@duraflows/kysely`](https://www.npmjs.com/package/@duraflows/kysely) | PostgreSQL adapter using Kysely (supports shared transactions) |
 | [`@duraflows/nestjs`](https://www.npmjs.com/package/@duraflows/nestjs) | NestJS module with DI, services, and optional REST controllers |
 
 To build a custom adapter, implement these interfaces:
