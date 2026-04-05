@@ -29,7 +29,9 @@ interface AppDb extends WorkflowDatabase {
 
 describe("Kysely type invariance", () => {
   it("kyselyWorkflowProviders accepts Kysely<AppDb>", () => {
-    expectTypeOf(kyselyWorkflowProviders<AppDb>).parameter(0).toMatchTypeOf<Kysely<AppDb>>();
+    expectTypeOf(kyselyWorkflowProviders<AppDb>)
+      .parameter(0)
+      .toMatchTypeOf<Kysely<AppDb>>();
     expectTypeOf(kyselyWorkflowProviders<AppDb>).returns.toMatchTypeOf<WorkflowPersistenceProvider>();
   });
 

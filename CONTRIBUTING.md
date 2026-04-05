@@ -41,23 +41,23 @@ Thanks for your interest in contributing! This guide covers everything you need 
 
 This is a monorepo with three packages:
 
-| Package              | Path                        | Description                           |
-| -------------------- | --------------------------- | ------------------------------------- |
-| `@duraflows/core`    | `packages/duraflows-core`   | Framework-agnostic runtime and types  |
-| `@duraflows/pg`      | `packages/duraflows-pg`     | PostgreSQL persistence adapter        |
-| `@duraflows/nestjs`  | `packages/duraflows-nestjs` | NestJS module integration             |
+| Package             | Path                        | Description                          |
+| ------------------- | --------------------------- | ------------------------------------ |
+| `@duraflows/core`   | `packages/duraflows-core`   | Framework-agnostic runtime and types |
+| `@duraflows/pg`     | `packages/duraflows-pg`     | PostgreSQL persistence adapter       |
+| `@duraflows/nestjs` | `packages/duraflows-nestjs` | NestJS module integration            |
 
 ## Development Workflow
 
 ### Scripts
 
-| Command              | Description                        |
-| -------------------- | ---------------------------------- |
-| `npm run build`      | Build all packages                 |
-| `npm test`           | Run tests                          |
-| `npm run test:watch` | Run tests in watch mode            |
-| `npm run lint`       | Lint all packages                  |
-| `npm run format`     | Format code with Prettier          |
+| Command                | Description                      |
+| ---------------------- | -------------------------------- |
+| `npm run build`        | Build all packages               |
+| `npm test`             | Run tests                        |
+| `npm run test:watch`   | Run tests in watch mode          |
+| `npm run lint`         | Lint all packages                |
+| `npm run format`       | Format code with Prettier        |
 | `npm run format:check` | Check formatting without writing |
 
 ### Before Submitting

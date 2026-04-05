@@ -20,9 +20,7 @@ export type { WorkflowDatabase, WorkflowInstancesTable, WorkflowHistoryTable } f
  * only access workflow tables; the `unknown` cast is needed because
  * Kysely is invariant in its DB type parameter).
  */
-export function kyselyWorkflowProviders<DB extends WorkflowDatabase>(
-  db: Kysely<DB>,
-): WorkflowPersistenceProvider {
+export function kyselyWorkflowProviders<DB extends WorkflowDatabase>(db: Kysely<DB>): WorkflowPersistenceProvider {
   const narrowed = db as unknown as Kysely<WorkflowDatabase>;
   const transactionRunner = new KyselyTransactionRunner(narrowed);
   const instanceStore = new KyselyWorkflowInstanceStore(narrowed);

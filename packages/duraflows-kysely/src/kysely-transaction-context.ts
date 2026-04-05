@@ -18,10 +18,7 @@ export const KyselyTransactionContext = {
    * `Transaction<WorkflowDatabase>` which is safe — stores only access
    * workflow tables.
    */
-  run<T, DB extends WorkflowDatabase = WorkflowDatabase>(
-    trx: Transaction<DB>,
-    callback: () => T,
-  ): T {
+  run<T, DB extends WorkflowDatabase = WorkflowDatabase>(trx: Transaction<DB>, callback: () => T): T {
     return storage.run(trx as unknown as Transaction<WorkflowDatabase>, callback);
   },
 };
