@@ -39,5 +39,4 @@ jobs:
         with:
           scan-args: |-
             --recursive
-            --skip-dev-deps
             .

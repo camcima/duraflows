@@ -1,0 +1,6 @@
+# Ignore dev dependency vulnerabilities — this library ships zero runtime deps
+# in the core package. Dev deps only affect the local development workflow,
+# not consumers.
+[[PackageOverrides]]
+group = "dev"
+ignore = true
