@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.0](https://github.com/camcima/duraflows/compare/v0.4.0...v0.5.0) (2026-04-06)
+
+### Bug Fixes
+
+* override path-to-regexp to ^8.4.0 (CVE fix) ([cc86be5](https://github.com/camcima/duraflows/commit/cc86be5442d354f3677d5c7255c3f59b897fddac))
+
 ## [0.4.0](https://github.com/camcima/duraflows/compare/v0.3.0...v0.4.0) (2026-04-04)
 
 ### Features
