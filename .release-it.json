@@ -10,9 +10,9 @@
     "publish": false
   },
   "hooks": {
-    "before:bump": "npm --workspaces version ${version} --no-git-tag-version --allow-same-version && npm pkg set --workspace=packages/duraflows-pg \"dependencies.@duraflows/core=^${version}\" && npm pkg set --workspace=packages/duraflows-nestjs \"dependencies.@duraflows/core=^${version}\"",
-    "after:bump": "npm run build",
-    "before:release": "npm publish --workspaces"
+    "before:bump": "pnpm -r exec npm version ${version} --no-git-tag-version --allow-same-version && pnpm --filter @duraflows/pg exec npm pkg set \"dependencies.@duraflows/core=^${version}\" && pnpm --filter @duraflows/nestjs exec npm pkg set \"dependencies.@duraflows/core=^${version}\"",
+    "after:bump": "pnpm run build",
+    "before:release": "pnpm -r publish --no-git-checks"
   },
   "plugins": {
     "@release-it/conventional-changelog": {

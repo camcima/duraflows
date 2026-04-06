@@ -15,7 +15,7 @@ Part of the [duraflows](https://github.com/camcima/duraflows) monorepo.
 ## Installation
 
 ```bash
-npm install @duraflows/core @duraflows/kysely kysely pg
+pnpm add @duraflows/core @duraflows/kysely kysely pg
 ```
 
 ## Quick Start

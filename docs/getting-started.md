@@ -12,14 +12,14 @@ Install the packages you need:
 
 ```bash
 # Core runtime (always required)
-npm install @duraflows/core
+pnpm add @duraflows/core
 
 # PostgreSQL adapter (if using pg)
-npm install @duraflows/pg pg
-npm install -D @types/pg
+pnpm add @duraflows/pg pg
+pnpm add -D @types/pg
 
 # NestJS integration (if using NestJS)
-npm install @duraflows/nestjs
+pnpm add @duraflows/nestjs
 ```
 
 ## Database Setup

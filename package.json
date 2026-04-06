@@ -2,12 +2,7 @@
   "name": "@duraflows/monorepo",
   "private": true,
   "type": "module",
-  "workspaces": [
-    "packages/duraflows-core",
-    "packages/duraflows-pg",
-    "packages/duraflows-nestjs",
-    "packages/duraflows-kysely"
-  ],
+  "packageManager": "pnpm@10.17.0",
   "scripts": {
     "build": "tsc --build && tsc --build tsconfig.cjs.json && sh scripts/add-cjs-package-json.sh",
     "clean": "tsc --build --clean && tsc --build --clean tsconfig.cjs.json",
@@ -20,7 +15,7 @@
     "format:check": "prettier --check .",
     "release": "release-it",
     "security:secrets": "gitleaks detect --no-banner",
-    "security:audit": "npm audit"
+    "security:audit": "pnpm audit"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",

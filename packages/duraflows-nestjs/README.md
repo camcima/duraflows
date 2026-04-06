@@ -16,13 +16,13 @@ Part of the [duraflows](https://github.com/camcima/duraflows) monorepo.
 ## Installation
 
 ```bash
-npm install @duraflows/core @duraflows/nestjs
+pnpm add @duraflows/core @duraflows/nestjs
 ```
 
 You will also need a persistence adapter such as [`@duraflows/pg`](https://www.npmjs.com/package/@duraflows/pg):
 
 ```bash
-npm install @duraflows/pg pg
+pnpm add @duraflows/pg pg
 ```
 
 ## Quick Start

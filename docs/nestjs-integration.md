@@ -5,13 +5,13 @@ The `@duraflows/nestjs` package provides a NestJS module that wires the workflow
 ## Installation
 
 ```bash
-npm install @duraflows/nestjs @duraflows/core
+pnpm add @duraflows/nestjs @duraflows/core
 
 # If using the built-in pg adapter:
-npm install @duraflows/pg pg
+pnpm add @duraflows/pg pg
 
 # If using REST controllers (enableControllers: true):
-npm install class-validator class-transformer
+pnpm add class-validator class-transformer
 ```
 
 `@duraflows/nestjs` does **not** depend on `@duraflows/pg`. You choose your persistence adapter.

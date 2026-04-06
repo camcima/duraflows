@@ -43,13 +43,13 @@ Designed as a family of three packages:
 
 ```bash
 # Core runtime (always required)
-npm install @duraflows/core
+pnpm add @duraflows/core
 
 # PostgreSQL adapter (if using pg)
-npm install @duraflows/pg pg
+pnpm add @duraflows/pg pg
 
 # NestJS integration (if using NestJS)
-npm install @duraflows/nestjs
+pnpm add @duraflows/nestjs
 ```
 
 ## Quick Example
@@ -439,10 +439,10 @@ graph TD
 
 ```bash
 # Secret scanning (requires gitleaks)
-npm run security:secrets
+pnpm run security:secrets
 
 # Dependency audit
-npm run security:audit
+pnpm run security:audit
 ```
 
 ### Installing Local Tools (Optional)

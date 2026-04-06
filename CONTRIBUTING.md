@@ -5,7 +5,7 @@ Thanks for your interest in contributing! This guide covers everything you need 
 ## Prerequisites
 
 - Node.js 18, 20, or 22
-- npm 9+
+- pnpm 10+
 - PostgreSQL 13+ (for running persistence adapter tests)
 
 ## Getting Started
@@ -20,7 +20,7 @@ Thanks for your interest in contributing! This guide covers everything you need 
 2. Install dependencies:
 
    ```bash
-   npm install
+   pnpm install
    ```
 
    This also installs [Lefthook](https://github.com/evilmartians/lefthook) git hooks automatically.
@@ -28,13 +28,13 @@ Thanks for your interest in contributing! This guide covers everything you need 
 3. Build all packages:
 
    ```bash
-   npm run build
+   pnpm run build
    ```
 
 4. Run the tests:
 
    ```bash
-   npm test
+   pnpm test
    ```
 
 ## Project Structure
@@ -51,24 +51,24 @@ This is a monorepo with three packages:
 
 ### Scripts
 
-| Command                | Description                      |
-| ---------------------- | -------------------------------- |
-| `npm run build`        | Build all packages               |
-| `npm test`             | Run tests                        |
-| `npm run test:watch`   | Run tests in watch mode          |
-| `npm run lint`         | Lint all packages                |
-| `npm run format`       | Format code with Prettier        |
-| `npm run format:check` | Check formatting without writing |
+| Command                 | Description                      |
+| ----------------------- | -------------------------------- |
+| `pnpm run build`        | Build all packages               |
+| `pnpm test`             | Run tests                        |
+| `pnpm run test:watch`   | Run tests in watch mode          |
+| `pnpm run lint`         | Lint all packages                |
+| `pnpm run format`       | Format code with Prettier        |
+| `pnpm run format:check` | Check formatting without writing |
 
 ### Before Submitting
 
 Make sure your changes pass all checks:
 
 ```bash
-npm run build
-npm run format:check
-npm run lint
-npm test
+pnpm run build
+pnpm run format:check
+pnpm run lint
+pnpm test
 ```
 
 ## Commit Messages

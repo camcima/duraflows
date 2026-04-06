@@ -19,7 +19,7 @@ Part of the [duraflows](https://github.com/camcima/duraflows) monorepo.
 ## Installation
 
 ```bash
-npm install @duraflows/core
+pnpm add @duraflows/core
 ```
 
 ## Quick Example

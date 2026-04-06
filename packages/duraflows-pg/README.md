@@ -16,7 +16,7 @@ Part of the [duraflows](https://github.com/camcima/duraflows) monorepo.
 ## Installation
 
 ```bash
-npm install @duraflows/core @duraflows/pg pg
+pnpm add @duraflows/core @duraflows/pg pg
 ```
 
 ## Quick Start
