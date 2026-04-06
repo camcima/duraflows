@@ -6,8 +6,7 @@
 
 <br>
 
-[![Test](https://github.com/camcima/duraflows/actions/workflows/test.yml/badge.svg)](https://github.com/camcima/duraflows/actions/workflows/test.yml)
-[![Validate](https://github.com/camcima/duraflows/actions/workflows/validate.yml/badge.svg)](https://github.com/camcima/duraflows/actions/workflows/validate.yml)
+[![CI](https://github.com/camcima/duraflows/actions/workflows/ci.yml/badge.svg)](https://github.com/camcima/duraflows/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/camcima/duraflows/graph/badge.svg)](https://codecov.io/gh/camcima/duraflows)
 [![npm version](https://img.shields.io/npm/v/@duraflows/core)](https://www.npmjs.com/package/@duraflows/core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
