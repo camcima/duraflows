@@ -38,5 +38,6 @@
   },
   "devDependencies": {
     "@nestjs/testing": "^11.1.17"
-  }
+  },
+  "license": "MIT"
 }
