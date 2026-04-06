@@ -13,6 +13,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7%2B-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-18%20%7C%2020%20%7C%2022-green.svg)](https://nodejs.org/)
+[![CodeQL](https://github.com/camcima/duraflows/actions/workflows/codeql.yml/badge.svg)](https://github.com/camcima/duraflows/actions/workflows/codeql.yml)
 
 </div>
 
@@ -417,6 +418,47 @@ graph TD
 ```
 
 `duraflows-nestjs` depends only on `duraflows-core` interfaces. `duraflows-pg` is one persistence adapter. You can replace it with your own.
+
+## Security
+
+### CI Scanning
+
+| Tool            | Purpose                                                  | Trigger                             |
+| --------------- | -------------------------------------------------------- | ----------------------------------- |
+| **CodeQL**      | Static analysis for security vulnerabilities             | Push/PR to `main` + weekly schedule |
+| **OSV-Scanner** | Dependency vulnerability scanning (production deps only) | Push/PR to `main`                   |
+| **Dependabot**  | Automated dependency and GitHub Actions updates          | Weekly PRs                          |
+
+### Local Hooks (Lefthook)
+
+| Hook         | Tool         | Behavior                                                  |
+| ------------ | ------------ | --------------------------------------------------------- |
+| `pre-commit` | **Gitleaks** | Scans staged files for secrets (skipped if not installed) |
+| `pre-push`   | **Semgrep**  | Lightweight code-security scan (skipped if not installed) |
+
+### Manual Commands
+
+```bash
+# Secret scanning (requires gitleaks)
+npm run security:secrets
+
+# Dependency audit
+npm run security:audit
+```
+
+### Installing Local Tools (Optional)
+
+Gitleaks and Semgrep are optional -- hooks skip gracefully if they are not installed.
+
+```bash
+# macOS
+brew install gitleaks
+brew install semgrep
+
+# Linux (see each project's install docs)
+# https://github.com/gitleaks/gitleaks#installing
+# https://semgrep.dev/docs/getting-started/
+```
 
 ## License
 

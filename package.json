@@ -18,7 +18,9 @@
     "lint": "eslint packages/*/src/",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "release": "release-it"
+    "release": "release-it",
+    "security:secrets": "gitleaks detect --no-banner",
+    "security:audit": "npm audit"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",
