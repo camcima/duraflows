@@ -4,6 +4,10 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  path-to-regexp: ^8.4.0
+  undici: ">=6.24.0"
+
 importers:
   .:
     devDependencies:
@@ -19,6 +23,9 @@ importers:
       "@release-it/conventional-changelog":
         specifier: ^10.0.6
         version: 10.0.6(conventional-commits-filter@5.0.0)(conventional-commits-parser@6.4.0)(release-it@19.2.4(@types/node@25.5.2)(magicast@0.3.5))
+      "@types/node":
+        specifier: ^25.5.2
+        version: 25.5.2
       "@vitest/coverage-v8":
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4(@types/node@25.5.2)(jiti@2.6.1))
@@ -2843,10 +2850,10 @@ packages:
     resolution:
       { integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w== }
 
-  undici@6.23.0:
+  undici@8.0.2:
     resolution:
-      { integrity: sha512-VfQPToRA5FZs/qJxLIinmU59u0r7LXqoJkCzinq3ckNJp3vKEh7jTWN589YQ5+aoAC/TGRLyJLCPKcLQbM8r9g== }
-    engines: { node: ">=18.17" }
+      { integrity: sha512-B9MeU5wuFhkFAuNeA19K2GDFcQXZxq33fL0nRy2Aq30wdufZbyyvxW3/ChaeipXVfy/wUweZyzovQGk39+9k2w== }
+    engines: { node: ">=22.19.0" }
 
   universal-user-agent@7.0.3:
     resolution:
@@ -4979,7 +4986,7 @@ snapshots:
       proxy-agent: 6.5.0
       semver: 7.7.3
       tinyglobby: 0.2.15
-      undici: 6.23.0
+      undici: 8.0.2
       url-join: 5.0.0
       wildcard-match: 5.1.4
       yargs-parser: 21.1.1
@@ -5211,7 +5218,7 @@ snapshots:
 
   undici-types@7.18.2: {}
 
-  undici@6.23.0: {}
+  undici@8.0.2: {}
 
   universal-user-agent@7.0.3: {}
 
