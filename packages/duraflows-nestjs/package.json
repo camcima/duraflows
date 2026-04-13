@@ -37,7 +37,7 @@
     "rxjs": "^7.0.0"
   },
   "devDependencies": {
-    "@nestjs/testing": "^11.1.17"
+    "@nestjs/testing": "^11.1.19"
   },
   "license": "MIT"
 }
