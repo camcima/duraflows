@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "@duraflows/core": "^0.3.0",
-    "kysely": "^0.28.0"
+    "kysely": "^0.28.16"
   },
   "peerDependencies": {
     "pg": "^8.13.0"
