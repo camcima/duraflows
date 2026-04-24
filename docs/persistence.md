@@ -29,13 +29,13 @@ interface WorkflowInstanceStore {
 }
 ```
 
-| Method                    | Description                                                                                                                                                                                                                                                                                                                                                        |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `create(instance)`        | Insert a new workflow instance record                                                                                                                                                                                                                                                                                                                              |
-| `findByUuid(uuid)`        | Find an instance by UUID (no locking). Returns `null` if not found                                                                                                                                                                                                                                                                                                 |
-| `lockByUuid(uuid)`        | Find and lock an instance for update (e.g., `SELECT ... FOR UPDATE`). Must be called within a transaction. Returns `null` if not found                                                                                                                                                                                                                             |
-| `update(instance)`        | Update mutable fields: `currentState`, `version`, `expiresAt`, `lastTransitionAt`, `context`, `updatedAt`. Uses optimistic locking: the WHERE clause must include `AND version = $expectedVersion` (i.e., `instance.version - 1`). If no row is matched, throw `WorkflowError` to signal a concurrent modification. Note: `metadata` is immutable and not updated. |
-| `findExpired(limit, now)` | Find instances where `expiresAt < now` (the `now` parameter, not the database's `now()`), locked for update with skip-locked semantics (e.g., `FOR UPDATE SKIP LOCKED`). Must be called within a transaction                                                                                                                                                       |
+| Method                    | Tx required? | Description                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `create(instance)`        | Recommended  | Insert a new workflow instance record. Typically called inside the same transaction as the initial history record append and any onEnter chain writes.                                                                                                                                                                                                          |
+| `findByUuid(uuid)`        | Not required | Find an instance by UUID (no locking). Safe to call outside a transaction (read-only). Returns `null` if not found.                                                                                                                                                                                                                                             |
+| `lockByUuid(uuid)`        | **Required** | Find and lock an instance for update (`SELECT ... FOR UPDATE`). **Adapters must throw if called outside an active transaction** — a lock without a transaction releases immediately and defeats its purpose. Returns `null` if not found.                                                                                                                       |
+| `update(instance)`        | Recommended  | Update mutable fields: `currentState`, `version`, `expiresAt`, `lastTransitionAt`, `context`, `updatedAt`. Uses optimistic locking: the WHERE clause must include `AND version = $expectedVersion` (i.e., `instance.version - 1`). If no row is matched, throw `WorkflowError` to signal a concurrent modification. `metadata` is immutable and is NOT updated. |
+| `findExpired(limit, now)` | **Required** | Find instances where `expiresAt < now` (the `now` parameter — not the database clock), locked for update with skip-locked semantics (`FOR UPDATE SKIP LOCKED`). **Adapters must throw if called outside an active transaction.** Multiple workers can call this concurrently without processing the same instance twice because uncontested rows are skipped.   |
 
 ### WorkflowHistoryStore
 
@@ -51,10 +51,10 @@ interface WorkflowHistoryStore {
 }
 ```
 
-| Method                               | Description                                                                                                                                      |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `append(entry)`                      | Insert a history record. Returns the generated UUID of the new record                                                                            |
-| `findByInstanceUuid(uuid, options?)` | Find history records for an instance, ordered by creation time descending. Supports pagination via `limit` (default 50) and `offset` (default 0) |
+| Method                               | Tx required? | Description                                                                                                                                                                                             |
+| ------------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `append(entry)`                      | Recommended  | Insert a history record. Returns the generated UUID of the new record. Typically inside the same transaction as the corresponding `update` call so history and instance state are committed atomically. |
+| `findByInstanceUuid(uuid, options?)` | Not required | Find history records for an instance, ordered by creation time descending. Safe to call outside a transaction (read-only). Supports pagination via `limit` (default 50) and `offset` (default 0).       |
 
 **WorkflowHistoryRecord:**
 
@@ -81,11 +81,11 @@ interface WorkflowTransactionRunner {
 }
 ```
 
-| Method                       | Description                                                                                                                                                                      |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runInTransaction(callback)` | Execute the callback within a transaction. Commit on success, rollback on error. The transaction-scoped connection must be available to store methods called within the callback |
+| Method                       | Description                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runInTransaction(callback)` | Execute the callback within a transaction. Commit on success, rollback on error. The transaction-scoped connection must be propagated (e.g. via `AsyncLocalStorage`) so that store methods called within the callback automatically use the same connection. If already within an active transaction on the current async context, adapters should reuse the existing connection rather than opening a nested transaction. |
 
-The key contract: when `runInTransaction` is active, `lockByUuid()` and `findExpired()` must use the **same database connection** as the transaction. This is typically achieved via `AsyncLocalStorage` or a similar mechanism.
+The key contract: when `runInTransaction` is active, `lockByUuid()` and `findExpired()` must use the **same database connection** as the transaction — this is what makes row locks (`FOR UPDATE`) work correctly. Both methods **must throw** if called outside an active transaction. This is typically achieved via `AsyncLocalStorage` or a similar mechanism.
 
 ### WorkflowPersistenceProvider
 
@@ -384,3 +384,36 @@ Each `triggerEvent()` call runs in a single transaction:
 - Commit
 
 If any step fails (including command exceptions), the entire transaction rolls back. No partial state is persisted.
+
+## Adapter Conformance Tests
+
+`@duraflows/core` ships a shared conformance suite that any adapter can import to verify it satisfies the cross-adapter contract. The helper is exported from the `@duraflows/core/testing` subpath (a dev-time entry point, not part of the main bundle).
+
+```ts
+import { runInstanceStoreConformance } from "@duraflows/core/testing";
+
+runInstanceStoreConformance("my-adapter", {
+  setup: async () => {
+    const store = new MyInstanceStore();
+    const transactionRunner = new MyTransactionRunner();
+    return {
+      store,
+      transactionRunner,
+      teardown: async () => {
+        // close connections, flush state, etc.
+      },
+    };
+  },
+});
+```
+
+The suite covers:
+
+| Test                              | What it verifies                                                         |
+| --------------------------------- | ------------------------------------------------------------------------ |
+| `create` / `findByUuid` roundtrip | Stored instance is retrievable by UUID                                   |
+| `findByUuid` unknown UUID         | Returns `null`, not an error                                             |
+| `update` mutable fields           | `currentState`, `version`, `context`, `expiresAt` are persisted          |
+| `update` metadata immutability    | Mutating `metadata` on the locked object has no effect on the stored row |
+| `findExpired` filtering           | Past `expiresAt` → included; future / null → excluded                    |
+| `findExpired` limit               | Result length respects the `limit` parameter                             |
