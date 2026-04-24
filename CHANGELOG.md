@@ -11,6 +11,12 @@
 - add `fromState`, `toState`, and `transitionUuid` to `WorkflowExecutionContext` — UUID identifies the state entry and is shared across all onEnter hops for that entry ([7008271](https://github.com/camcima/duraflows/commit/7008271d5d1f73f1e4b31584ebb3f0007b4b459f))
 - add `bestEffort?: boolean` flag to `WorkflowCommand` — fire-and-forget commands whose failures don't abort the chain ([db9dbba](https://github.com/camcima/duraflows/commit/db9dbba18ae448ec17b234b0b65a9c079fa1a7ab))
 - add `outcome: "success" | "failure"` aggregate field to `OnEnterChainResult` ([c5efe67](https://github.com/camcima/duraflows/commit/c5efe67fa7eeebd105a439f2014c72f98ddcb056))
+- register `onEnter.errorState` targets in the finita process graph so events can be triggered from error-recovery states ([f069770](https://github.com/camcima/duraflows/commit/f0697701d8cc066e9dbed00e7f22dab05db19eee))
+- allow command-only and failure-only events (optional `targetState`) — event must still define at least one of `targetState`, `errorState`, or `commands` ([7bbaf1a](https://github.com/camcima/duraflows/commit/7bbaf1a300619a38e2464152511d7463b37f0a6c))
+- add optional `onObserverError` handler on `WorkflowRuntimeOptions` and NestJS module config — replaces the hard-coded `console.warn` fallback so observer failures can be routed to a structured logger ([031fb10](https://github.com/camcima/duraflows/commit/031fb10f91b13cc9948b6354c3411ca32a4f9a4b))
+- deep-clone and deep-freeze workflow definitions on register — post-registration caller mutations can no longer corrupt stored definitions ([16b0829](https://github.com/camcima/duraflows/commit/16b0829d68f386d15282dd382641fca8adb52446))
+- expose `WorkflowCommandRef.metadata` to commands via `WorkflowExecutionContext.commandMetadata` (deep-cloned and frozen per command) ([4acef2b](https://github.com/camcima/duraflows/commit/4acef2bb35de862f06b11a9236a60a065c227300))
+- strengthen persistence contract with JSDoc distinguishing transactional-only methods and ship `@duraflows/core/testing` subpath export with `runInstanceStoreConformance` for adapter conformance tests ([71d7b0f](https://github.com/camcima/duraflows/commit/71d7b0f1f79f1390f65a73b6da296cf4bebd87dd))
 
 ### Bug Fixes
 
@@ -23,12 +29,25 @@
 - `processExpiredWorkflows.processed` counter only increments when a timeout event actually fires — skipped and cleared cases no longer inflate the metric ([213a9b5](https://github.com/camcima/duraflows/commit/213a9b54743ccc416cb9048a97b5391b9e70930c))
 - `transitionUuid` is shared between onEnter commands and observer events within the same hop — observer events now report the same UUID as the command context ([0405a3b](https://github.com/camcima/duraflows/commit/0405a3b61385320851dea4d979c3a95443f4a757))
 - first onEnter hop reuses the caller's `transitionUuid`; subsequent hops get fresh UUIDs — UUID correctly identifies a state entry boundary ([d46bbae](https://github.com/camcima/duraflows/commit/d46bbaef4ee6877a9897142fb82d29bd1c4c1eb0))
+- deep-clone context and metadata at runtime boundaries — state-defined nested context from `WorkflowDefinition.states[...].context` is no longer aliased into live instance state, so commands mutating `instance.context.nested` no longer corrupt definition defaults ([2f559ba](https://github.com/camcima/duraflows/commit/2f559baf58c650b44c2a0c4138aed7b3971dc4c4))
+- make migration `002_replace_trigger_with_metadata.sql` idempotent — fresh installs skip the legacy column replacement body; legacy installs still migrate `triggered_by_type`/`triggered_by_uuid` to `trigger_metadata_json` ([35358a6](https://github.com/camcima/duraflows/commit/35358a6215aed0783d5b3b4af3311fe502361f53))
+- align `@duraflows/core` dependency range in `@duraflows/kysely` to `^0.5.1` (was stale at `^0.3.0`) ([1104e7c](https://github.com/camcima/duraflows/commit/1104e7ccbd03a1feb55479d6b8f25d11f0693355))
+- remove `metadata_json` from `UPDATE` in `@duraflows/pg` and `@duraflows/kysely` instance stores — enforces the documented immutability of `metadata` after creation ([b638a7c](https://github.com/camcima/duraflows/commit/b638a7cd2c06e5fa50e35aa66d715b836de56604))
+- relax `deepFreeze` generic signature so `WorkflowDefinition` no longer needs a double cast at the registration site ([c869f5d](https://github.com/camcima/duraflows/commit/c869f5d2af626ad361592d33454bb5746512e2cf))
+
+### Documentation
+
+- add `@duraflows/kysely` to the root `README.md` package list and adapter comparison ([d61253f](https://github.com/camcima/duraflows/commit/d61253f7851c0647854d6f5a807a8d1b15cfaac8))
+- add changelog and expanded `docs/core-runtime.md`, `docs/error-handling.md`, `docs/nestjs-integration.md` covering observers, `bestEffort`, context transition fields, `outcome` aggregation, and the NestJS observer breaking change ([99fe14d](https://github.com/camcima/duraflows/commit/99fe14da31d65ceb1dffbbaba6d0bf98b4b6f20d))
+- add npm discovery metadata (`description`, `keywords`, `author`, `homepage`, `repository`, `bugs`) to every `@duraflows/*` package and fix a missing `@duraflows/kysely` dep-range update in `.release-it.json`'s `before:bump` hook ([dbe5aa0](https://github.com/camcima/duraflows/commit/dbe5aa030e6092428aa0296c92315a0a095ac30e))
 
 ### BREAKING CHANGES
 
 - `WorkflowModuleAsyncOptions.observers` field removed — pass observers inside the `WorkflowModuleFactoryConfig` returned by `useFactory` instead; `forRoot` (sync) is unchanged ([f7b4817](https://github.com/camcima/duraflows/commit/f7b4817026bd6bbfc6901c63666af5a5d9cdcbc2))
+- `WorkflowModuleAsyncOptions` is now generic over factory args (`<TArgs extends unknown[] = unknown[]>`); consumers who relied on implicit `any` typing for `useFactory` args now receive `unknown[]` by default. Either parameterize `forRootAsync<[ServiceA, ServiceB]>({ ... })` or cast inside the factory ([d60d67f](https://github.com/camcima/duraflows/commit/d60d67fa53f5fa1f1da2420335d65a73b59f76e5))
+- `WorkflowService` constructor now takes a single `WorkflowRuntime` argument instead of the previous `(runtime, instanceStore, historyStore)` triple — queries delegate to runtime methods. Invisible under normal NestJS DI usage; affects only consumers who manually instantiate `WorkflowService` outside the container ([9787a0c](https://github.com/camcima/duraflows/commit/9787a0cbcf70cb2d56dfe9f3d91836d039c20b87))
 
-> This release includes a breaking change; the next version will be **0.6.0**.
+> This release includes breaking changes; the next version will be **0.6.0**.
 
 ## [0.5.1](https://github.com/camcima/duraflows/compare/v0.5.0...v0.5.1) (2026-04-06)
 
