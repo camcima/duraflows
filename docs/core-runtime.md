@@ -18,15 +18,16 @@ new WorkflowRuntime(options: WorkflowRuntimeOptions)
 
 **WorkflowRuntimeOptions:**
 
-| Property             | Type                         | Description                                                    |
-| -------------------- | ---------------------------- | -------------------------------------------------------------- |
-| `definitionRegistry` | `WorkflowDefinitionRegistry` | Registry of workflow definitions                               |
-| `commandRegistry`    | `WorkflowCommandRegistry`    | Registry of command handlers                                   |
-| `instanceStore`      | `WorkflowInstanceStore`      | Persistence for workflow instances                             |
-| `historyStore`       | `WorkflowHistoryStore`       | Persistence for history records                                |
-| `transactionRunner`  | `WorkflowTransactionRunner`  | Transaction management                                         |
-| `clock`              | `WorkflowClock`              | Clock for timestamps (injectable for testing)                  |
-| `maxOnEnterDepth`    | `number`                     | Maximum depth for onEnter auto-transition chains (default: 10) |
+| Property             | Type                          | Description                                                    |
+| -------------------- | ----------------------------- | -------------------------------------------------------------- |
+| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                               |
+| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                   |
+| `instanceStore`      | `WorkflowInstanceStore`       | Persistence for workflow instances                             |
+| `historyStore`       | `WorkflowHistoryStore`        | Persistence for history records                                |
+| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                         |
+| `clock`              | `WorkflowClock`               | Clock for timestamps (injectable for testing)                  |
+| `maxOnEnterDepth`    | `number`                      | Maximum depth for onEnter auto-transition chains (default: 10) |
+| `observers`          | `readonly WorkflowObserver[]` | Optional observers notified post-commit on every state entry   |
 
 ### createInstance()
 
@@ -112,6 +113,17 @@ interface WorkflowExecutionResult {
   historyUuid: string;
 }
 ```
+
+`outcome` is aggregated across both the event execution and the subsequent onEnter chain:
+
+```
+outcome = eventResult.outcome === "failure" || onEnterChain.outcome === "failure"
+  ? "failure"
+  : "success"
+```
+
+- A best-effort command returning `ok: false` does **not** taint `outcome`.
+- A mandatory command routing to `errorState` surfaces as `outcome: "failure"` even if subsequent onEnter hops succeed.
 
 **Example:**
 
@@ -449,8 +461,10 @@ async execute(
 2. For each command in order:
    - Resolves the handler from `commandRegistry.get(name)`
    - Calls `command.execute(subject, context)`
-   - If `result.ok === false`, stops immediately (remaining commands are skipped)
-   - If the command throws, the exception propagates (not caught)
+   - If the command throws and `command.bestEffort === true`, catches the exception and records `{ ok: false, code: "BEST_EFFORT_THROWN", ... }` — chain continues
+   - If `result.ok === false` and `command.bestEffort === true`, records the result and continues — chain is not stopped
+   - If `result.ok === false` and the command is not best-effort, stops immediately (remaining commands are skipped)
+   - If the command throws and is not best-effort, the exception propagates (not caught)
 
 **Returns:**
 
@@ -506,16 +520,20 @@ The `context` object is shared by reference -- command mutations accumulate acro
 ```ts
 interface OnEnterChainResult {
   finalState: string;
+  outcome: "success" | "failure"; // "failure" if ANY hop routed to errorState, else "success"
   hops: OnEnterHopResult[];
 }
 
 interface OnEnterHopResult {
   fromState: string;
   toState: string;
+  transitionUuid: string;
   outcome: "success" | "failure";
   commandResults: CommandResult[];
 }
 ```
+
+`OnEnterChainResult.outcome` is `"failure"` if any hop routed to `errorState`, otherwise `"success"`. Prefer inspecting `outcome` directly rather than examining the last hop or last command result.
 
 ## EventExecutor
 
@@ -653,7 +671,39 @@ Command handlers implement this interface:
 
 ```ts
 interface WorkflowCommand<TSubject = unknown> {
+  readonly bestEffort?: boolean;
   execute(subject: TSubject, context: WorkflowExecutionContext): Promise<CommandResult> | CommandResult;
+}
+```
+
+### bestEffort
+
+When `bestEffort` is `true` the command is treated as a fire-and-forget side effect. Failure semantics differ from mandatory commands:
+
+- If the command returns `{ ok: false, ... }`, the result is recorded but the chain continues as if the command had succeeded.
+- If the command throws, the runtime catches the exception and converts it to a `CommandResult`:
+  ```ts
+  { ok: false, code: "BEST_EFFORT_THROWN", message, error: { name, message, stack? } }
+  ```
+  The chain continues. The `error` field is a serializable shape (not the raw thrown value) — safe to persist via `JSON.stringify`.
+- A best-effort `ok: false` result does **not** taint `outcome` — `outcome` remains `"success"` unless a mandatory command fails.
+
+Non-best-effort commands retain the current behavior: `ok: false` stops the chain (or routes to `errorState`); throws propagate.
+
+**Example:**
+
+```ts
+class EmitMetricsCommand implements WorkflowCommand {
+  readonly bestEffort = true;
+
+  async execute(subject: unknown, ctx: WorkflowExecutionContext): Promise<CommandResult> {
+    try {
+      await metrics.increment("transition", { to: ctx.toState });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, code: "METRICS_DOWN", error };
+    }
+  }
 }
 ```
 
@@ -687,15 +737,21 @@ interface WorkflowExecutionContext {
   now: Date;
   context: Record<string, unknown>;
   metadata: Readonly<Record<string, unknown>>;
+  readonly fromState: string | null;
+  readonly toState: string;
+  readonly transitionUuid: string;
 }
 ```
 
-| Property          | Type                                | Description                                                                                                                   |
-| ----------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `triggerMetadata` | `Readonly<Record<string, unknown>>` | Optional metadata about who/what triggered the event (frozen object)                                                          |
-| `now`             | `Date`                              | Current timestamp from the injected clock                                                                                     |
-| `context`         | `Record<string, unknown>`           | **Mutable.** The workflow's working memory. Commands can read and write. Changes are persisted after the transition.          |
-| `metadata`        | `Readonly<Record<string, unknown>>` | **Read-only.** The workflow's immutable identity labels set at creation. Attempting to write will be ignored (frozen object). |
+| Property          | Type                                | Description                                                                                                                                                                                                                                                                                 |
+| ----------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `triggerMetadata` | `Readonly<Record<string, unknown>>` | Optional metadata about who/what triggered the event (frozen object)                                                                                                                                                                                                                        |
+| `now`             | `Date`                              | Current timestamp from the injected clock                                                                                                                                                                                                                                                   |
+| `context`         | `Record<string, unknown>`           | **Mutable.** The workflow's working memory. Commands can read and write. Changes are persisted after the transition.                                                                                                                                                                        |
+| `metadata`        | `Readonly<Record<string, unknown>>` | **Read-only.** The workflow's immutable identity labels set at creation. Attempting to write will be ignored (frozen object).                                                                                                                                                               |
+| `fromState`       | `string \| null`                    | The state the workflow is leaving. `null` when entering the initial state on create.                                                                                                                                                                                                        |
+| `toState`         | `string`                            | The state being entered for this command's execution. May differ from the eventual final state in an onEnter chain.                                                                                                                                                                         |
+| `transitionUuid`  | `string`                            | UUID identifying this state entry. All commands running on entry to a given state (event commands + onEnter commands for that hop) share the same UUID. A fresh UUID is generated when the chain transitions to a new state. The matching observer `StateEnterEvent` carries the same UUID. |
 
 See [Context and Metadata](./workflow-definitions.md#context-and-metadata) for a full explanation of the difference.
 
@@ -827,3 +883,71 @@ const runtime = new WorkflowRuntime({
 // Advance time for testing
 currentTime = new Date("2025-01-15T00:00:00Z");
 ```
+
+## Observers
+
+Observers receive a notification every time the runtime enters a new state. They are intended for cross-cutting concerns — audit logging, metrics, cache invalidation — that must not affect runtime correctness.
+
+Both types are exported from `@duraflows/core`.
+
+### Types
+
+```ts
+interface WorkflowObserver {
+  readonly name: string;
+  onEnter?(event: StateEnterEvent): void | Promise<void>;
+}
+
+interface StateEnterEvent {
+  readonly workflowName: string;
+  readonly instanceUuid: string;
+  readonly state: string;
+  readonly fromState: string | null;
+  readonly toState: string;
+  readonly transitionUuid: string;
+  readonly triggerEvent: string | null;
+  readonly context: Readonly<Record<string, unknown>>;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly triggerMetadata: Readonly<Record<string, unknown>>;
+  readonly occurredAt: Date;
+}
+```
+
+### Registration
+
+Pass observers at construction time via `WorkflowRuntimeOptions.observers`, or register them dynamically with `runtime.addObserver()`:
+
+```ts
+const auditObserver: WorkflowObserver = {
+  name: "audit-trail",
+  onEnter: async (event) => {
+    await auditLog.record({
+      instance: event.instanceUuid,
+      state: event.state,
+      at: event.occurredAt,
+      transitionUuid: event.transitionUuid,
+    });
+  },
+};
+
+const runtime = new WorkflowRuntime({
+  // ... other config ...
+  observers: [auditObserver],
+});
+
+// Or register dynamically:
+runtime.addObserver(auditObserver);
+```
+
+### Firing semantics
+
+- Observers fire **post-commit** — only after the state-entering transaction has committed successfully.
+- Observers fire **sequentially** in registration order.
+- Each state entry fires observers **at-most-once**. If the process crashes between commit and the observer call, the event is skipped (no outbox pattern; at-least-once delivery is deferred to a future version).
+- If an observer's `onEnter` throws, the error is caught and logged via `console.warn`. Other observers still fire. Observer errors do **not** cause rollback or affect runtime correctness.
+
+### Snapshot guarantees
+
+`context`, `metadata`, and `triggerMetadata` on the event are deep-cloned via `structuredClone` and deep-frozen at event time. Consumers may hold references to these objects indefinitely — mutations to the live instance after the event fires do not affect the snapshot.
+
+`transitionUuid` on the event matches the `transitionUuid` on the `WorkflowExecutionContext` seen by commands that ran during that state entry, making it straightforward to correlate command results with observer events.
