@@ -1,7 +1,7 @@
 {
   "name": "@duraflows/core",
   "version": "0.5.1",
-  "description": "Framework-agnostic durable workflow runtime for TypeScript, built on @camcima/finita. Ships the runtime, types, persistence interfaces, and observer pattern.",
+  "description": "Framework-agnostic durable workflow runtime for TypeScript, built on @camcima/finita. Ships the runtime, types, persistence interfaces, and observer hooks.",
   "keywords": [
     "workflow",
     "state-machine",

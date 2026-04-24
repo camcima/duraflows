@@ -1,7 +1,7 @@
 {
   "name": "@duraflows/pg",
   "version": "0.5.1",
-  "description": "PostgreSQL persistence adapter for duraflows using `pg`. Provides transaction runner, workflow instance store, and history store backed by SELECT ... FOR UPDATE SKIP LOCKED.",
+  "description": "PostgreSQL persistence adapter for duraflows using `pg`. Provides transaction runner, workflow instance store, and history store with row-level locking for safe concurrent access.",
   "keywords": [
     "duraflows",
     "workflow",
