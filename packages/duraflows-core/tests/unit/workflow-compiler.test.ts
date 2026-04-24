@@ -230,6 +230,27 @@ describe("WorkflowCompiler", () => {
     expect(compiled.process.hasState("shipped")).toBe(true);
   });
 
+  it("registers onEnter.errorState targets in the finita process", () => {
+    const definition: WorkflowDefinition = {
+      name: "onenter-errorstate-reachability",
+      initialState: "processing",
+      states: {
+        processing: {
+          onEnter: {
+            errorState: "failed",
+            commands: [{ name: "riskyWork" }],
+          },
+        },
+        failed: {
+          // reachable ONLY via processing.onEnter.errorState — no event points here
+        },
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    expect(compiled.process.hasState("failed")).toBe(true);
+  });
+
   it("throws WorkflowDefinitionError for non-existent initial state", () => {
     const definition: WorkflowDefinition = {
       name: "order",

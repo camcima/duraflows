@@ -950,6 +950,50 @@ describe("WorkflowRuntime onEnter integration", () => {
     expect(final!.expiresAt).toBeNull();
   });
 
+  it("can trigger an event from a state reachable only via onEnter.errorState", async () => {
+    // This workflow uses a separate "retry" event that moves to a terminal "retried" state,
+    // so the onEnter chain does not re-run on retry and the final toState is predictable.
+    let callCount = 0;
+    const definition: WorkflowDefinition = {
+      name: "errorstate-recovery",
+      initialState: "processing",
+      states: {
+        processing: {
+          onEnter: {
+            targetState: "done",
+            errorState: "failed",
+            commands: [{ name: "mayFail" }],
+          },
+        },
+        done: {},
+        failed: {
+          events: {
+            retry: { targetState: "retried" },
+          },
+        },
+        retried: {},
+      },
+    };
+    definitionRegistry.register(definition);
+    commandRegistry.register("mayFail", {
+      execute: async () => {
+        callCount++;
+        // Fail on the first call (during createInstance), succeed on subsequent calls
+        return callCount === 1 ? { ok: false, code: "FAIL" } : { ok: true };
+      },
+    });
+
+    // Create an instance — onEnter runs, command fails on first call, routes to "failed"
+    const instance = await runtime.createInstance({ workflowName: "errorstate-recovery" });
+    const stored = await instanceStore.findByUuid(instance.uuid);
+    expect(stored!.currentState).toBe("failed");
+
+    // Without the fix, finita throws "State 'failed' not found" because it was never registered.
+    // With the fix, the event fires cleanly and moves to "retried".
+    const result = await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "retry" });
+    expect(result.toState).toBe("retried");
+  });
+
   it("processExpiredWorkflows: resolves timeout event from freshly-locked state, not stale snapshot", async () => {
     // Two-state timeout: "waiting" times out to "expired-A"; "racing" times out to "expired-B".
     // An instance starts in "waiting", but BETWEEN findExpired and lockByUuid, another worker moves it to "racing".

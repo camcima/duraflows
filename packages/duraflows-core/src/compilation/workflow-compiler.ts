@@ -78,18 +78,30 @@ export class WorkflowCompiler {
       }
     }
 
-    // Register onEnter target states in finita graph via never-matching
-    // transitions so that states reachable only through onEnter hops are
-    // known to the Process (finita only auto-registers states reachable
-    // via transitions from the initial state).
+    // Register onEnter target/error states in the finita graph via never-matching
+    // transitions so that states reachable only through onEnter hops are known
+    // to the Process (finita only auto-registers states reachable via transitions
+    // from the initial state).
     for (const stateName of stateNames) {
       const stateDef = definition.states[stateName];
-      if (stateDef.onEnter?.targetState) {
-        const sourceState = states.get(stateName)!;
-        const targetState = states.get(stateDef.onEnter.targetState);
+      const onEnter = stateDef.onEnter;
+      if (!onEnter) continue;
+
+      const sourceState = states.get(stateName)!;
+
+      if (onEnter.targetState) {
+        const targetState = states.get(onEnter.targetState);
         if (targetState) {
           const neverCondition = new CallbackCondition(`workflow:onEnter:${stateName}`, () => false);
           sourceState.addTransition(new Transition(targetState, null, neverCondition));
+        }
+      }
+
+      if (onEnter.errorState) {
+        const errorState = states.get(onEnter.errorState);
+        if (errorState) {
+          const neverCondition = new CallbackCondition(`workflow:onEnter:error:${stateName}`, () => false);
+          sourceState.addTransition(new Transition(errorState, null, neverCondition));
         }
       }
     }
