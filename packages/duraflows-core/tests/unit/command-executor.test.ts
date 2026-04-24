@@ -158,6 +158,40 @@ describe("CommandExecutor", () => {
     expect(secondCalled).toBe(true);
   });
 
+  it("converts a thrown exception from a best-effort command into a CommandResult and continues", async () => {
+    const error = new Error("boom");
+    const okFollowing = okResult({ code: "AFTER_THROW" });
+    let secondCalled = false;
+
+    const registry = createMockRegistry({
+      cmdThrowBE: {
+        bestEffort: true,
+        execute: () => {
+          throw error;
+        },
+      },
+      cmdAfter: {
+        execute: () => {
+          secondCalled = true;
+          return okFollowing;
+        },
+      },
+    });
+    const executor = new CommandExecutor(registry);
+
+    const commands: WorkflowCommandRef[] = [{ name: "cmdThrowBE" }, { name: "cmdAfter" }];
+    const result = await executor.execute(commands, {}, createContext());
+
+    expect(result.outcome).toBe("success");
+    expect(result.commandResults).toHaveLength(2);
+    expect(result.commandResults[0].ok).toBe(false);
+    expect(result.commandResults[0].code).toBe("BEST_EFFORT_THROWN");
+    expect(result.commandResults[0].message).toBe("boom");
+    expect(result.commandResults[0].error).toBe(error);
+    expect(result.commandResults[1]).toEqual(okFollowing);
+    expect(secondCalled).toBe(true);
+  });
+
   it("executes commands in definition order", async () => {
     const callOrder: string[] = [];
 
