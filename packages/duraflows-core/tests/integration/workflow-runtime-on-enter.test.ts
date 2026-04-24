@@ -7,7 +7,7 @@ import { WorkflowValidator } from "../../src/validation/workflow-validator.js";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
 import { OnEnterDepthExceededError } from "../../src/errors/index.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
-import type { WorkflowInstance, WorkflowCommand } from "../../src/types/runtime.js";
+import type { WorkflowInstance, WorkflowCommand, WorkflowExecutionContext } from "../../src/types/runtime.js";
 import type {
   WorkflowInstanceStore,
   WorkflowHistoryStore,
@@ -625,5 +625,38 @@ describe("WorkflowRuntime onEnter integration", () => {
         eventName: "go",
       }),
     ).rejects.toThrow(OnEnterDepthExceededError);
+  });
+
+  it("createInstance passes fromState=null, toState=initialState, transitionUuid to initial onEnter commands", async () => {
+    const definition: WorkflowDefinition = {
+      name: "ctx-fields-create",
+      initialState: "initializing",
+      states: {
+        initializing: {
+          onEnter: {
+            targetState: "ready",
+            commands: [{ name: "captureInitCtx" }],
+          },
+        },
+        ready: {},
+      },
+    };
+
+    definitionRegistry.register(definition);
+
+    let captured: WorkflowExecutionContext | undefined;
+    commandRegistry.register("captureInitCtx", {
+      execute: async (_subject, ctx) => {
+        captured = ctx;
+        return { ok: true };
+      },
+    });
+
+    await runtime.createInstance({ workflowName: "ctx-fields-create" });
+
+    expect(captured).toBeDefined();
+    expect(captured!.fromState).toBeNull();
+    expect(captured!.toState).toBe("initializing");
+    expect(captured!.transitionUuid).toMatch(/^[0-9a-f-]{36}$/);
   });
 });

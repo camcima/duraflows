@@ -115,6 +115,9 @@ export class WorkflowRuntime {
           now: this.clock.now(),
           context: { ...instance.context },
           metadata: deepFreeze({ ...instance.metadata }),
+          fromState: null,
+          toState: definition.initialState,
+          transitionUuid: randomUUID(),
         };
 
         await this.processOnEnterChain(instance, definition, executionContext, undefined);
