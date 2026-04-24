@@ -1,5 +1,68 @@
 # Changelog
 
+## [1.0.0](https://github.com/camcima/duraflows/compare/v0.5.1...v1.0.0) (2026-04-24)
+
+### ⚠ BREAKING CHANGES
+
+* **nestjs:** consumers who relied on implicit any typing for
+useFactory args now get unknown[] by default. Either parameterize
+forRootAsync<[ServiceA, ServiceB]>({ useFactory: (a, b) => ... })
+or cast inside the factory.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+* **nestjs:** WorkflowModuleAsyncOptions.observers has been removed.
+Return observers from the useFactory's WorkflowModuleFactoryConfig instead.
+forRoot's WorkflowModuleOptions.observers is unchanged.
+
+### Features
+
+* **core:** add aggregate outcome field to OnEnterChainResult ([c5efe67](https://github.com/camcima/duraflows/commit/c5efe67fa7eeebd105a439f2014c72f98ddcb056))
+* **core:** add fromState, toState, transitionUuid to WorkflowExecutionContext type ([7008271](https://github.com/camcima/duraflows/commit/7008271d5d1f73f1e4b31584ebb3f0007b4b459f))
+* **core:** add ObserverRegistry to WorkflowRuntime with addObserver method ([9624dd5](https://github.com/camcima/duraflows/commit/9624dd561ee506b78a25ed22a9a6d4ae9dbcb118))
+* **core:** add ObserverRegistry with sequential fire and error containment ([e8a6a1a](https://github.com/camcima/duraflows/commit/e8a6a1a805318e9e9bb4a181fada3bba3f3cc88e))
+* **core:** add optional bestEffort flag to WorkflowCommand interface ([db9dbba](https://github.com/camcima/duraflows/commit/db9dbba18ae448ec17b234b0b65a9c079fa1a7ab))
+* **core:** add optional onObserverError handler on runtime options ([031fb10](https://github.com/camcima/duraflows/commit/031fb10f91b13cc9948b6354c3411ca32a4f9a4b))
+* **core:** allow best-effort commands to fail without aborting transition ([6450e87](https://github.com/camcima/duraflows/commit/6450e872aa76f4d9b71b17915a0cfd2bd7c12d22))
+* **core:** allow command-only and failure-only events (optional targetState) ([7bbaf1a](https://github.com/camcima/duraflows/commit/7bbaf1a300619a38e2464152511d7463b37f0a6c))
+* **core:** collect post-commit observer events in triggerEvent and onEnter chain ([da1b606](https://github.com/camcima/duraflows/commit/da1b606e38b70f9cec98792fa09edbe544a0b323))
+* **core:** deep-clone and deep-freeze definitions on register ([16b0829](https://github.com/camcima/duraflows/commit/16b0829d68f386d15282dd382641fca8adb52446))
+* **core:** expose WorkflowCommandRef.metadata to commands via ctx.commandMetadata ([4acef2b](https://github.com/camcima/duraflows/commit/4acef2bb35de862f06b11a9236a60a065c227300))
+* **core:** fire observer events for createInstance initial state entry ([9747800](https://github.com/camcima/duraflows/commit/9747800bfe34c1c4d5e1ce498db4258ab6440a1d))
+* **core:** fire observer events on timeout-driven transitions ([56fd399](https://github.com/camcima/duraflows/commit/56fd399e24490ecdf5cdc3232b929ac52fdb522f))
+* **core:** introduce WorkflowObserver and StateEnterEvent types ([79fe178](https://github.com/camcima/duraflows/commit/79fe178604385c279f2507a3121e09a582decc8a))
+* **core:** populate context transition fields in createInstance for initial onEnter ([d9eb4a4](https://github.com/camcima/duraflows/commit/d9eb4a47941ef9f3ed0ff058d9efcc2bcde2c815))
+* **core:** populate context transition fields in processTimeoutEvent ([84acb84](https://github.com/camcima/duraflows/commit/84acb841b633afd09f6bad7b3ae781803a6f45d5))
+* **core:** populate fromState/toState/transitionUuid in triggerEvent context ([1fce60f](https://github.com/camcima/duraflows/commit/1fce60fe415eda72f59cdf039e446da4cd34f167))
+* **core:** re-export observer types and ObserverRegistry from package barrel ([ba43613](https://github.com/camcima/duraflows/commit/ba4361359967ac4acc69d2df9430fb7e742212bd))
+* **core:** regenerate transitionUuid per onEnter hop and update from/toState ([0321ebf](https://github.com/camcima/duraflows/commit/0321ebfcad045f1e86ede798ddf948ac74e2b4ec))
+* **core:** strengthen persistence contract with JSDoc and shared conformance tests ([71d7b0f](https://github.com/camcima/duraflows/commit/71d7b0f1f79f1390f65a73b6da296cf4bebd87dd))
+* **nestjs:** forward optional observers from WorkflowModule to runtime ([c9694b5](https://github.com/camcima/duraflows/commit/c9694b55f5fad2d80b7b727461ae82f9e8961b40))
+* **nestjs:** move forRootAsync observers into factory config; re-export types ([f7b4817](https://github.com/camcima/duraflows/commit/f7b4817026bd6bbfc6901c63666af5a5d9cdcbc2))
+
+### Bug Fixes
+
+* add @types/node devDep and override undici for pnpm strict resolution ([5c98923](https://github.com/camcima/duraflows/commit/5c98923ecea1e477428c1e27c1604b2d2cd7cef6))
+* **ci:** pin pnpm to 9.15.0 and override basic-ftp to clear CVEs ([af82390](https://github.com/camcima/duraflows/commit/af8239059f442c69f19873718fd59cb1d1d95f90))
+* **core:** aggregate triggerEvent outcome from chain outcome not last command result ([941bd1a](https://github.com/camcima/duraflows/commit/941bd1afb5b059d411782af79b520f73ff6719ec))
+* **core:** count processed only when timeout event actually fires ([213a9b5](https://github.com/camcima/duraflows/commit/213a9b54743ccc416cb9048a97b5391b9e70930c))
+* **core:** deep-clone context and metadata at runtime boundaries ([2f559ba](https://github.com/camcima/duraflows/commit/2f559baf58c650b44c2a0c4138aed7b3971dc4c4))
+* **core:** deep-clone metadata and triggerMetadata in execution context ([05834b9](https://github.com/camcima/duraflows/commit/05834b941796f6e7576d985a5c7928be386c776c))
+* **core:** deep-clone observer snapshots to avoid freezing live instance state ([88f4d4c](https://github.com/camcima/duraflows/commit/88f4d4cbe4a475f5a7c80369ba3752c6ee2fab8d))
+* **core:** per-instance transactions in processExpiredWorkflows for isolation ([6c00dc6](https://github.com/camcima/duraflows/commit/6c00dc64ca778ab84f19a49e22cfa49e9a4b4e62))
+* **core:** register onEnter.errorState targets in finita process graph ([f069770](https://github.com/camcima/duraflows/commit/f0697701d8cc066e9dbed00e7f22dab05db19eee))
+* **core:** relax deepFreeze signature to accept WorkflowDefinition without double-cast ([c869f5d](https://github.com/camcima/duraflows/commit/c869f5d2af626ad361592d33454bb5746512e2cf))
+* **core:** resolve timeout eventName from freshly-locked instance state ([30d7f73](https://github.com/camcima/duraflows/commit/30d7f7368f7fa4d3fe15aeb2e609822f50cdf15b))
+* **core:** share per-hop transitionUuid between onEnter commands and observer events ([0405a3b](https://github.com/camcima/duraflows/commit/0405a3b61385320851dea4d979c3a95443f4a757))
+* **core:** store serializable {name,message,stack} for best-effort thrown errors ([814e841](https://github.com/camcima/duraflows/commit/814e841fc2fac2b058290697da1461984a93bc39))
+* **core:** uuid identifies a state entry; first onEnter hop reuses caller uuid ([d46bbae](https://github.com/camcima/duraflows/commit/d46bbaef4ee6877a9897142fb82d29bd1c4c1eb0))
+* **kysely:** align @duraflows/core dep range with package version (0.5.1) ([1104e7c](https://github.com/camcima/duraflows/commit/1104e7ccbd03a1feb55479d6b8f25d11f0693355))
+* **pg:** make migration 002 idempotent for fresh and legacy schemas ([35358a6](https://github.com/camcima/duraflows/commit/35358a6215aed0783d5b3b4af3311fe502361f53))
+* **pg:** remove metadata_json from UPDATE — metadata is write-once ([b638a7c](https://github.com/camcima/duraflows/commit/b638a7cd2c06e5fa50e35aa66d715b836de56604))
+
+### Code Refactoring
+
+* **nestjs:** make WorkflowModuleAsyncOptions generic over factory args ([d60d67f](https://github.com/camcima/duraflows/commit/d60d67fa53f5fa1f1da2420335d65a73b59f76e5))
+
 ## [Unreleased]
 
 ### Features
