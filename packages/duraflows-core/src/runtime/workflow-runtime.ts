@@ -137,12 +137,18 @@ export class WorkflowRuntime {
       const definition = this.definitionRegistry.get(instance.workflowName);
       const compiled = this.compiler.compile(definition);
 
+      const eventDef = definition.states[instance.currentState]?.events?.[input.eventName];
+      const prospectiveToState = eventDef?.targetState ?? instance.currentState;
+
       // Build execution context with instance's mutable context and immutable metadata
       const executionContext: WorkflowExecutionContext = {
         triggerMetadata: deepFreeze({ ...(input.triggerMetadata ?? {}) }),
         now: this.clock.now(),
         context: { ...instance.context },
         metadata: deepFreeze({ ...instance.metadata }),
+        fromState: instance.currentState,
+        toState: prospectiveToState,
+        transitionUuid: randomUUID(),
       };
 
       const result = await this.eventExecutor.execute(

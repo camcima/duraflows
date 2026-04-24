@@ -7,7 +7,7 @@ import { WorkflowValidator } from "../../src/validation/workflow-validator.js";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
 import { WorkflowError } from "../../src/errors/index.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
-import type { WorkflowInstance } from "../../src/types/runtime.js";
+import type { WorkflowInstance, WorkflowExecutionContext } from "../../src/types/runtime.js";
 import type {
   WorkflowInstanceStore,
   WorkflowHistoryStore,
@@ -130,15 +130,18 @@ describe("WorkflowRuntime.getAvailableEvents", () => {
 
   let runtime: WorkflowRuntime;
   let instanceUuid: string;
+  let definitionRegistry: InMemoryDefinitionRegistry;
+  let commandRegistry: InMemoryCommandRegistry;
+  let instanceStore: InMemoryInstanceStore;
 
   beforeEach(async () => {
-    const definitionRegistry = new InMemoryDefinitionRegistry({
+    definitionRegistry = new InMemoryDefinitionRegistry({
       validator: new WorkflowValidator(),
       compiler: new WorkflowCompiler(),
     });
     definitionRegistry.register(DEFINITION);
 
-    const commandRegistry = new InMemoryCommandRegistry();
+    commandRegistry = new InMemoryCommandRegistry();
     commandRegistry.register("validateOrder", {
       execute: async () => ({ ok: true }),
     });
@@ -149,10 +152,12 @@ describe("WorkflowRuntime.getAvailableEvents", () => {
       execute: async () => ({ ok: true }),
     });
 
+    instanceStore = new InMemoryInstanceStore();
+
     runtime = new WorkflowRuntime({
       definitionRegistry,
       commandRegistry,
-      instanceStore: new InMemoryInstanceStore(),
+      instanceStore,
       historyStore: new InMemoryHistoryStore(),
       transactionRunner: new InMemoryTransactionRunner(),
       clock,
@@ -231,5 +236,41 @@ describe("WorkflowRuntime.getAvailableEvents", () => {
         workflowInstanceUuid: bogusUuid,
       }),
     ).rejects.toThrow(`Workflow instance "${bogusUuid}" not found`);
+  });
+
+  it("triggerEvent passes fromState, toState, transitionUuid to event commands", async () => {
+    const definition: WorkflowDefinition = {
+      name: "ctx-fields-event",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              targetState: "submitted",
+              commands: [{ name: "captureCtx" }],
+            },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    definitionRegistry.register(definition);
+
+    let captured: WorkflowExecutionContext | undefined;
+    commandRegistry.register("captureCtx", {
+      execute: async (_subject, ctx) => {
+        captured = ctx;
+        return { ok: true };
+      },
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "ctx-fields-event" });
+    await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "submit" });
+
+    expect(captured).toBeDefined();
+    expect(captured!.fromState).toBe("draft");
+    expect(captured!.toState).toBe("submitted");
+    expect(captured!.transitionUuid).toMatch(/^[0-9a-f-]{36}$/);
   });
 });
