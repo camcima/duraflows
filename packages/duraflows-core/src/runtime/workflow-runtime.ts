@@ -302,8 +302,9 @@ export class WorkflowRuntime {
   async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<ProcessExpiredWorkflowsResult> {
     const limit = input?.limit ?? 100;
     const now = this.clock.now();
+    const eventsToFire: StateEnterEvent[] = [];
 
-    return this.transactionRunner.runInTransaction(async () => {
+    const result = await this.transactionRunner.runInTransaction(async () => {
       const expired = await this.instanceStore.findExpired(limit, now);
       let processed = 0;
       const failed: Array<{ uuid: string; error: string }> = [];
@@ -321,7 +322,7 @@ export class WorkflowRuntime {
             continue;
           }
 
-          await this.processTimeoutEvent(instance, definition, eventName);
+          await this.processTimeoutEvent(instance, definition, eventName, eventsToFire);
           processed++;
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : String(error);
@@ -331,12 +332,19 @@ export class WorkflowRuntime {
 
       return { processed, failed };
     });
+
+    for (const event of eventsToFire) {
+      await this.observerRegistry.fireOnEnter(event);
+    }
+
+    return result;
   }
 
   private async processTimeoutEvent(
     instance: WorkflowInstance,
     definition: WorkflowDefinition,
     eventName: string,
+    eventsToFire: StateEnterEvent[],
   ): Promise<void> {
     const compiled = this.compiler.compile(definition);
 
@@ -362,7 +370,6 @@ export class WorkflowRuntime {
       executionContext,
     );
 
-    // Update instance
     const now = this.clock.now();
     instance.currentState = result.toState;
     instance.version++;
@@ -379,7 +386,6 @@ export class WorkflowRuntime {
 
     await this.instanceStore.update(instance);
 
-    // Extract error message
     let errorMessage: string | undefined;
     if (result.outcome === "failure" && result.commandResults.length > 0) {
       const lastResult = result.commandResults[result.commandResults.length - 1];
@@ -399,11 +405,23 @@ export class WorkflowRuntime {
       triggerMetadata: { source: "timeout" },
     });
 
-    // Update execution context to reflect merged state context for onEnter commands
+    eventsToFire.push({
+      workflowName: instance.workflowName,
+      instanceUuid: instance.uuid,
+      state: result.toState,
+      fromState: result.fromState,
+      toState: result.toState,
+      transitionUuid: executionContext.transitionUuid,
+      triggerEvent: eventName,
+      context: deepFreeze({ ...instance.context }),
+      metadata: deepFreeze({ ...instance.metadata }),
+      triggerMetadata: deepFreeze({ source: "timeout" }),
+      occurredAt: now,
+    });
+
     executionContext.context = { ...instance.context };
 
-    // Process onEnter chain on the new state
-    await this.processOnEnterChain(instance, definition, executionContext, undefined, []);
+    await this.processOnEnterChain(instance, definition, executionContext, undefined, eventsToFire);
   }
 
   private async processOnEnterChain(
