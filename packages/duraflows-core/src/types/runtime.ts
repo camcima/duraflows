@@ -1,4 +1,5 @@
 export interface WorkflowCommand<TSubject = unknown> {
+  readonly bestEffort?: boolean;
   execute(subject: TSubject, context: WorkflowExecutionContext): Promise<CommandResult> | CommandResult;
 }
 
