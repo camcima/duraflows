@@ -119,26 +119,33 @@ export class AppModule {}
 | ------------------- | ------------------------------- | -------- | --------------------------------------------------------------------------------------- |
 | `workflows`         | `WorkflowDefinition[]`          | Yes      | Workflow definitions to register                                                        |
 | `commands`          | `WorkflowCommandRegistration[]` | No       | Explicit command handler registrations. Optional if using `@WorkflowCommand` decorator. |
+| `observers`         | `WorkflowObserver[]`            | No       | Lifecycle observers registered with the runtime. See [Observers](#observers).           |
 | `persistence`       | `WorkflowPersistenceProvider`   | Yes      | Persistence implementations (instance store, history store, transaction runner)         |
 | `clock`             | `WorkflowClock`                 | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                   |
 | `enableControllers` | `boolean`                       | No       | If `true`, registers REST controllers. Defaults to `false`                              |
 
 ### forRootAsync()
 
-Asynchronous module configuration for cases where options depend on other providers. The interface is split: `commands` and `enableControllers` are static fields on the options object (available at module-setup time), while `useFactory` returns only the async-resolved config (`workflows`, `persistence`, `clock`).
+Asynchronous module configuration for cases where options depend on other providers. The interface is split: `commands` and `enableControllers` are static fields on the options object (available at module-setup time), while `useFactory` returns the async-resolved config (`workflows`, `persistence`, `clock`, `observers`). Observers belong in `useFactory` so they can be composed from injected services.
 
 ```ts
 @Module({
   imports: [
     WorkflowModule.forRootAsync({
-      imports: [ConfigModule],
+      imports: [ConfigModule, AuditModule],
       commands: [{ name: "chargePayment", useClass: ChargePaymentCommand }],
       enableControllers: true,
-      useFactory: (config: ConfigService) => ({
+      useFactory: (config: ConfigService, auditService: AuditService) => ({
         workflows: [orderWorkflow],
         persistence: pgWorkflowProviders(new Pool({ connectionString: config.get("DATABASE_URL") })),
+        observers: [
+          {
+            name: "audit",
+            onEnter: (event) => auditService.record(event),
+          },
+        ],
       }),
-      inject: [ConfigService],
+      inject: [ConfigService, AuditService],
     }),
   ],
 })
@@ -157,11 +164,108 @@ export class AppModule {}
 
 **WorkflowModuleFactoryConfig** (returned by `useFactory`):
 
-| Property      | Type                          | Required | Description                                           |
-| ------------- | ----------------------------- | -------- | ----------------------------------------------------- |
-| `workflows`   | `WorkflowDefinition[]`        | Yes      | Workflow definitions to register                      |
-| `persistence` | `WorkflowPersistenceProvider` | Yes      | Persistence implementations                           |
-| `clock`       | `WorkflowClock`               | No       | Custom clock. Defaults to `{ now: () => new Date() }` |
+| Property      | Type                          | Required | Description                                                                          |
+| ------------- | ----------------------------- | -------- | ------------------------------------------------------------------------------------ |
+| `workflows`   | `WorkflowDefinition[]`        | Yes      | Workflow definitions to register                                                     |
+| `persistence` | `WorkflowPersistenceProvider` | Yes      | Persistence implementations                                                          |
+| `clock`       | `WorkflowClock`               | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                |
+| `observers`   | `WorkflowObserver[]`          | No       | Lifecycle observers. Return them from the factory to compose from injected services. |
+
+#### Breaking change: observers moved into useFactory (v0.6.0)
+
+In v0.6.0, `observers` was removed from the top-level `WorkflowModuleAsyncOptions` and must now be returned from `useFactory` as part of `WorkflowModuleFactoryConfig`. This allows observers to reference services from the DI container.
+
+```ts
+// BEFORE (v0.5.x) — no longer works
+WorkflowModule.forRootAsync({
+  observers: [myObserver], // removed from top-level
+  useFactory: () => ({ workflows: [...], persistence: ... }),
+});
+
+// AFTER (v0.6.0+) — correct
+WorkflowModule.forRootAsync({
+  useFactory: (auditService: AuditService) => ({
+    workflows: [...],
+    persistence: ...,
+    observers: [myObserver], // now part of factory return value
+  }),
+  inject: [AuditService],
+});
+```
+
+**Migration:** move the `observers` array from the top level of `forRootAsync(...)` into the object returned by `useFactory`. No other changes are required. The synchronous `forRoot` is unaffected — it continues to accept `observers` as a top-level option.
+
+## Observers
+
+Observers receive lifecycle events fired by the workflow runtime after a state transition is committed. They are registered via the `observers` option on `WorkflowModuleOptions` (for `forRoot`) or returned from `useFactory` (for `forRootAsync`).
+
+**Semantics:**
+
+- Fired post-commit — the database write has already completed before observers run
+- At-most-once — an observer that throws does not retry
+- Sequential — observers run one after another in registration order
+- Error-contained — a thrown error is logged via `console.warn` and does not affect workflow correctness or the transaction result
+
+**`WorkflowObserver` interface:**
+
+```ts
+interface WorkflowObserver {
+  name: string;
+  onEnter?: (event: StateEnterEvent) => Promise<void> | void;
+}
+```
+
+**`StateEnterEvent` fields:**
+
+| Field            | Type     | Description                                         |
+| ---------------- | -------- | --------------------------------------------------- |
+| `transitionUuid` | `string` | UUID shared by all hops in a single event execution |
+| `workflowName`   | `string` | Name of the workflow definition                     |
+| `instanceUuid`   | `string` | UUID of the workflow instance                       |
+| `fromState`      | `string` | State before the transition                         |
+| `toState`        | `string` | State entered by this hop                           |
+| `eventName`      | `string` | Event that triggered the transition                 |
+
+**Example — forRoot:**
+
+```typescript
+@Module({
+  imports: [
+    WorkflowModule.forRoot({
+      workflows: [myDefinition],
+      persistence: myPersistenceProvider,
+      observers: [
+        {
+          name: "audit",
+          onEnter: async (event) => {
+            // post-commit, at-most-once
+            await auditLog.record(event);
+          },
+        },
+      ],
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+**Example — forRootAsync (observers from DI):**
+
+```typescript
+WorkflowModule.forRootAsync({
+  useFactory: (auditService: AuditService) => ({
+    workflows: [myDefinition],
+    persistence: myPersistence,
+    observers: [
+      {
+        name: "audit",
+        onEnter: (event) => auditService.record(event),
+      },
+    ],
+  }),
+  inject: [AuditService],
+});
+```
 
 ## WorkflowCommandRegistration
 
@@ -496,6 +600,14 @@ import { WorkflowService } from "@duraflows/nestjs";
 // You can do:
 import type { WorkflowDefinition } from "@duraflows/nestjs";
 import { WorkflowService } from "@duraflows/nestjs";
+```
+
+This includes the observer types. Both import paths are valid:
+
+```ts
+// Both are equivalent:
+import type { WorkflowObserver, StateEnterEvent } from "@duraflows/nestjs";
+import type { WorkflowObserver, StateEnterEvent } from "@duraflows/core";
 ```
 
 ## Startup Validation
