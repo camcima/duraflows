@@ -136,9 +136,9 @@ export class WorkflowRuntime {
           toState: definition.initialState,
           transitionUuid: executionContext.transitionUuid,
           triggerEvent: null,
-          context: deepFreeze({ ...instance.context }),
-          metadata: deepFreeze({ ...instance.metadata }),
-          triggerMetadata: deepFreeze({ ...(input.triggerMetadata ?? {}) }),
+          context: deepFreeze(structuredClone(instance.context)),
+          metadata: deepFreeze(structuredClone(instance.metadata)),
+          triggerMetadata: deepFreeze(structuredClone(input.triggerMetadata ?? {})),
           occurredAt: now,
         });
 
@@ -164,9 +164,9 @@ export class WorkflowRuntime {
       toState: definition.initialState,
       transitionUuid: randomUUID(),
       triggerEvent: null,
-      context: deepFreeze({ ...instance.context }),
-      metadata: deepFreeze({ ...instance.metadata }),
-      triggerMetadata: deepFreeze({ ...(input.triggerMetadata ?? {}) }),
+      context: deepFreeze(structuredClone(instance.context)),
+      metadata: deepFreeze(structuredClone(instance.metadata)),
+      triggerMetadata: deepFreeze(structuredClone(input.triggerMetadata ?? {})),
       occurredAt: now,
     });
 
@@ -254,9 +254,9 @@ export class WorkflowRuntime {
         toState: eventResult.toState,
         transitionUuid: executionContext.transitionUuid,
         triggerEvent: input.eventName,
-        context: deepFreeze({ ...instance.context }),
-        metadata: deepFreeze({ ...instance.metadata }),
-        triggerMetadata: deepFreeze({ ...(input.triggerMetadata ?? {}) }),
+        context: deepFreeze(structuredClone(instance.context)),
+        metadata: deepFreeze(structuredClone(instance.metadata)),
+        triggerMetadata: deepFreeze(structuredClone(input.triggerMetadata ?? {})),
         occurredAt: now,
       });
 
@@ -413,8 +413,8 @@ export class WorkflowRuntime {
       toState: result.toState,
       transitionUuid: executionContext.transitionUuid,
       triggerEvent: eventName,
-      context: deepFreeze({ ...instance.context }),
-      metadata: deepFreeze({ ...instance.metadata }),
+      context: deepFreeze(structuredClone(instance.context)),
+      metadata: deepFreeze(structuredClone(instance.metadata)),
       triggerMetadata: deepFreeze({ source: "timeout" }),
       occurredAt: now,
     });
@@ -495,8 +495,8 @@ export class WorkflowRuntime {
         toState: hop.toState,
         transitionUuid: hop.transitionUuid,
         triggerEvent: "onEnter",
-        context: deepFreeze({ ...instance.context }),
-        metadata: deepFreeze({ ...instance.metadata }),
+        context: deepFreeze(structuredClone(instance.context)),
+        metadata: deepFreeze(structuredClone(instance.metadata)),
         triggerMetadata: deepFreeze({ source: "onEnter" }),
         occurredAt: now,
       });

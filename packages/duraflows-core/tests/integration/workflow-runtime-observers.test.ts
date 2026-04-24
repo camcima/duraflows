@@ -243,6 +243,70 @@ describe("WorkflowRuntime observers", () => {
     expect(captured[0].state).toBe("ready");
   });
 
+  it("observer snapshots do not freeze live instance.context nested objects", async () => {
+    const definition: WorkflowDefinition = {
+      name: "obs-snapshot-isolation",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            step1: {
+              targetState: "middle",
+              commands: [{ name: "setNested" }],
+            },
+          },
+        },
+        middle: {
+          onEnter: {
+            targetState: "done",
+            commands: [{ name: "mutateNested" }],
+          },
+        },
+        done: {},
+      },
+    };
+    definitionRegistry.register(definition);
+
+    commandRegistry.register("setNested", {
+      execute: async (_subject, ctx) => {
+        ctx.context["nested"] = { count: 1, deeper: { tag: "initial" } };
+        return { ok: true };
+      },
+    });
+    commandRegistry.register("mutateNested", {
+      execute: async (_subject, ctx) => {
+        const nested = ctx.context["nested"] as { count: number; deeper: { tag: string } };
+        // With the fix: instance.context.nested is a fresh object (structuredClone), NOT frozen — these succeed.
+        // Without the fix: deepFreeze({ ...instance.context }) aliased the nested refs and froze them in-place.
+        // These mutations throw TypeError in that case, surfacing the bug inside a single triggerEvent call.
+        nested.count = 2;
+        nested.deeper.tag = "updated";
+        return { ok: true };
+      },
+    });
+
+    runtime.addObserver({
+      name: "snapshot-reader",
+      onEnter: () => {
+        // Presence forces the runtime to build the snapshot (triggering deepFreeze).
+      },
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "obs-snapshot-isolation" });
+    const result = await runtime.triggerEvent({
+      workflowInstanceUuid: instance.uuid,
+      eventName: "step1",
+    });
+
+    expect(result.outcome).toBe("success");
+    expect(result.toState).toBe("done");
+
+    const updated = await instanceStore.findByUuid(instance.uuid);
+    const nested = updated!.context["nested"] as { count: number; deeper: { tag: string } };
+    expect(nested.count).toBe(2);
+    expect(nested.deeper.tag).toBe("updated");
+  });
+
   it("observer event transitionUuid equals the one commands saw for the same hop", async () => {
     const definition: WorkflowDefinition = {
       name: "obs-uuid-correlation",
