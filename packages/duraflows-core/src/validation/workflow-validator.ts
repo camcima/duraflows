@@ -77,10 +77,12 @@ export class WorkflowValidator {
         const event = state.events[eventName];
         const eventPath = `states.${stateName}.events.${eventName}`;
 
-        if (!event.targetState) {
+        // An event must do something: transition state, route on error, or run commands.
+        // A completely empty event is a declarative no-op and is rejected.
+        if (!event.targetState && !event.errorState && (!event.commands || event.commands.length === 0)) {
           errors.push({
             path: eventPath,
-            message: "Event must define targetState",
+            message: "Event must define at least one of: targetState, errorState, or commands",
           });
         }
 

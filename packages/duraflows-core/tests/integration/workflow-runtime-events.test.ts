@@ -391,4 +391,98 @@ describe("WorkflowRuntime.getAvailableEvents", () => {
     expect(result.outcome).toBe("failure");
     expect(result.toState).toBe("failed");
   });
+
+  it("command-only event stays in current state on success", async () => {
+    const definition: WorkflowDefinition = {
+      name: "command-only",
+      initialState: "active",
+      states: {
+        active: {
+          events: {
+            ping: {
+              commands: [{ name: "emitPing" }],
+            },
+          },
+        },
+      },
+    };
+    definitionRegistry.register(definition);
+
+    let pingCount = 0;
+    commandRegistry.register("emitPing", {
+      execute: async () => {
+        pingCount++;
+        return { ok: true };
+      },
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "command-only" });
+    const result = await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "ping" });
+
+    expect(result.outcome).toBe("success");
+    expect(result.toState).toBe("active");
+    expect(pingCount).toBe(1);
+
+    // Still in active after the event
+    const stored = await instanceStore.findByUuid(instance.uuid);
+    expect(stored!.currentState).toBe("active");
+  });
+
+  it("failure-only event (errorState, no targetState) routes to errorState on command failure", async () => {
+    const definition: WorkflowDefinition = {
+      name: "failure-only",
+      initialState: "processing",
+      states: {
+        processing: {
+          events: {
+            try: {
+              errorState: "failed",
+              commands: [{ name: "alwaysFails" }],
+            },
+          },
+        },
+        failed: {},
+      },
+    };
+    definitionRegistry.register(definition);
+
+    commandRegistry.register("alwaysFails", {
+      execute: async () => ({ ok: false, code: "NOPE" }),
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "failure-only" });
+    const result = await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "try" });
+
+    expect(result.outcome).toBe("failure");
+    expect(result.toState).toBe("failed");
+  });
+
+  it("failure-only event stays in current state when commands succeed", async () => {
+    const definition: WorkflowDefinition = {
+      name: "failure-only-success-path",
+      initialState: "processing",
+      states: {
+        processing: {
+          events: {
+            try: {
+              errorState: "failed",
+              commands: [{ name: "ok" }],
+            },
+          },
+        },
+        failed: {},
+      },
+    };
+    definitionRegistry.register(definition);
+
+    commandRegistry.register("ok", {
+      execute: async () => ({ ok: true }),
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "failure-only-success-path" });
+    const result = await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "try" });
+
+    expect(result.outcome).toBe("success");
+    expect(result.toState).toBe("processing");
+  });
 });

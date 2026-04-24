@@ -99,29 +99,64 @@ describe("WorkflowValidator", () => {
     );
   });
 
-  it("returns an error when an event defines errorState but no targetState", () => {
-    const def: WorkflowDefinition = {
-      name: "order-workflow",
-      initialState: "pending",
+  it("accepts an event with only commands (no state change on success)", () => {
+    const definition: WorkflowDefinition = {
+      name: "command-only-event",
+      initialState: "ready",
       states: {
-        pending: {
+        ready: {
           events: {
-            fail: { errorState: "error" },
+            ping: {
+              commands: [{ name: "emitPing" }],
+            },
           },
         },
-        error: {},
       },
     };
 
-    const result = validator.validate(def);
+    const result = validator.validate(definition, { knownCommandNames: new Set(["emitPing"]) });
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
 
+  it("accepts an event with only errorState (failure-only transition)", () => {
+    const definition: WorkflowDefinition = {
+      name: "error-only-event",
+      initialState: "ready",
+      states: {
+        ready: {
+          events: {
+            process: {
+              errorState: "failed",
+              commands: [{ name: "risky" }],
+            },
+          },
+        },
+        failed: {},
+      },
+    };
+
+    const result = validator.validate(definition, { knownCommandNames: new Set(["risky"]) });
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("rejects a completely empty event (no targetState, no errorState, no commands)", () => {
+    const definition: WorkflowDefinition = {
+      name: "empty-event",
+      initialState: "ready",
+      states: {
+        ready: {
+          events: {
+            noop: {},
+          },
+        },
+      },
+    };
+
+    const result = validator.validate(definition);
     expect(result.valid).toBe(false);
-    expect(result.errors).toContainEqual(
-      expect.objectContaining({
-        path: "states.pending.events.fail",
-        message: expect.stringContaining("targetState"),
-      }),
-    );
+    expect(result.errors.some((e) => e.message.includes("targetState, errorState, or commands"))).toBe(true);
   });
 
   it("returns an error when a state has multiple events with timeouts", () => {

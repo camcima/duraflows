@@ -193,27 +193,36 @@ interface WorkflowEventDefinition {
 
 | Property      | Type                        | Required | Description                                                                                       |
 | ------------- | --------------------------- | -------- | ------------------------------------------------------------------------------------------------- |
-| `targetState` | `string`                    | Yes\*    | State to transition to on success. Must reference a valid state name.                             |
+| `targetState` | `string`                    | No       | State to transition to on success. Must reference a valid state name.                             |
 | `errorState`  | `string`                    | No       | State to transition to on command failure. Must reference a valid state name.                     |
 | `commands`    | `WorkflowCommandRef[]`      | No       | Ordered list of commands to execute when the event is triggered.                                  |
 | `timeout`     | `WorkflowTimeoutDefinition` | No       | Timeout configuration for automatic triggering. At most one event per state may define a timeout. |
 | `metadata`    | `Record<string, unknown>`   | No       | Arbitrary event metadata.                                                                         |
 
-\*`targetState` is required for any event that changes state.
+An event must define at least one of `targetState`, `errorState`, or `commands`. A completely empty event is rejected as a declarative no-op.
+
+### Event Shapes
+
+The runtime supports several event shapes:
+
+- **Transitioning event** (`targetState` + optionally `commands`): runs commands, then transitions to `targetState` on success. On failure, routes to `errorState` if defined, else throws `CommandFailureError`.
+- **Command-only event** (`commands`, no `targetState` or `errorState`): runs commands, stays in current state on success. Throws `CommandFailureError` if a mandatory command fails.
+- **Failure-only event** (`errorState` + `commands`, no `targetState`): stays in current state on success, routes to `errorState` on command failure.
+- **Transitioning with recovery** (`targetState` + `errorState` + `commands`): transitions to `targetState` on success, routes to `errorState` on failure.
 
 ### Event Outcome Rules
 
-| Scenario                                             | Outcome   | Transition                                                  |
-| ---------------------------------------------------- | --------- | ----------------------------------------------------------- |
-| No commands defined                                  | `success` | Transitions to `targetState`                                |
-| All commands return `{ ok: true }`                   | `success` | Transitions to `targetState`                                |
-| Any command returns `{ ok: false }`                  | `failure` | Transitions to `errorState` (if defined)                    |
-| Any command returns `{ ok: false }`, no `errorState` | --        | Throws `CommandFailureError`, no transition                 |
-| Any command throws an exception                      | --        | Exception propagates, no transition, transaction rolls back |
+| Scenario                                                  | Outcome   | Transition                                                  |
+| --------------------------------------------------------- | --------- | ----------------------------------------------------------- |
+| No commands defined                                       | `success` | Transitions to `targetState` (if defined), else stays put   |
+| All commands return `{ ok: true }`                        | `success` | Transitions to `targetState` (if defined), else stays put   |
+| Any command returns `{ ok: false }`, `errorState` defined | `failure` | Transitions to `errorState`                                 |
+| Any command returns `{ ok: false }`, no `errorState`      | --        | Throws `CommandFailureError`, no transition                 |
+| Any command throws an exception                           | --        | Exception propagates, no transition, transaction rolls back |
 
 ### Examples
 
-**Simple event (no commands):**
+**Simple transitioning event (no commands):**
 
 ```ts
 PaymentReceived: {
@@ -236,6 +245,27 @@ Export: {
 ```
 
 Commands execute sequentially. If `validateInventory` fails, `sendToWarehouse` and `notifyCustomer` are skipped and the workflow transitions to `export_failed`.
+
+**Command-only event (no state change on success):**
+
+```ts
+Ping: {
+  commands: [{ name: "emitPing" }],
+}
+```
+
+The workflow stays in its current state after the event. Use this for side effects that don't change state.
+
+**Failure-only event (error routing, no success transition):**
+
+```ts
+TryProcess: {
+  errorState: "failed",
+  commands: [{ name: "riskyOperation" }],
+}
+```
+
+On success the workflow stays in its current state; on failure it routes to `failed`.
 
 **Timeout event:**
 

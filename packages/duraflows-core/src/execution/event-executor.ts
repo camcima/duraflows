@@ -46,15 +46,24 @@ export class EventExecutor {
       throw new CommandFailureError(instanceUuid, eventName, failedCommandName, failedResult);
     }
 
-    // Build finita context and trigger event
-    const finitaContext = new Map<string, unknown>();
-    finitaContext.set("workflow:eventOutcome", outcome);
+    // Determine target state. For command-only events (no targetState, no errorState),
+    // no transitions are registered in finita — skip the statemachine call and stay in place.
+    let toState: string;
 
-    const statemachine = new Statemachine(subject, compiledWorkflow.process, currentState);
+    if (!eventDef.targetState && !eventDef.errorState) {
+      // Command-only event: no state change regardless of outcome.
+      toState = fromState;
+    } else {
+      // Build finita context and trigger event
+      const finitaContext = new Map<string, unknown>();
+      finitaContext.set("workflow:eventOutcome", outcome);
 
-    await statemachine.triggerEvent(eventName, finitaContext);
+      const statemachine = new Statemachine(subject, compiledWorkflow.process, currentState);
 
-    const toState = statemachine.getCurrentState().getName();
+      await statemachine.triggerEvent(eventName, finitaContext);
+
+      toState = statemachine.getCurrentState().getName();
+    }
 
     return {
       outcome,
