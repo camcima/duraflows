@@ -1,5 +1,35 @@
 # Changelog
 
+## [Unreleased]
+
+### Features
+
+- add `WorkflowObserver`, `StateEnterEvent`, and `ObserverRegistry` to `@duraflows/core` — post-commit, at-most-once, sequential, error-contained ([79fe178](https://github.com/camcima/duraflows/commit/79fe178604385c279f2507a3121e09a582decc8a))
+- attach `ObserverRegistry` to `WorkflowRuntime` and fire events on `triggerEvent`, `createInstance`, and timeout-driven transitions ([9624dd5](https://github.com/camcima/duraflows/commit/9624dd561ee506b78a25ed22a9a6d4ae9dbcb118))
+- re-export `WorkflowObserver`, `StateEnterEvent`, and `ObserverRegistry` from `@duraflows/core` barrel ([ba43613](https://github.com/camcima/duraflows/commit/ba4361359967ac4acc69d2df9430fb7e742212bd))
+- accept optional `observers` array in `WorkflowModule.forRoot` and forward to runtime ([c9694b5](https://github.com/camcima/duraflows/commit/c9694b55f5fad2d80b7b727461ae82f9e8961b40))
+- add `fromState`, `toState`, and `transitionUuid` to `WorkflowExecutionContext` — UUID identifies the state entry and is shared across all onEnter hops for that entry ([7008271](https://github.com/camcima/duraflows/commit/7008271d5d1f73f1e4b31584ebb3f0007b4b459f))
+- add `bestEffort?: boolean` flag to `WorkflowCommand` — fire-and-forget commands whose failures don't abort the chain ([db9dbba](https://github.com/camcima/duraflows/commit/db9dbba18ae448ec17b234b0b65a9c079fa1a7ab))
+- add `outcome: "success" | "failure"` aggregate field to `OnEnterChainResult` ([c5efe67](https://github.com/camcima/duraflows/commit/c5efe67fa7eeebd105a439f2014c72f98ddcb056))
+
+### Bug Fixes
+
+- `triggerEvent` now derives its outcome from `eventResult.outcome` and `onEnterChain.outcome` instead of the last command result — fixes false failures when a best-effort command is last, and surfaces earlier failures ([941bd1a](https://github.com/camcima/duraflows/commit/941bd1afb5b059d411782af79b520f73ff6719ec))
+- observer event snapshots (`context`, `metadata`, `triggerMetadata`) are deep-cloned before freezing — live instance state is no longer frozen as a side effect ([88f4d4c](https://github.com/camcima/duraflows/commit/88f4d4cbe4a475f5a7c80369ba3752c6ee2fab8d))
+- execution-context `metadata` and `triggerMetadata` are deep-cloned before freezing — caller-owned nested objects no longer get frozen as a side effect ([05834b9](https://github.com/camcima/duraflows/commit/05834b941796f6e7576d985a5c7928be386c776c))
+- best-effort thrown errors are stored as serializable `{ name, message, stack }` — survives JSON persistence without crashing on circular references or BigInt values ([814e841](https://github.com/camcima/duraflows/commit/814e841fc2fac2b058290697da1461984a93bc39))
+- `processExpiredWorkflows` uses per-instance transactions — a failing instance's rollback no longer corrupts other instances or fires observer events for partial state changes ([6c00dc6](https://github.com/camcima/duraflows/commit/6c00dc64ca778ab84f19a49e22cfa49e9a4b4e62))
+- `processExpiredWorkflows` resolves the timeout event name from the freshly-locked instance state — concurrent state transitions between `findExpired` and `lockByUuid` no longer cause stale timeout events to fire ([30d7f73](https://github.com/camcima/duraflows/commit/30d7f7368f7fa4d3fe15aeb2e609822f50cdf15b))
+- `processExpiredWorkflows.processed` counter only increments when a timeout event actually fires — skipped and cleared cases no longer inflate the metric ([213a9b5](https://github.com/camcima/duraflows/commit/213a9b54743ccc416cb9048a97b5391b9e70930c))
+- `transitionUuid` is shared between onEnter commands and observer events within the same hop — observer events now report the same UUID as the command context ([0405a3b](https://github.com/camcima/duraflows/commit/0405a3b61385320851dea4d979c3a95443f4a757))
+- first onEnter hop reuses the caller's `transitionUuid`; subsequent hops get fresh UUIDs — UUID correctly identifies a state entry boundary ([d46bbae](https://github.com/camcima/duraflows/commit/d46bbaef4ee6877a9897142fb82d29bd1c4c1eb0))
+
+### BREAKING CHANGES
+
+- `WorkflowModuleAsyncOptions.observers` field removed — pass observers inside the `WorkflowModuleFactoryConfig` returned by `useFactory` instead; `forRoot` (sync) is unchanged ([f7b4817](https://github.com/camcima/duraflows/commit/f7b4817026bd6bbfc6901c63666af5a5d9cdcbc2))
+
+> This release includes a breaking change; the next version will be **0.6.0**.
+
 ## [0.5.1](https://github.com/camcima/duraflows/compare/v0.5.0...v0.5.1) (2026-04-06)
 
 ## [0.5.0](https://github.com/camcima/duraflows/compare/v0.4.0...v0.5.0) (2026-04-06)
