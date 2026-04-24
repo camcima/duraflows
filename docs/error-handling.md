@@ -134,7 +134,7 @@ try {
 
 ## CommandFailureError
 
-Thrown when a command returns `{ ok: false }` and the event has no `errorState` to transition to.
+Thrown when a **mandatory** command returns `{ ok: false }` and the event has no `errorState` to transition to. Best-effort commands never trigger this error — see [Best-Effort Commands](#best-effort-commands).
 
 ```ts
 class CommandFailureError extends WorkflowError {
@@ -153,7 +153,7 @@ class CommandFailureError extends WorkflowError {
 | `commandName`          | `string`        | The command that failed             |
 | `result`               | `CommandResult` | The failure result from the command |
 
-**When thrown:** A command returns `{ ok: false }` and the event does not define an `errorState`. Since there's no error state to transition to, the failure is surfaced as an exception.
+**When thrown:** A mandatory command returns `{ ok: false }` and the event does not define an `errorState`. Since there's no error state to transition to, the failure is surfaced as an exception.
 
 ```ts
 // Event definition:
@@ -238,11 +238,15 @@ The command returns a structured failure. This is a **business failure** -- the 
 
 The command throws an error. This is a **technical failure** -- the command could not execute at all (e.g., network error, database crash).
 
+For **mandatory** commands:
+
 - The exception propagates through `triggerEvent()`
 - No state transition occurs
 - No history record is created
 - The transaction rolls back completely
 - The workflow instance remains in its previous state
+
+For **best-effort** commands, the runtime catches the exception instead of propagating it -- see [Best-Effort Commands](#best-effort-commands).
 
 ### Decision Guide
 
@@ -253,6 +257,69 @@ The command throws an error. This is a **technical failure** -- the command coul
 | Database connection lost | Let the exception propagate     | N/A (infrastructure failure)        |
 | Validation failure       | Return `{ ok: false }`          | Include `errorState`                |
 | Bug in command code      | Let the exception propagate     | N/A (fix the bug)                   |
+| Metrics / notification   | Use `bestEffort = true`         | No `errorState` needed              |
+
+## Best-Effort Commands
+
+A command is best-effort when it declares `readonly bestEffort = true` (class field) or `bestEffort: true` (object property). Best-effort commands have different failure semantics from mandatory commands:
+
+| Outcome              | Mandatory command                                | Best-effort command                                             |
+| -------------------- | ------------------------------------------------ | --------------------------------------------------------------- |
+| `{ ok: true }`       | Chain continues                                  | Chain continues                                                 |
+| `{ ok: false, ... }` | Chain aborts (or routes to `errorState`)         | Chain continues; result recorded                                |
+| Throws               | Exception propagates (or routes to `errorState`) | Exception caught; converted to `CommandResult`; chain continues |
+
+### Thrown Exception Shape
+
+When a best-effort command throws, the runtime catches the exception and builds a `CommandResult` with a serializable error shape:
+
+```typescript
+{
+  ok: false,
+  code: "BEST_EFFORT_THROWN",
+  message: string,  // extracted from error.message or String(error)
+  error: {
+    name: string,    // error.name for Error instances; "UnknownError" otherwise
+    message: string, // error.message or String(value)
+    stack?: string,  // only present for Error instances with a stack
+  }
+}
+```
+
+The `error` field is always a serializable shape — it is **not** the raw thrown value. This matters because `CommandResult` is JSON-serialized by persistence backends (pg, kysely). Raw `Error` objects persist poorly (`JSON.stringify(new Error(...))` returns `"{}"`), and non-`Error` throws (strings, BigInts, circular objects) can crash serialization entirely. The sanitized shape is safe across all persistence backends.
+
+Note: the `error` field on the `CommandResult` interface has type `unknown` (for backward compatibility with user code that populates `error` directly from an `ok: false` return). The runtime-synthesized best-effort shape is always `{ name, message, stack? }` as described above.
+
+### Intent
+
+Use `bestEffort` for side effects that should **not** block the workflow — metrics emission, notifications, cache warming, auditing. Never use it for state-critical operations.
+
+### Example
+
+```typescript
+class WarmCacheCommand implements WorkflowCommand {
+  readonly bestEffort = true; // cache failures shouldn't block the workflow
+
+  async execute(_subject: unknown, ctx: WorkflowExecutionContext): Promise<CommandResult> {
+    try {
+      await cache.put(ctx.toState, ctx.context);
+      return { ok: true };
+    } catch (error) {
+      // Still return the error shape so history retains context:
+      return { ok: false, code: "CACHE_WARM_FAILED", message: String(error) };
+    }
+  }
+}
+```
+
+If `WarmCacheCommand.execute()` throws instead of catching, the runtime catches it on behalf of the command and the chain still continues.
+
+### Interaction with `errorState`
+
+`errorState` and `bestEffort` are independent mechanisms:
+
+- `errorState` applies to **mandatory** command failures in an `onEnter` chain. When a mandatory command returns `ok: false` (or throws) and the state has an `errorState`, the runtime transitions to `errorState` instead of throwing `CommandFailureError`. This is per-hop routing — the chain's aggregate `outcome` becomes `"failure"` once an `errorState` hop occurs.
+- `bestEffort` applies to **individual commands** regardless of whether the state has `errorState`. A best-effort failure never triggers `errorState` routing because, from the chain's perspective, it is not a failure.
 
 ## Error Handling Patterns
 
