@@ -25,6 +25,9 @@ function createContext(): WorkflowExecutionContext {
     now: new Date("2026-01-01T00:00:00Z"),
     context: {},
     metadata: {},
+    fromState: "fromState-test",
+    toState: "toState-test",
+    transitionUuid: "00000000-0000-0000-0000-000000000001",
   };
 }
 
