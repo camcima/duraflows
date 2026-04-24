@@ -7,6 +7,7 @@ import { CommandFailureError, OnEnterDepthExceededError } from "../errors/index.
 export interface OnEnterHopResult {
   fromState: string;
   toState: string;
+  transitionUuid: string;
   outcome: "success" | "failure";
   commandResults: CommandResult[];
 }
@@ -50,6 +51,7 @@ export class OnEnterExecutor {
         toState: currentState,
         transitionUuid: randomUUID(),
       };
+      const hopTransitionUuid = hopContext.transitionUuid;
 
       const commands = onEnter.commands ?? [];
       const commandExecResult = await this.commandExecutor.execute(commands, subject, hopContext);
@@ -61,6 +63,7 @@ export class OnEnterExecutor {
           hops.push({
             fromState,
             toState: onEnter.errorState,
+            transitionUuid: hopTransitionUuid,
             outcome: "failure",
             commandResults: commandExecResult.commandResults,
           });
@@ -77,6 +80,7 @@ export class OnEnterExecutor {
         hops.push({
           fromState,
           toState: onEnter.targetState,
+          transitionUuid: hopTransitionUuid,
           outcome: "success",
           commandResults: commandExecResult.commandResults,
         });
@@ -89,6 +93,7 @@ export class OnEnterExecutor {
         hops.push({
           fromState,
           toState: currentState,
+          transitionUuid: hopTransitionUuid,
           outcome: "success",
           commandResults: commandExecResult.commandResults,
         });

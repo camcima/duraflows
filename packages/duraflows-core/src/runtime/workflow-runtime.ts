@@ -493,7 +493,7 @@ export class WorkflowRuntime {
         state: hop.toState,
         fromState: hop.fromState,
         toState: hop.toState,
-        transitionUuid: randomUUID(),
+        transitionUuid: hop.transitionUuid,
         triggerEvent: "onEnter",
         context: deepFreeze({ ...instance.context }),
         metadata: deepFreeze({ ...instance.metadata }),
