@@ -1,6 +1,27 @@
 {
   "name": "@duraflows/nestjs",
   "version": "0.5.1",
+  "description": "NestJS integration for duraflows: dependency injection, services, optional REST controllers, and @WorkflowCommand decorator for DI-backed command handlers.",
+  "keywords": [
+    "duraflows",
+    "workflow",
+    "nestjs",
+    "dependency-injection",
+    "decorator",
+    "durable",
+    "state-machine"
+  ],
+  "author": "Carlos Cima",
+  "license": "MIT",
+  "homepage": "https://github.com/camcima/duraflows#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/camcima/duraflows.git",
+    "directory": "packages/duraflows-nestjs"
+  },
+  "bugs": {
+    "url": "https://github.com/camcima/duraflows/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -38,6 +59,5 @@
   },
   "devDependencies": {
     "@nestjs/testing": "^11.1.19"
-  },
-  "license": "MIT"
+  }
 }

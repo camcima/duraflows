@@ -1,6 +1,27 @@
 {
   "name": "@duraflows/pg",
   "version": "0.5.1",
+  "description": "PostgreSQL persistence adapter for duraflows using `pg`. Provides transaction runner, workflow instance store, and history store backed by SELECT ... FOR UPDATE SKIP LOCKED.",
+  "keywords": [
+    "duraflows",
+    "workflow",
+    "postgresql",
+    "pg",
+    "persistence",
+    "durable",
+    "state-machine"
+  ],
+  "author": "Carlos Cima",
+  "license": "MIT",
+  "homepage": "https://github.com/camcima/duraflows#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/camcima/duraflows.git",
+    "directory": "packages/duraflows-pg"
+  },
+  "bugs": {
+    "url": "https://github.com/camcima/duraflows/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -31,6 +52,5 @@
   },
   "devDependencies": {
     "@types/pg": "^8.11.0"
-  },
-  "license": "MIT"
+  }
 }

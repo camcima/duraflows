@@ -1,6 +1,27 @@
 {
   "name": "@duraflows/core",
   "version": "0.5.1",
+  "description": "Framework-agnostic durable workflow runtime for TypeScript, built on @camcima/finita. Ships the runtime, types, persistence interfaces, and observer pattern.",
+  "keywords": [
+    "workflow",
+    "state-machine",
+    "fsm",
+    "durable",
+    "orchestration",
+    "typescript",
+    "finita"
+  ],
+  "author": "Carlos Cima",
+  "license": "MIT",
+  "homepage": "https://github.com/camcima/duraflows#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/camcima/duraflows.git",
+    "directory": "packages/duraflows-core"
+  },
+  "bugs": {
+    "url": "https://github.com/camcima/duraflows/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -37,6 +58,5 @@
   },
   "dependencies": {
     "@camcima/finita": "^2.0.0"
-  },
-  "license": "MIT"
+  }
 }

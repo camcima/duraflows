@@ -1,6 +1,28 @@
 {
   "name": "@duraflows/kysely",
   "version": "0.5.1",
+  "description": "PostgreSQL persistence adapter for duraflows using `kysely`. Integrates with kysely's type-safe query builder and AsyncLocalStorage-based transaction context.",
+  "keywords": [
+    "duraflows",
+    "workflow",
+    "postgresql",
+    "kysely",
+    "persistence",
+    "durable",
+    "state-machine",
+    "type-safe"
+  ],
+  "author": "Carlos Cima",
+  "license": "MIT",
+  "homepage": "https://github.com/camcima/duraflows#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/camcima/duraflows.git",
+    "directory": "packages/duraflows-kysely"
+  },
+  "bugs": {
+    "url": "https://github.com/camcima/duraflows/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -31,6 +53,5 @@
   },
   "peerDependencies": {
     "pg": "^8.13.0"
-  },
-  "license": "MIT"
+  }
 }
