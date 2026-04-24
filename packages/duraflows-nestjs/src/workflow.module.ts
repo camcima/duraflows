@@ -8,6 +8,7 @@ import type {
   WorkflowHistoryStore,
   WorkflowTransactionRunner,
   WorkflowDefinitionRegistry,
+  WorkflowObserver,
 } from "@duraflows/core";
 import { InMemoryDefinitionRegistry, WorkflowRuntime, WorkflowValidator, WorkflowCompiler } from "@duraflows/core";
 import { NestCommandRegistry, type WorkflowCommandRegistration } from "./providers/nest-command-registry.js";
@@ -31,6 +32,7 @@ import { WorkflowInstanceController } from "./controllers/workflow-instance.cont
 export interface WorkflowModuleOptions {
   workflows: WorkflowDefinition[];
   commands?: WorkflowCommandRegistration[];
+  observers?: WorkflowObserver[];
   persistence: WorkflowPersistenceProvider;
   clock?: WorkflowClock;
   enableControllers?: boolean;
@@ -45,6 +47,7 @@ export interface WorkflowModuleFactoryConfig {
 export interface WorkflowModuleAsyncOptions {
   imports?: Type<unknown>[];
   commands?: WorkflowCommandRegistration[];
+  observers?: WorkflowObserver[];
   enableControllers?: boolean;
   useFactory: (...args: any[]) => Promise<WorkflowModuleFactoryConfig> | WorkflowModuleFactoryConfig;
   inject?: InjectionToken[];
@@ -133,6 +136,7 @@ export class WorkflowModule {
             historyStore,
             transactionRunner,
             clock: wfClock,
+            observers: options.observers,
           }),
         inject: [
           WORKFLOW_DEFINITION_REGISTRY,
@@ -235,6 +239,7 @@ export class WorkflowModule {
             historyStore,
             transactionRunner,
             clock,
+            observers: options.observers,
           }),
         inject: [
           WORKFLOW_DEFINITION_REGISTRY,

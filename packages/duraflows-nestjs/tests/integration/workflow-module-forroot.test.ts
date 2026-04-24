@@ -30,6 +30,7 @@ import {
   type WorkflowClock,
   type WorkflowDefinitionRegistry,
   type WorkflowCommandRegistry,
+  type StateEnterEvent,
 } from "@duraflows/core";
 
 // ---------------------------------------------------------------------------
@@ -198,5 +199,40 @@ describe("WorkflowModule.forRoot()", () => {
       expect(() => mod.get(WorkflowQueryController)).toThrow();
       expect(() => mod.get(WorkflowTimeoutController)).toThrow();
     });
+  });
+
+  it("forwards observers from WorkflowModule.forRoot to WorkflowRuntime", async () => {
+    const captured: { state: string }[] = [];
+
+    const definition: WorkflowDefinition = {
+      name: "nestjs-observer-wf",
+      initialState: "ready",
+      states: { ready: {} },
+    };
+
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      imports: [
+        WorkflowModule.forRoot({
+          workflows: [definition],
+          persistence: stubPersistence,
+          clock: fixedClock,
+          observers: [
+            {
+              name: "nest-test-observer",
+              onEnter: (event: StateEnterEvent) => {
+                captured.push({ state: event.state });
+              },
+            },
+          ],
+        }),
+      ],
+    }).compile();
+
+    const runtime = moduleRef.get<WorkflowRuntime>(WORKFLOW_RUNTIME);
+    await runtime.createInstance({ workflowName: "nestjs-observer-wf" });
+
+    expect(captured).toEqual([{ state: "ready" }]);
+
+    await moduleRef.close();
   });
 });

@@ -77,8 +77,8 @@ importers:
   packages/duraflows-nestjs:
     dependencies:
       '@duraflows/core':
-        specifier: ^0.5.1
-        version: 0.5.1
+        specifier: workspace:*
+        version: link:../duraflows-core
       '@nestjs/common':
         specifier: ^11.1.19
         version: 11.1.19(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2)
