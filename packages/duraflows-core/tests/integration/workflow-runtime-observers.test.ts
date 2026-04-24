@@ -387,4 +387,64 @@ describe("WorkflowRuntime observers", () => {
     const uuids = [enterStep1.transitionUuid, enterStep2.transitionUuid, enterDone.transitionUuid];
     expect(new Set(uuids).size).toBe(3);
   });
+
+  it("caller-supplied triggerMetadata nested objects remain mutable after createInstance returns", async () => {
+    // Use an onEnter definition so the runtime takes the onEnter branch in createInstance,
+    // which is where the buggy deepFreeze({ ...(input.triggerMetadata ?? {}) }) lives.
+    const definition: WorkflowDefinition = {
+      name: "trigger-metadata-isolation",
+      initialState: "ready",
+      states: {
+        ready: {
+          onEnter: { targetState: "active" },
+        },
+        active: {},
+      },
+    };
+    definitionRegistry.register(definition);
+
+    const callerMetadata = { audit: { tag: "initial" } };
+    await runtime.createInstance({
+      workflowName: "trigger-metadata-isolation",
+      triggerMetadata: callerMetadata,
+    });
+
+    // Without the fix: deepFreeze recursed into callerMetadata.audit and froze it.
+    // The following mutation would throw TypeError in strict mode.
+    expect(() => {
+      callerMetadata.audit.tag = "updated";
+    }).not.toThrow();
+    expect(callerMetadata.audit.tag).toBe("updated");
+    expect(Object.isFrozen(callerMetadata.audit)).toBe(false);
+  });
+
+  it("instance.metadata nested objects remain mutable after triggerEvent returns", async () => {
+    const definition: WorkflowDefinition = {
+      name: "instance-metadata-isolation",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            go: { targetState: "done" },
+          },
+        },
+        done: {},
+      },
+    };
+    definitionRegistry.register(definition);
+
+    // Seed instance with nested metadata.
+    const instance = await runtime.createInstance({
+      workflowName: "instance-metadata-isolation",
+      metadata: { audit: { tag: "initial" } },
+    });
+
+    // Fire an event — execution context is constructed with deepFreeze({ ...instance.metadata }).
+    // Without the fix, that shallow spread still aliases .audit, so freezing recursively freezes the LIVE instance.metadata.audit.
+    await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "go" });
+
+    // Fetch the instance back — its metadata.audit should still be unfrozen.
+    const freshlyFetched = await instanceStore.findByUuid(instance.uuid);
+    expect(Object.isFrozen(freshlyFetched!.metadata["audit"] as object)).toBe(false);
+  });
 });

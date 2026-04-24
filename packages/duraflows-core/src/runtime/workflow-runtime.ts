@@ -119,10 +119,10 @@ export class WorkflowRuntime {
         await this.instanceStore.create(instance);
 
         const executionContext: WorkflowExecutionContext = {
-          triggerMetadata: deepFreeze({ ...(input.triggerMetadata ?? {}) }),
+          triggerMetadata: deepFreeze(structuredClone(input.triggerMetadata ?? {})),
           now: this.clock.now(),
           context: { ...instance.context },
-          metadata: deepFreeze({ ...instance.metadata }),
+          metadata: deepFreeze(structuredClone(instance.metadata)),
           fromState: null,
           toState: definition.initialState,
           transitionUuid: randomUUID(),
@@ -193,10 +193,10 @@ export class WorkflowRuntime {
       const prospectiveToState = eventDef?.targetState ?? instance.currentState;
 
       const executionContext: WorkflowExecutionContext = {
-        triggerMetadata: deepFreeze({ ...(input.triggerMetadata ?? {}) }),
+        triggerMetadata: deepFreeze(structuredClone(input.triggerMetadata ?? {})),
         now: this.clock.now(),
         context: { ...instance.context },
-        metadata: deepFreeze({ ...instance.metadata }),
+        metadata: deepFreeze(structuredClone(instance.metadata)),
         fromState: instance.currentState,
         toState: prospectiveToState,
         transitionUuid: randomUUID(),
@@ -372,7 +372,7 @@ export class WorkflowRuntime {
       triggerMetadata: deepFreeze({ source: "timeout" }),
       now: this.clock.now(),
       context: { ...instance.context },
-      metadata: deepFreeze({ ...instance.metadata }),
+      metadata: deepFreeze(structuredClone(instance.metadata)),
       fromState: instance.currentState,
       toState: prospectiveToState,
       transitionUuid: randomUUID(),
