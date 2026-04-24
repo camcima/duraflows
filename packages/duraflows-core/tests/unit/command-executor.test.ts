@@ -192,6 +192,36 @@ describe("CommandExecutor", () => {
     expect(secondCalled).toBe(true);
   });
 
+  it("aborts on mandatory command failure even after a best-effort failure already occurred", async () => {
+    const beFail = failResult({ code: "BE_FAIL" });
+    const mandatoryFail = failResult({ code: "MANDATORY_FAIL" });
+    let thirdCalled = false;
+
+    const registry = createMockRegistry({
+      cmdBE: {
+        bestEffort: true,
+        execute: () => beFail,
+      },
+      cmdMandatory: {
+        execute: () => mandatoryFail,
+      },
+      cmdNever: {
+        execute: () => {
+          thirdCalled = true;
+          return okResult();
+        },
+      },
+    });
+    const executor = new CommandExecutor(registry);
+
+    const commands: WorkflowCommandRef[] = [{ name: "cmdBE" }, { name: "cmdMandatory" }, { name: "cmdNever" }];
+    const result = await executor.execute(commands, {}, createContext());
+
+    expect(result.outcome).toBe("failure");
+    expect(result.commandResults).toEqual([beFail, mandatoryFail]);
+    expect(thirdCalled).toBe(false);
+  });
+
   it("executes commands in definition order", async () => {
     const callOrder: string[] = [];
 
