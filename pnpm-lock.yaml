@@ -65,8 +65,8 @@ importers:
   packages/duraflows-kysely:
     dependencies:
       '@duraflows/core':
-        specifier: ^0.3.0
-        version: 0.3.0
+        specifier: ^0.5.1
+        version: 0.5.1
       kysely:
         specifier: ^0.28.16
         version: 0.28.16
@@ -228,9 +228,6 @@ packages:
         optional: true
       conventional-commits-parser:
         optional: true
-
-  '@duraflows/core@0.3.0':
-    resolution: {integrity: sha512-1YqyvsMNfZOv6q/2cx4meN2xvaiYqfNzM1qf+cGdYaZm/UsRxOXSqF7k+r37a4m/JJVngkAbwsKElcNyddb9rA==}
 
   '@duraflows/core@0.5.1':
     resolution: {integrity: sha512-ISHHE8oGV5EckW1CrUbBntu69l2IwCFFbvDrZmFLqCdpnJBGUytMHKDH/Gv+D4h/sbbN3S+HlgrZkEbXvxgAtg==}
@@ -2474,10 +2471,6 @@ snapshots:
     optionalDependencies:
       conventional-commits-filter: 5.0.0
       conventional-commits-parser: 6.4.0
-
-  '@duraflows/core@0.3.0':
-    dependencies:
-      '@camcima/finita': 2.2.0
 
   '@duraflows/core@0.5.1':
     dependencies:
