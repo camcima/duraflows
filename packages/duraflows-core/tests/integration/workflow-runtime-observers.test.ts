@@ -242,4 +242,67 @@ describe("WorkflowRuntime observers", () => {
     expect(captured).toHaveLength(1);
     expect(captured[0].state).toBe("ready");
   });
+
+  it("observer event transitionUuid equals the one commands saw for the same hop", async () => {
+    const definition: WorkflowDefinition = {
+      name: "obs-uuid-correlation",
+      initialState: "draft",
+      states: {
+        draft: { events: { go: { targetState: "step1" } } },
+        step1: {
+          onEnter: {
+            targetState: "step2",
+            commands: [{ name: "captureStep1Uuid" }],
+          },
+        },
+        step2: {
+          onEnter: {
+            targetState: "done",
+            commands: [{ name: "captureStep2Uuid" }],
+          },
+        },
+        done: {},
+      },
+    };
+    definitionRegistry.register(definition);
+
+    const commandSeen: Record<string, string> = {};
+    commandRegistry.register("captureStep1Uuid", {
+      execute: async (_subject, ctx) => {
+        commandSeen["step1"] = ctx.transitionUuid;
+        return { ok: true };
+      },
+    });
+    commandRegistry.register("captureStep2Uuid", {
+      execute: async (_subject, ctx) => {
+        commandSeen["step2"] = ctx.transitionUuid;
+        return { ok: true };
+      },
+    });
+
+    const captured: StateEnterEvent[] = [];
+    runtime.addObserver({
+      name: "uuid-capture",
+      onEnter: (event) => {
+        captured.push(event);
+      },
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "obs-uuid-correlation" });
+    await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "go" });
+
+    // captured events: createInstance(draft) + triggerEvent(step1) + onEnter(step2) + onEnter(done)
+    expect(captured).toHaveLength(4);
+
+    // The observer event entering step2 corresponds to step1's onEnter hop,
+    // during which captureStep1Uuid ran. Their transitionUuids must match.
+    const step2Event = captured.find((e) => e.state === "step2");
+    expect(step2Event).toBeDefined();
+    expect(step2Event!.transitionUuid).toBe(commandSeen["step1"]);
+
+    // Same for the done event (step2's onEnter).
+    const doneEvent = captured.find((e) => e.state === "done");
+    expect(doneEvent).toBeDefined();
+    expect(doneEvent!.transitionUuid).toBe(commandSeen["step2"]);
+  });
 });
