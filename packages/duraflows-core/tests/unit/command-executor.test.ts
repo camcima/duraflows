@@ -131,6 +131,33 @@ describe("CommandExecutor", () => {
     await expect(executor.execute(commands, {}, createContext())).rejects.toThrow(error);
   });
 
+  it("does not abort when a best-effort command returns ok:false; continues to next command", async () => {
+    const beResult = failResult({ code: "BE_FAILED" });
+    const okFollowing = okResult({ code: "AFTER_BE" });
+    let secondCalled = false;
+
+    const registry = createMockRegistry({
+      cmdBE: {
+        bestEffort: true,
+        execute: () => beResult,
+      },
+      cmdAfter: {
+        execute: () => {
+          secondCalled = true;
+          return okFollowing;
+        },
+      },
+    });
+    const executor = new CommandExecutor(registry);
+
+    const commands: WorkflowCommandRef[] = [{ name: "cmdBE" }, { name: "cmdAfter" }];
+    const result = await executor.execute(commands, {}, createContext());
+
+    expect(result.outcome).toBe("success");
+    expect(result.commandResults).toEqual([beResult, okFollowing]);
+    expect(secondCalled).toBe(true);
+  });
+
   it("executes commands in definition order", async () => {
     const callOrder: string[] = [];
 

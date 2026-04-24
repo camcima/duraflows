@@ -23,10 +23,26 @@ export class CommandExecutor {
 
     for (const commandRef of commands) {
       const command: WorkflowCommand = this.commandRegistry.get(commandRef.name);
-      const result = await command.execute(subject, context);
+      let result: CommandResult;
+
+      try {
+        result = await command.execute(subject, context);
+      } catch (error: unknown) {
+        if (command.bestEffort) {
+          result = {
+            ok: false,
+            code: "BEST_EFFORT_THROWN",
+            message: error instanceof Error ? error.message : String(error),
+            error,
+          };
+        } else {
+          throw error;
+        }
+      }
+
       commandResults.push(result);
 
-      if (!result.ok) {
+      if (!result.ok && !command.bestEffort) {
         return { outcome: "failure", commandResults };
       }
     }
