@@ -38,7 +38,7 @@ import { TimeoutResolver } from "../execution/timeout-resolver.js";
 import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
 import { WorkflowError } from "../errors/index.js";
 import { WorkflowHandle } from "./workflow-handle.js";
-import type { WorkflowObserver } from "../types/observer.js";
+import type { WorkflowObserver, StateEnterEvent } from "../types/observer.js";
 import { ObserverRegistry } from "./observer-registry.js";
 
 const DEFAULT_MAX_ON_ENTER_DEPTH = 10;
@@ -129,7 +129,7 @@ export class WorkflowRuntime {
           transitionUuid: randomUUID(),
         };
 
-        await this.processOnEnterChain(instance, definition, executionContext, undefined);
+        await this.processOnEnterChain(instance, definition, executionContext, undefined, []);
 
         return instance;
       });
@@ -140,7 +140,9 @@ export class WorkflowRuntime {
   }
 
   async triggerEvent(input: TriggerWorkflowEventInput): Promise<WorkflowExecutionResult> {
-    return this.transactionRunner.runInTransaction(async () => {
+    const eventsToFire: StateEnterEvent[] = [];
+
+    const result = await this.transactionRunner.runInTransaction(async () => {
       const instance = await this.instanceStore.lockByUuid(input.workflowInstanceUuid);
       if (!instance) {
         throw new WorkflowError(`Workflow instance "${input.workflowInstanceUuid}" not found`);
@@ -152,7 +154,6 @@ export class WorkflowRuntime {
       const eventDef = definition.states[instance.currentState]?.events?.[input.eventName];
       const prospectiveToState = eventDef?.targetState ?? instance.currentState;
 
-      // Build execution context with instance's mutable context and immutable metadata
       const executionContext: WorkflowExecutionContext = {
         triggerMetadata: deepFreeze({ ...(input.triggerMetadata ?? {}) }),
         now: this.clock.now(),
@@ -163,7 +164,7 @@ export class WorkflowRuntime {
         transitionUuid: randomUUID(),
       };
 
-      const result = await this.eventExecutor.execute(
+      const eventResult = await this.eventExecutor.execute(
         compiled,
         instance.currentState,
         input.eventName,
@@ -172,61 +173,72 @@ export class WorkflowRuntime {
         executionContext,
       );
 
-      // Update instance
       const now = this.clock.now();
-      instance.currentState = result.toState;
+      instance.currentState = eventResult.toState;
       instance.version++;
       instance.lastTransitionAt = now;
       instance.updatedAt = now;
 
-      // Persist context mutations from commands, then merge state-defined context on top
-      const newStateDef = definition.states[result.toState];
+      const newStateDef = definition.states[eventResult.toState];
       instance.context = {
         ...executionContext.context,
         ...(newStateDef?.context ?? {}),
       };
 
-      // Compute timeout deadline for new state
-      instance.expiresAt = this.timeoutResolver.computeDeadline(definition, result.toState, now);
+      instance.expiresAt = this.timeoutResolver.computeDeadline(definition, eventResult.toState, now);
 
       await this.instanceStore.update(instance);
 
-      // Extract error message from last failed command (if any)
       let errorMessage: string | undefined;
-      if (result.outcome === "failure" && result.commandResults.length > 0) {
-        const lastResult = result.commandResults[result.commandResults.length - 1];
+      if (eventResult.outcome === "failure" && eventResult.commandResults.length > 0) {
+        const lastResult = eventResult.commandResults[eventResult.commandResults.length - 1];
         if (!lastResult.ok) {
           errorMessage = lastResult.message ?? lastResult.code ?? "Command failed";
         }
       }
 
-      // Append history
       let lastHistoryUuid = await this.historyStore.append({
         workflowInstanceUuid: instance.uuid,
-        fromState: result.fromState,
+        fromState: eventResult.fromState,
         eventName: input.eventName,
-        toState: result.toState,
-        outcome: result.outcome,
+        toState: eventResult.toState,
+        outcome: eventResult.outcome,
         errorMessage,
-        commandResultsJson: result.commandResults,
+        commandResultsJson: eventResult.commandResults,
         triggerMetadata: input.triggerMetadata,
       });
 
-      // Update execution context to reflect merged state context for onEnter commands
+      eventsToFire.push({
+        workflowName: instance.workflowName,
+        instanceUuid: instance.uuid,
+        state: eventResult.toState,
+        fromState: eventResult.fromState,
+        toState: eventResult.toState,
+        transitionUuid: executionContext.transitionUuid,
+        triggerEvent: input.eventName,
+        context: deepFreeze({ ...instance.context }),
+        metadata: deepFreeze({ ...instance.metadata }),
+        triggerMetadata: deepFreeze({ ...(input.triggerMetadata ?? {}) }),
+        occurredAt: now,
+      });
+
       executionContext.context = { ...instance.context };
 
-      // Process onEnter chain on the new state
-      const onEnterResult = await this.processOnEnterChain(instance, definition, executionContext, input.subject);
+      const onEnterResult = await this.processOnEnterChain(
+        instance,
+        definition,
+        executionContext,
+        input.subject,
+        eventsToFire,
+      );
 
-      const allCommandResults = [...result.commandResults, ...onEnterResult.commandResults];
+      const allCommandResults = [...eventResult.commandResults, ...onEnterResult.commandResults];
       if (onEnterResult.lastHistoryUuid) {
         lastHistoryUuid = onEnterResult.lastHistoryUuid;
       }
 
-      // Determine final outcome
-      let finalOutcome = result.outcome;
+      let finalOutcome = eventResult.outcome;
       if (onEnterResult.commandResults.length > 0) {
-        // If there were onEnter hops, check if the last hop had a failure
         const lastOnEnterResult = onEnterResult.commandResults[onEnterResult.commandResults.length - 1];
         if (lastOnEnterResult && !lastOnEnterResult.ok) {
           finalOutcome = "failure";
@@ -235,12 +247,18 @@ export class WorkflowRuntime {
 
       return {
         outcome: finalOutcome,
-        fromState: result.fromState,
+        fromState: eventResult.fromState,
         toState: instance.currentState,
         commandResults: allCommandResults,
         historyUuid: lastHistoryUuid,
       };
     });
+
+    for (const event of eventsToFire) {
+      await this.observerRegistry.fireOnEnter(event);
+    }
+
+    return result;
   }
 
   async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<ProcessExpiredWorkflowsResult> {
@@ -347,7 +365,7 @@ export class WorkflowRuntime {
     executionContext.context = { ...instance.context };
 
     // Process onEnter chain on the new state
-    await this.processOnEnterChain(instance, definition, executionContext, undefined);
+    await this.processOnEnterChain(instance, definition, executionContext, undefined, []);
   }
 
   private async processOnEnterChain(
@@ -355,6 +373,7 @@ export class WorkflowRuntime {
     definition: WorkflowDefinition,
     executionContext: WorkflowExecutionContext,
     subject: unknown,
+    eventsToFire: StateEnterEvent[],
   ): Promise<{ commandResults: CommandResult[]; lastHistoryUuid: string | null }> {
     const chainResult = await this.onEnterExecutor.executeChain(
       definition,
@@ -410,6 +429,20 @@ export class WorkflowRuntime {
         errorMessage,
         commandResultsJson: hop.commandResults,
         triggerMetadata: { source: "onEnter" },
+      });
+
+      eventsToFire.push({
+        workflowName: instance.workflowName,
+        instanceUuid: instance.uuid,
+        state: hop.toState,
+        fromState: hop.fromState,
+        toState: hop.toState,
+        transitionUuid: randomUUID(),
+        triggerEvent: "onEnter",
+        context: deepFreeze({ ...instance.context }),
+        metadata: deepFreeze({ ...instance.metadata }),
+        triggerMetadata: deepFreeze({ source: "onEnter" }),
+        occurredAt: now,
       });
 
       allCommandResults.push(...hop.commandResults);
