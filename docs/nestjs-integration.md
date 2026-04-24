@@ -210,21 +210,26 @@ Observers receive lifecycle events fired by the workflow runtime after a state t
 
 ```ts
 interface WorkflowObserver {
-  name: string;
-  onEnter?: (event: StateEnterEvent) => Promise<void> | void;
+  readonly name: string;
+  onEnter?(event: StateEnterEvent): void | Promise<void>;
 }
 ```
 
 **`StateEnterEvent` fields:**
 
-| Field            | Type     | Description                                         |
-| ---------------- | -------- | --------------------------------------------------- |
-| `transitionUuid` | `string` | UUID shared by all hops in a single event execution |
-| `workflowName`   | `string` | Name of the workflow definition                     |
-| `instanceUuid`   | `string` | UUID of the workflow instance                       |
-| `fromState`      | `string` | State before the transition                         |
-| `toState`        | `string` | State entered by this hop                           |
-| `eventName`      | `string` | Event that triggered the transition                 |
+| Field             | Type                                | Description                                                                                                                                                         |
+| ----------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflowName`    | `string`                            | Name of the workflow definition                                                                                                                                     |
+| `instanceUuid`    | `string`                            | UUID of the workflow instance                                                                                                                                       |
+| `state`           | `string`                            | The state the instance just entered (same as `toState`)                                                                                                             |
+| `fromState`       | `string \| null`                    | Prior state (null on initial-state entry from `createInstance`)                                                                                                     |
+| `toState`         | `string`                            | State entered                                                                                                                                                       |
+| `transitionUuid`  | `string`                            | UUID identifying this state entry. All commands running on entry to this state share this UUID; a fresh UUID is generated when the chain transitions to a new state |
+| `triggerEvent`    | `string \| null`                    | Name of the event that triggered the transition; `null` for initial-state entries and onEnter hops                                                                  |
+| `context`         | `Readonly<Record<string, unknown>>` | Deep-cloned + deep-frozen snapshot of instance context at event time — safe to retain indefinitely                                                                  |
+| `metadata`        | `Readonly<Record<string, unknown>>` | Deep-cloned + deep-frozen snapshot of instance metadata                                                                                                             |
+| `triggerMetadata` | `Readonly<Record<string, unknown>>` | Deep-cloned + deep-frozen snapshot of caller-supplied trigger metadata                                                                                              |
+| `occurredAt`      | `Date`                              | Timestamp when the event was constructed                                                                                                                            |
 
 **Example — forRoot:**
 
