@@ -307,12 +307,19 @@ describe("WorkflowRuntime observers", () => {
     expect(nested.deeper.tag).toBe("updated");
   });
 
-  it("observer event transitionUuid equals the one commands saw for the same hop", async () => {
+  it("observer event transitionUuid equals the one commands saw for the same state entry", async () => {
     const definition: WorkflowDefinition = {
       name: "obs-uuid-correlation",
       initialState: "draft",
       states: {
-        draft: { events: { go: { targetState: "step1" } } },
+        draft: {
+          events: {
+            go: {
+              targetState: "step1",
+              commands: [{ name: "captureEventUuid" }],
+            },
+          },
+        },
         step1: {
           onEnter: {
             targetState: "step2",
@@ -331,6 +338,12 @@ describe("WorkflowRuntime observers", () => {
     definitionRegistry.register(definition);
 
     const commandSeen: Record<string, string> = {};
+    commandRegistry.register("captureEventUuid", {
+      execute: async (_subject, ctx) => {
+        commandSeen["event"] = ctx.transitionUuid;
+        return { ok: true };
+      },
+    });
     commandRegistry.register("captureStep1Uuid", {
       execute: async (_subject, ctx) => {
         commandSeen["step1"] = ctx.transitionUuid;
@@ -355,18 +368,23 @@ describe("WorkflowRuntime observers", () => {
     const instance = await runtime.createInstance({ workflowName: "obs-uuid-correlation" });
     await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "go" });
 
-    // captured events: createInstance(draft) + triggerEvent(step1) + onEnter(step2) + onEnter(done)
+    // captured: createInstance(draft) + triggerEvent(step1) + onEnter(step2) + onEnter(done)
     expect(captured).toHaveLength(4);
 
-    // The observer event entering step2 corresponds to step1's onEnter hop,
-    // during which captureStep1Uuid ran. Their transitionUuids must match.
-    const step2Event = captured.find((e) => e.state === "step2");
-    expect(step2Event).toBeDefined();
-    expect(step2Event!.transitionUuid).toBe(commandSeen["step1"]);
+    const enterStep1 = captured.find((e) => e.state === "step1")!;
+    const enterStep2 = captured.find((e) => e.state === "step2")!;
+    const enterDone = captured.find((e) => e.state === "done")!;
 
-    // Same for the done event (step2's onEnter).
-    const doneEvent = captured.find((e) => e.state === "done");
-    expect(doneEvent).toBeDefined();
-    expect(doneEvent!.transitionUuid).toBe(commandSeen["step2"]);
+    // The event commands AND step1's onEnter commands BOTH fire "on entry to step1" —
+    // they share the SAME UUID (the entry UUID for step1).
+    expect(commandSeen["event"]).toBe(enterStep1.transitionUuid);
+    expect(commandSeen["step1"]).toBe(enterStep1.transitionUuid);
+
+    // step2's onEnter commands fire on entry to step2 → match enterStep2 UUID
+    expect(commandSeen["step2"]).toBe(enterStep2.transitionUuid);
+
+    // All entry UUIDs are distinct (each state entry is unique)
+    const uuids = [enterStep1.transitionUuid, enterStep2.transitionUuid, enterDone.transitionUuid];
+    expect(new Set(uuids).size).toBe(3);
   });
 });

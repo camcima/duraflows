@@ -457,7 +457,7 @@ describe("OnEnterExecutor", () => {
     expect(result.finalState).toBe("failed");
   });
 
-  it("generates a fresh transitionUuid per onEnter hop and updates fromState/toState", async () => {
+  it("generates a fresh transitionUuid per state entry; first hop reuses caller UUID", async () => {
     const definition: WorkflowDefinition = {
       name: "ctx-fields-chain",
       initialState: "stateA",
@@ -492,10 +492,11 @@ describe("OnEnterExecutor", () => {
     const commandExecutor = new CommandExecutor(registry);
     const executor = new OnEnterExecutor(commandExecutor);
 
+    const callerUuid = "00000000-0000-4000-8000-000000000042";
     const baseContext = makeContext({
       fromState: "before-chain",
       toState: "stateA",
-      transitionUuid: "caller-supplied-uuid",
+      transitionUuid: callerUuid,
     });
 
     await executor.executeChain(definition, "stateA", "instance-ctx-1", undefined, baseContext, 10);
@@ -503,13 +504,127 @@ describe("OnEnterExecutor", () => {
     expect(seenA).toHaveLength(1);
     expect(seenA[0].fromState).toBe("before-chain");
     expect(seenA[0].toState).toBe("stateA");
-    expect(seenA[0].transitionUuid).toMatch(/^[0-9a-f-]{36}$/);
-    expect(seenA[0].transitionUuid).not.toBe("caller-supplied-uuid");
+    // Under the new rule: first hop REUSES the caller's UUID (same state entry into A)
+    expect(seenA[0].transitionUuid).toBe(callerUuid);
 
     expect(seenB).toHaveLength(1);
     expect(seenB[0].fromState).toBe("stateA");
     expect(seenB[0].toState).toBe("stateB");
+    // Entering B is a NEW state entry, so new UUID
     expect(seenB[0].transitionUuid).toMatch(/^[0-9a-f-]{36}$/);
-    expect(seenB[0].transitionUuid).not.toBe(seenA[0].transitionUuid);
+    expect(seenB[0].transitionUuid).not.toBe(callerUuid);
+  });
+
+  it("onEnter commands for first hop see the caller's transitionUuid (same entry)", async () => {
+    const definition: WorkflowDefinition = {
+      name: "first-hop-uuid-reuse",
+      initialState: "stateA",
+      states: {
+        stateA: {
+          onEnter: {
+            targetState: "stateB",
+            commands: [{ name: "capA" }],
+          },
+        },
+        stateB: {
+          onEnter: {
+            targetState: "stateC",
+            commands: [{ name: "capB" }],
+          },
+        },
+        stateC: {},
+      },
+    };
+
+    let seenAUuid: string | undefined;
+    let seenBUuid: string | undefined;
+
+    const registry = makeRegistry({
+      capA: {
+        execute: async (_s, ctx) => {
+          seenAUuid = ctx.transitionUuid;
+          return { ok: true };
+        },
+      },
+      capB: {
+        execute: async (_s, ctx) => {
+          seenBUuid = ctx.transitionUuid;
+          return { ok: true };
+        },
+      },
+    });
+    const commandExecutor = new CommandExecutor(registry);
+    const executor = new OnEnterExecutor(commandExecutor);
+
+    const callerUuid = "caller-supplied-uuid-for-entering-A";
+    const baseContext = makeContext({
+      fromState: "before-chain",
+      toState: "stateA",
+      transitionUuid: callerUuid,
+    });
+
+    const result = await executor.executeChain(
+      definition,
+      "stateA",
+      "instance-uuid-entry-1",
+      undefined,
+      baseContext,
+      10,
+    );
+
+    // capA runs "on entry to A" → shares the caller's entry UUID
+    expect(seenAUuid).toBe(callerUuid);
+
+    // capB runs "on entry to B" → new UUID for B's entry (and matches the hop that records entering B)
+    const enterBHop = result.hops.find((h) => h.toState === "stateB");
+    expect(enterBHop).toBeDefined();
+    expect(seenBUuid).toBe(enterBHop!.transitionUuid);
+    expect(seenBUuid).not.toBe(callerUuid);
+
+    // entering C has yet another UUID
+    const enterCHop = result.hops.find((h) => h.toState === "stateC");
+    expect(enterCHop).toBeDefined();
+    expect(enterCHop!.transitionUuid).not.toBe(seenBUuid);
+    expect(enterCHop!.transitionUuid).not.toBe(callerUuid);
+  });
+
+  it("self-hop onEnter (no targetState) keeps the entry UUID", async () => {
+    const definition: WorkflowDefinition = {
+      name: "self-hop-uuid",
+      initialState: "idle",
+      states: {
+        idle: {
+          onEnter: {
+            commands: [{ name: "logEntry" }],
+          },
+        },
+      },
+    };
+
+    let seenUuid: string | undefined;
+
+    const registry = makeRegistry({
+      logEntry: {
+        execute: async (_s, ctx) => {
+          seenUuid = ctx.transitionUuid;
+          return { ok: true };
+        },
+      },
+    });
+    const commandExecutor = new CommandExecutor(registry);
+    const executor = new OnEnterExecutor(commandExecutor);
+
+    const callerUuid = "caller-for-self-hop";
+    const baseContext = makeContext({
+      fromState: "before",
+      toState: "idle",
+      transitionUuid: callerUuid,
+    });
+
+    const result = await executor.executeChain(definition, "idle", "instance-uuid-entry-2", undefined, baseContext, 10);
+
+    expect(seenUuid).toBe(callerUuid);
+    expect(result.hops).toHaveLength(1);
+    expect(result.hops[0].transitionUuid).toBe(callerUuid);
   });
 });

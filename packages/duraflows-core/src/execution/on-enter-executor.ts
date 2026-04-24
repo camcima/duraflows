@@ -33,6 +33,7 @@ export class OnEnterExecutor {
     let currentState = startingState;
     let depth = 0;
     let predecessor: string | null = context.fromState;
+    let currentEntryUuid: string = context.transitionUuid;
     let chainOutcome: "success" | "failure" = "success";
 
     while (true) {
@@ -47,13 +48,13 @@ export class OnEnterExecutor {
       const onEnter = stateDef.onEnter;
       const fromState = currentState;
 
+      // Commands for THIS entry share the entry UUID (first iteration uses caller's UUID)
       const hopContext: WorkflowExecutionContext = {
         ...context,
         fromState: predecessor,
         toState: currentState,
-        transitionUuid: randomUUID(),
+        transitionUuid: currentEntryUuid,
       };
-      const hopTransitionUuid = hopContext.transitionUuid;
 
       const commands = onEnter.commands ?? [];
       const commandExecResult = await this.commandExecutor.execute(commands, subject, hopContext);
@@ -62,16 +63,18 @@ export class OnEnterExecutor {
 
       if (outcome === "failure") {
         if (onEnter.errorState) {
+          const errorEntryUuid = randomUUID();
           hops.push({
             fromState,
             toState: onEnter.errorState,
-            transitionUuid: hopTransitionUuid,
+            transitionUuid: errorEntryUuid,
             outcome: "failure",
             commandResults: commandExecResult.commandResults,
           });
           chainOutcome = "failure";
           predecessor = currentState;
           currentState = onEnter.errorState;
+          currentEntryUuid = errorEntryUuid;
           continue;
         }
         const failedResult = commandExecResult.commandResults[commandExecResult.commandResults.length - 1];
@@ -80,15 +83,17 @@ export class OnEnterExecutor {
       }
 
       if (onEnter.targetState) {
+        const nextEntryUuid = randomUUID();
         hops.push({
           fromState,
           toState: onEnter.targetState,
-          transitionUuid: hopTransitionUuid,
+          transitionUuid: nextEntryUuid,
           outcome: "success",
           commandResults: commandExecResult.commandResults,
         });
         predecessor = currentState;
         currentState = onEnter.targetState;
+        currentEntryUuid = nextEntryUuid;
         continue;
       }
 
@@ -96,7 +101,7 @@ export class OnEnterExecutor {
         hops.push({
           fromState,
           toState: currentState,
-          transitionUuid: hopTransitionUuid,
+          transitionUuid: currentEntryUuid,
           outcome: "success",
           commandResults: commandExecResult.commandResults,
         });
