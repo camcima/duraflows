@@ -187,7 +187,11 @@ describe("CommandExecutor", () => {
     expect(result.commandResults[0].ok).toBe(false);
     expect(result.commandResults[0].code).toBe("BEST_EFFORT_THROWN");
     expect(result.commandResults[0].message).toBe("boom");
-    expect(result.commandResults[0].error).toBe(error);
+    expect(result.commandResults[0].error).toEqual({
+      name: "Error",
+      message: "boom",
+      stack: error.stack,
+    });
     expect(result.commandResults[1]).toEqual(okFollowing);
     expect(secondCalled).toBe(true);
   });
@@ -251,5 +255,72 @@ describe("CommandExecutor", () => {
     await executor.execute(commands, {}, createContext());
 
     expect(callOrder).toEqual(["first", "second", "third"]);
+  });
+
+  it("best-effort Error throw produces serializable {name, message, stack} shape", async () => {
+    const thrown = new Error("queue unreachable");
+
+    const registry = createMockRegistry({
+      cmdThrowBE: {
+        bestEffort: true,
+        execute: () => {
+          throw thrown;
+        },
+      },
+    });
+    const executor = new CommandExecutor(registry);
+    const result = await executor.execute([{ name: "cmdThrowBE" }], {}, createContext());
+
+    expect(result.outcome).toBe("success");
+    expect(result.commandResults[0].ok).toBe(false);
+    expect(result.commandResults[0].code).toBe("BEST_EFFORT_THROWN");
+    expect(result.commandResults[0].error).toEqual({
+      name: "Error",
+      message: "queue unreachable",
+      stack: thrown.stack,
+    });
+    // Critical: the stored error must survive JSON.stringify round-trip
+    const roundTripped = JSON.parse(JSON.stringify(result.commandResults[0]));
+    expect(roundTripped.error.name).toBe("Error");
+    expect(roundTripped.error.message).toBe("queue unreachable");
+    expect(typeof roundTripped.error.stack).toBe("string");
+  });
+
+  it("best-effort string throw produces UnknownError-named serializable shape", async () => {
+    const registry = createMockRegistry({
+      cmdThrowBE: {
+        bestEffort: true,
+        execute: () => {
+          throw "something broke";
+        },
+      },
+    });
+    const executor = new CommandExecutor(registry);
+    const result = await executor.execute([{ name: "cmdThrowBE" }], {}, createContext());
+
+    expect(result.commandResults[0].error).toEqual({
+      name: "UnknownError",
+      message: "something broke",
+    });
+    expect(() => JSON.stringify(result.commandResults[0])).not.toThrow();
+  });
+
+  it("best-effort BigInt throw does not crash JSON.stringify", async () => {
+    const registry = createMockRegistry({
+      cmdThrowBE: {
+        bestEffort: true,
+        execute: () => {
+          throw 42n;
+        },
+      },
+    });
+    const executor = new CommandExecutor(registry);
+    const result = await executor.execute([{ name: "cmdThrowBE" }], {}, createContext());
+
+    expect(result.commandResults[0].ok).toBe(false);
+    // The sanitized error must be JSON-serializable (no BigInt in the persisted shape).
+    expect(() => JSON.stringify(result.commandResults[0])).not.toThrow();
+    expect((result.commandResults[0].error as { name: string }).name).toBe("UnknownError");
+    expect((result.commandResults[0].error as { message: string }).message).toBe("42");
   });
 });

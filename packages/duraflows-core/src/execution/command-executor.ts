@@ -2,6 +2,17 @@ import type { CommandResult, WorkflowCommand, WorkflowExecutionContext } from ".
 import type { WorkflowCommandRef } from "../types/definition.js";
 import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
 
+function toSerializableError(value: unknown): { name: string; message: string; stack?: string } {
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message,
+      stack: value.stack,
+    };
+  }
+  return { name: "UnknownError", message: String(value) };
+}
+
 export interface CommandExecutionResult {
   outcome: "success" | "failure";
   commandResults: CommandResult[];
@@ -29,11 +40,12 @@ export class CommandExecutor {
         result = await command.execute(subject, context);
       } catch (error: unknown) {
         if (command.bestEffort) {
+          const message = error instanceof Error ? error.message : String(error);
           result = {
             ok: false,
             code: "BEST_EFFORT_THROWN",
-            message: error instanceof Error ? error.message : String(error),
-            error,
+            message,
+            error: toSerializableError(error),
           };
         } else {
           throw error;
