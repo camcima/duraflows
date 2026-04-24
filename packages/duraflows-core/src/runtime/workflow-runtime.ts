@@ -91,14 +91,12 @@ export class WorkflowRuntime {
 
     const now = this.clock.now();
 
-    // Seed context: state defaults first, user input wins on top
     const stateDef = definition.states[definition.initialState];
     const context: Record<string, unknown> = {
       ...(stateDef?.context ?? {}),
       ...(input.context ?? {}),
     };
 
-    // Compute timeout deadline for initial state
     const expiresAt = this.timeoutResolver.computeDeadline(definition, definition.initialState, now);
 
     const instance: WorkflowInstance = {
@@ -114,9 +112,10 @@ export class WorkflowRuntime {
       updatedAt: now,
     };
 
-    // Check if initial state has onEnter — if so, wrap in transaction
+    const eventsToFire: StateEnterEvent[] = [];
+
     if (stateDef?.onEnter) {
-      return this.transactionRunner.runInTransaction(async () => {
+      const result = await this.transactionRunner.runInTransaction(async () => {
         await this.instanceStore.create(instance);
 
         const executionContext: WorkflowExecutionContext = {
@@ -129,13 +128,52 @@ export class WorkflowRuntime {
           transitionUuid: randomUUID(),
         };
 
-        await this.processOnEnterChain(instance, definition, executionContext, undefined, []);
+        eventsToFire.push({
+          workflowName: instance.workflowName,
+          instanceUuid: instance.uuid,
+          state: definition.initialState,
+          fromState: null,
+          toState: definition.initialState,
+          transitionUuid: executionContext.transitionUuid,
+          triggerEvent: null,
+          context: deepFreeze({ ...instance.context }),
+          metadata: deepFreeze({ ...instance.metadata }),
+          triggerMetadata: deepFreeze({ ...(input.triggerMetadata ?? {}) }),
+          occurredAt: now,
+        });
+
+        await this.processOnEnterChain(instance, definition, executionContext, undefined, eventsToFire);
 
         return instance;
       });
+
+      for (const event of eventsToFire) {
+        await this.observerRegistry.fireOnEnter(event);
+      }
+
+      return result;
     }
 
     await this.instanceStore.create(instance);
+
+    eventsToFire.push({
+      workflowName: instance.workflowName,
+      instanceUuid: instance.uuid,
+      state: definition.initialState,
+      fromState: null,
+      toState: definition.initialState,
+      transitionUuid: randomUUID(),
+      triggerEvent: null,
+      context: deepFreeze({ ...instance.context }),
+      metadata: deepFreeze({ ...instance.metadata }),
+      triggerMetadata: deepFreeze({ ...(input.triggerMetadata ?? {}) }),
+      occurredAt: now,
+    });
+
+    for (const event of eventsToFire) {
+      await this.observerRegistry.fireOnEnter(event);
+    }
+
     return instance;
   }
 
