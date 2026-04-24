@@ -8,21 +8,15 @@ import type {
   WorkflowInstance,
   WorkflowExecutionResult,
   AvailableWorkflowEvent,
-  WorkflowInstanceStore,
-  WorkflowHistoryStore,
   WorkflowHistoryRecord,
 } from "@duraflows/core";
-import { WORKFLOW_RUNTIME, WORKFLOW_INSTANCE_STORE, WORKFLOW_HISTORY_STORE } from "../providers/injection-tokens.js";
+import { WORKFLOW_RUNTIME } from "../providers/injection-tokens.js";
 
 @Injectable()
 export class WorkflowService {
   constructor(
     @Inject(WORKFLOW_RUNTIME)
     private readonly runtime: WorkflowRuntime,
-    @Inject(WORKFLOW_INSTANCE_STORE)
-    private readonly instanceStore: WorkflowInstanceStore,
-    @Inject(WORKFLOW_HISTORY_STORE)
-    private readonly historyStore: WorkflowHistoryStore,
   ) {}
 
   async createInstance(input: CreateWorkflowInstanceInput): Promise<WorkflowInstance> {
@@ -38,14 +32,14 @@ export class WorkflowService {
   }
 
   async getInstance(uuid: string): Promise<WorkflowInstance | null> {
-    return this.instanceStore.findByUuid(uuid);
+    return this.runtime.getInstance(uuid);
   }
 
   async getHistory(
     workflowInstanceUuid: string,
     options?: { limit?: number; offset?: number },
   ): Promise<WorkflowHistoryRecord[]> {
-    return this.historyStore.findByInstanceUuid(workflowInstanceUuid, options);
+    return this.runtime.getHistory(workflowInstanceUuid, options);
   }
 
   getHandle(uuid: string): WorkflowHandle {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { WorkflowDefinition, CommandResult, WorkflowExecutionContext } from "../../src/types/index.js";
+import type { WorkflowDefinition, CommandResult, WorkflowExecutionContext } from "../../src/index.js";
 import { WorkflowError, WorkflowDefinitionError } from "../../src/errors/index.js";
 import { InMemoryCommandRegistry } from "../../src/registry/command-registry.js";
 import { InMemoryDefinitionRegistry } from "../../src/registry/definition-registry.js";

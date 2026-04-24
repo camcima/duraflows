@@ -8,19 +8,13 @@ function createMocks() {
     createInstance: vi.fn().mockResolvedValue({ uuid: "new-uuid", currentState: "start" }),
     triggerEvent: vi.fn().mockResolvedValue({ outcome: "success", toState: "done" }),
     getAvailableEvents: vi.fn().mockResolvedValue([{ eventName: "Go" }]),
+    getInstance: vi.fn().mockResolvedValue({ uuid: "inst-uuid", currentState: "pending" }),
+    getHistory: vi.fn().mockResolvedValue([{ eventName: "Created" }]),
   };
 
-  const instanceStore = {
-    findByUuid: vi.fn().mockResolvedValue({ uuid: "inst-uuid", currentState: "pending" }),
-  };
+  const service = new WorkflowService(runtime as any);
 
-  const historyStore = {
-    findByInstanceUuid: vi.fn().mockResolvedValue([{ eventName: "Created" }]),
-  };
-
-  const service = new WorkflowService(runtime as any, instanceStore as any, historyStore as any);
-
-  return { service, runtime, instanceStore, historyStore };
+  return { service, runtime };
 }
 
 describe("WorkflowService", () => {
@@ -57,33 +51,33 @@ describe("WorkflowService", () => {
     expect(result).toHaveLength(1);
   });
 
-  it("getInstance() queries instanceStore directly", async () => {
-    const { service, instanceStore } = createMocks();
+  it("getInstance() delegates to runtime", async () => {
+    const { service, runtime } = createMocks();
 
     const result = await service.getInstance("inst-uuid");
 
-    expect(instanceStore.findByUuid).toHaveBeenCalledWith("inst-uuid");
+    expect(runtime.getInstance).toHaveBeenCalledWith("inst-uuid");
     expect(result!.uuid).toBe("inst-uuid");
   });
 
-  it("getHistory() queries historyStore with pagination", async () => {
-    const { service, historyStore } = createMocks();
+  it("getHistory() delegates to runtime with pagination", async () => {
+    const { service, runtime } = createMocks();
 
     const result = await service.getHistory("inst-uuid", { limit: 10, offset: 5 });
 
-    expect(historyStore.findByInstanceUuid).toHaveBeenCalledWith("inst-uuid", {
+    expect(runtime.getHistory).toHaveBeenCalledWith("inst-uuid", {
       limit: 10,
       offset: 5,
     });
     expect(result).toHaveLength(1);
   });
 
-  it("getHistory() works without pagination options", async () => {
-    const { service, historyStore } = createMocks();
+  it("getHistory() delegates to runtime without pagination options", async () => {
+    const { service, runtime } = createMocks();
 
     await service.getHistory("inst-uuid");
 
-    expect(historyStore.findByInstanceUuid).toHaveBeenCalledWith("inst-uuid", undefined);
+    expect(runtime.getHistory).toHaveBeenCalledWith("inst-uuid", undefined);
   });
 
   it("getHandle() returns a WorkflowHandle with the correct uuid", () => {
