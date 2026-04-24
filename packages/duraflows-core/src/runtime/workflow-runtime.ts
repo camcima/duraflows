@@ -298,41 +298,60 @@ export class WorkflowRuntime {
     const limit = input?.limit ?? 100;
     const now = this.clock.now();
     const eventsToFire: StateEnterEvent[] = [];
+    let processed = 0;
+    const failed: Array<{ uuid: string; error: string }> = [];
 
-    const result = await this.transactionRunner.runInTransaction(async () => {
-      const expired = await this.instanceStore.findExpired(limit, now);
-      let processed = 0;
-      const failed: Array<{ uuid: string; error: string }> = [];
+    // Step 1: find expired instances (short-lived txn; locks released immediately).
+    const expired = await this.transactionRunner.runInTransaction(async () => {
+      return this.instanceStore.findExpired(limit, now);
+    });
 
-      for (const instance of expired) {
-        try {
-          const definition = this.definitionRegistry.get(instance.workflowName);
-          const eventName = this.timeoutResolver.getTimeoutEventName(definition, instance.currentState);
+    // Step 2: process each instance in its own transaction.
+    for (const staleInstance of expired) {
+      const startIdx = eventsToFire.length;
+      try {
+        await this.transactionRunner.runInTransaction(async () => {
+          const definition = this.definitionRegistry.get(staleInstance.workflowName);
+          const eventName = this.timeoutResolver.getTimeoutEventName(definition, staleInstance.currentState);
+
+          // Re-lock the instance fresh inside this transaction (locks from Step 1 were released).
+          const instance = await this.instanceStore.lockByUuid(staleInstance.uuid);
+          if (!instance) {
+            // Instance disappeared (another worker deleted it); skip silently.
+            return;
+          }
+
+          // Re-verify still expired (another worker may have already processed it).
+          if (!instance.expiresAt || instance.expiresAt > this.clock.now()) {
+            return;
+          }
 
           if (!eventName) {
+            // No timeout event for this state; just clear the stale deadline.
             instance.expiresAt = null;
             instance.version++;
             instance.updatedAt = this.clock.now();
             await this.instanceStore.update(instance);
-            continue;
+            return;
           }
 
           await this.processTimeoutEvent(instance, definition, eventName, eventsToFire);
-          processed++;
-        } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : String(error);
-          failed.push({ uuid: instance.uuid, error: message });
-        }
+        });
+        processed++;
+      } catch (error: unknown) {
+        // Per-instance transaction rolled back. Drop any events queued for this instance.
+        eventsToFire.length = startIdx;
+        const message = error instanceof Error ? error.message : String(error);
+        failed.push({ uuid: staleInstance.uuid, error: message });
       }
+    }
 
-      return { processed, failed };
-    });
-
+    // Step 3: fire observers post-commit (only for successful instances).
     for (const event of eventsToFire) {
       await this.observerRegistry.fireOnEnter(event);
     }
 
-    return result;
+    return { processed, failed };
   }
 
   private async processTimeoutEvent(

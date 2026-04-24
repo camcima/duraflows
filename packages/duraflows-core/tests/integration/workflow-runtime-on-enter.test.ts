@@ -20,8 +20,13 @@ import type {
 // In-memory test helpers
 // ---------------------------------------------------------------------------
 
-class InMemoryInstanceStore implements WorkflowInstanceStore {
-  private readonly instances = new Map<string, WorkflowInstance>();
+interface Snapshotable {
+  snapshot(): unknown;
+  restore(snap: unknown): void;
+}
+
+class InMemoryInstanceStore implements WorkflowInstanceStore, Snapshotable {
+  private instances = new Map<string, WorkflowInstance>();
 
   async create(instance: WorkflowInstance): Promise<void> {
     this.instances.set(instance.uuid, structuredClone(instance));
@@ -50,10 +55,18 @@ class InMemoryInstanceStore implements WorkflowInstanceStore {
     }
     return results;
   }
+
+  snapshot(): unknown {
+    return new Map([...this.instances.entries()].map(([k, v]) => [k, structuredClone(v)]));
+  }
+
+  restore(snap: unknown): void {
+    this.instances = snap as Map<string, WorkflowInstance>;
+  }
 }
 
-class InMemoryHistoryStore implements WorkflowHistoryStore {
-  private readonly records: Array<WorkflowHistoryRecord & { uuid: string }> = [];
+class InMemoryHistoryStore implements WorkflowHistoryStore, Snapshotable {
+  private records: Array<WorkflowHistoryRecord & { uuid: string }> = [];
 
   async append(entry: WorkflowHistoryRecord): Promise<string> {
     const uuid = randomUUID();
@@ -70,11 +83,32 @@ class InMemoryHistoryStore implements WorkflowHistoryStore {
     const limit = options?.limit ?? matching.length;
     return matching.slice(offset, offset + limit);
   }
+
+  snapshot(): unknown {
+    return [...this.records];
+  }
+
+  restore(snap: unknown): void {
+    this.records = snap as Array<WorkflowHistoryRecord & { uuid: string }>;
+  }
 }
 
 class InMemoryTransactionRunner implements WorkflowTransactionRunner {
+  constructor(private readonly stores: Snapshotable[] = []) {}
+
   async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
-    return callback();
+    if (this.stores.length === 0) {
+      return callback();
+    }
+    const snapshots = this.stores.map((s) => s.snapshot());
+    try {
+      return await callback();
+    } catch (err) {
+      for (let i = 0; i < this.stores.length; i++) {
+        this.stores[i].restore(snapshots[i]);
+      }
+      throw err;
+    }
   }
 }
 
@@ -658,6 +692,110 @@ describe("WorkflowRuntime onEnter integration", () => {
     expect(captured!.fromState).toBeNull();
     expect(captured!.toState).toBe("initializing");
     expect(captured!.transitionUuid).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("processExpiredWorkflows: a failing instance does not corrupt other instances or fire observers for the failure", async () => {
+    const definition: WorkflowDefinition = {
+      name: "per-instance-txn",
+      initialState: "waiting",
+      states: {
+        waiting: {
+          events: {
+            expire: {
+              targetState: "expiring",
+              timeout: { afterMinutes: 30 },
+            },
+          },
+        },
+        expiring: {
+          onEnter: {
+            targetState: "expired",
+            commands: [{ name: "cleanupMaybeThrow" }],
+            // Deliberately no errorState — failure throws out of the chain.
+          },
+        },
+        expired: {},
+      },
+    };
+
+    const definitionRegistry2 = new InMemoryDefinitionRegistry({
+      validator: new WorkflowValidator(),
+      compiler: new WorkflowCompiler(),
+    });
+    const commandRegistry2 = new InMemoryCommandRegistry();
+    const instanceStore2 = new InMemoryInstanceStore();
+    const historyStore2 = new InMemoryHistoryStore();
+    const runtime2 = new WorkflowRuntime({
+      definitionRegistry: definitionRegistry2,
+      commandRegistry: commandRegistry2,
+      instanceStore: instanceStore2,
+      historyStore: historyStore2,
+      transactionRunner: new InMemoryTransactionRunner([instanceStore2, historyStore2]),
+      clock,
+    });
+
+    definitionRegistry2.register(definition);
+    commandRegistry2.register("cleanupMaybeThrow", {
+      execute: async (_subject, ctx) => {
+        if (ctx.context["poison"] === true) {
+          return { ok: false, code: "POISON" };
+        }
+        return { ok: true };
+      },
+    });
+
+    const okA = await runtime2.createInstance({ workflowName: "per-instance-txn" });
+    const badB = await runtime2.createInstance({
+      workflowName: "per-instance-txn",
+      context: { poison: true },
+    });
+    const okC = await runtime2.createInstance({ workflowName: "per-instance-txn" });
+
+    // Expire all three.
+    const past = new Date("2025-06-15T11:00:00.000Z");
+    for (const uuid of [okA.uuid, badB.uuid, okC.uuid]) {
+      const stored = await instanceStore2.findByUuid(uuid);
+      stored!.expiresAt = past;
+      await instanceStore2.update(stored!);
+    }
+
+    // Register an observer AFTER creation so we only see events from processExpiredWorkflows.
+    const observedStates: string[] = [];
+    runtime2.addObserver({
+      name: "capture-post-expire",
+      onEnter: (event) => {
+        observedStates.push(`${event.instanceUuid}:${event.state}`);
+      },
+    });
+
+    const result = await runtime2.processExpiredWorkflows();
+
+    // B failed; A and C succeeded.
+    expect(result.processed).toBe(2);
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0].uuid).toBe(badB.uuid);
+
+    // A and C ended in "expired" state (both timeout event AND onEnter chain completed).
+    const finalA = await instanceStore2.findByUuid(okA.uuid);
+    expect(finalA!.currentState).toBe("expired");
+    const finalC = await instanceStore2.findByUuid(okC.uuid);
+    expect(finalC!.currentState).toBe("expired");
+
+    // B's per-instance transaction rolled back → still in "waiting".
+    const finalB = await instanceStore2.findByUuid(badB.uuid);
+    expect(finalB!.currentState).toBe("waiting");
+
+    // Observer saw 4 events for A and C (2 per instance: expiring + expired), and 0 for B.
+    const aEvents = observedStates.filter((s) => s.startsWith(okA.uuid));
+    const bEvents = observedStates.filter((s) => s.startsWith(badB.uuid));
+    const cEvents = observedStates.filter((s) => s.startsWith(okC.uuid));
+    expect(aEvents).toEqual([`${okA.uuid}:expiring`, `${okA.uuid}:expired`]);
+    expect(cEvents).toEqual([`${okC.uuid}:expiring`, `${okC.uuid}:expired`]);
+    expect(bEvents).toHaveLength(0);
+
+    // B's history must be empty (no timeout event logged, since txn rolled back).
+    const bHistory = await historyStore2.findByInstanceUuid(badB.uuid);
+    expect(bHistory).toHaveLength(0);
   });
 
   it("onEnter chain after event has fromState=event.fromState, toState=current state", async () => {
