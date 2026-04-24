@@ -45,11 +45,11 @@ export interface WorkflowModuleFactoryConfig {
   observers?: WorkflowObserver[];
 }
 
-export interface WorkflowModuleAsyncOptions {
+export interface WorkflowModuleAsyncOptions<TArgs extends unknown[] = unknown[]> {
   imports?: Type<unknown>[];
   commands?: WorkflowCommandRegistration[];
   enableControllers?: boolean;
-  useFactory: (...args: any[]) => Promise<WorkflowModuleFactoryConfig> | WorkflowModuleFactoryConfig;
+  useFactory: (...args: TArgs) => Promise<WorkflowModuleFactoryConfig> | WorkflowModuleFactoryConfig;
   inject?: InjectionToken[];
 }
 
@@ -160,7 +160,7 @@ export class WorkflowModule {
     };
   }
 
-  static forRootAsync(options: WorkflowModuleAsyncOptions): DynamicModule {
+  static forRootAsync<TArgs extends unknown[] = unknown[]>(options: WorkflowModuleAsyncOptions<TArgs>): DynamicModule {
     const controllers = options.enableControllers
       ? [WorkflowInstanceController, WorkflowEventController, WorkflowQueryController, WorkflowTimeoutController]
       : [];
