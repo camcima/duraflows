@@ -737,6 +737,7 @@ interface WorkflowExecutionContext {
   now: Date;
   context: Record<string, unknown>;
   metadata: Readonly<Record<string, unknown>>;
+  readonly commandMetadata: Readonly<Record<string, unknown>>;
   readonly fromState: string | null;
   readonly toState: string;
   readonly transitionUuid: string;
@@ -749,6 +750,7 @@ interface WorkflowExecutionContext {
 | `now`             | `Date`                              | Current timestamp from the injected clock                                                                                                                                                                                                                                                   |
 | `context`         | `Record<string, unknown>`           | **Mutable.** The workflow's working memory. Commands can read and write. Changes are persisted after the transition.                                                                                                                                                                        |
 | `metadata`        | `Readonly<Record<string, unknown>>` | **Read-only.** The workflow's immutable identity labels set at creation. Attempting to write will be ignored (frozen object).                                                                                                                                                               |
+| `commandMetadata` | `Readonly<Record<string, unknown>>` | **Read-only.** A deep-cloned, deep-frozen copy of the `metadata` field from the `WorkflowCommandRef` that invoked this command. `{}` when the ref defines no metadata. Each command in a chain sees its own metadata, not a prior command's.                                                |
 | `fromState`       | `string \| null`                    | The state the workflow is leaving. `null` when entering the initial state on create.                                                                                                                                                                                                        |
 | `toState`         | `string`                            | The state being entered for this command's execution. May differ from the eventual final state in an onEnter chain.                                                                                                                                                                         |
 | `transitionUuid`  | `string`                            | UUID identifying this state entry. All commands running on entry to a given state (event commands + onEnter commands for that hop) share the same UUID. A fresh UUID is generated when the chain transitions to a new state. The matching observer `StateEnterEvent` carries the same UUID. |

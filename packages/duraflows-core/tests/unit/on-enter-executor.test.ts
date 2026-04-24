@@ -12,6 +12,7 @@ function makeContext(overrides: Partial<WorkflowExecutionContext> = {}): Workflo
     now: new Date(),
     context: {},
     metadata: {},
+    commandMetadata: Object.freeze({}),
     fromState: "test-from",
     toState: "test-to",
     transitionUuid: "00000000-0000-0000-0000-000000000003",

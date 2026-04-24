@@ -13,6 +13,16 @@ function toSerializableError(value: unknown): { name: string; message: string; s
   return { name: "UnknownError", message: String(value) };
 }
 
+function deepFreeze<T extends Record<string, unknown>>(obj: T): Readonly<T> {
+  Object.freeze(obj);
+  for (const value of Object.values(obj)) {
+    if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+      deepFreeze(value as Record<string, unknown>);
+    }
+  }
+  return obj;
+}
+
 export interface CommandExecutionResult {
   outcome: "success" | "failure";
   commandResults: CommandResult[];
@@ -34,10 +44,14 @@ export class CommandExecutor {
 
     for (const commandRef of commands) {
       const command: WorkflowCommand = this.commandRegistry.get(commandRef.name);
+      const commandContext: WorkflowExecutionContext = {
+        ...context,
+        commandMetadata: deepFreeze(structuredClone(commandRef.metadata ?? {})),
+      };
       let result: CommandResult;
 
       try {
-        result = await command.execute(subject, context);
+        result = await command.execute(subject, commandContext);
       } catch (error: unknown) {
         if (command.bestEffort) {
           const message = error instanceof Error ? error.message : String(error);

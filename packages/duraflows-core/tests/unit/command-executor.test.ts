@@ -28,6 +28,7 @@ function createContext(): WorkflowExecutionContext {
     fromState: "fromState-test",
     toState: "toState-test",
     transitionUuid: "00000000-0000-0000-0000-000000000001",
+    commandMetadata: Object.freeze({}),
   };
 }
 
@@ -322,5 +323,98 @@ describe("CommandExecutor", () => {
     expect(() => JSON.stringify(result.commandResults[0])).not.toThrow();
     expect((result.commandResults[0].error as { name: string }).name).toBe("UnknownError");
     expect((result.commandResults[0].error as { message: string }).message).toBe("42");
+  });
+
+  it("passes WorkflowCommandRef.metadata to the command via context.commandMetadata", async () => {
+    let capturedMetadata: Readonly<Record<string, unknown>> | undefined;
+
+    const registry = createMockRegistry({
+      captureMeta: {
+        execute: (_subject, ctx) => {
+          capturedMetadata = ctx.commandMetadata;
+          return { ok: true };
+        },
+      },
+    });
+    const executor = new CommandExecutor(registry);
+
+    await executor.execute([{ name: "captureMeta", metadata: { tier: "gold", priority: 9 } }], {}, createContext());
+
+    expect(capturedMetadata).toEqual({ tier: "gold", priority: 9 });
+    expect(Object.isFrozen(capturedMetadata)).toBe(true);
+  });
+
+  it("each command in a chain sees its own commandMetadata, not a previous command's", async () => {
+    const seen: Array<Readonly<Record<string, unknown>>> = [];
+
+    const registry = createMockRegistry({
+      captureMeta: {
+        execute: (_subject, ctx) => {
+          seen.push(ctx.commandMetadata);
+          return { ok: true };
+        },
+      },
+    });
+    const executor = new CommandExecutor(registry);
+
+    await executor.execute(
+      [
+        { name: "captureMeta", metadata: { step: 1 } },
+        { name: "captureMeta", metadata: { step: 2 } },
+        { name: "captureMeta" }, // no metadata → should be {}
+      ],
+      {},
+      createContext(),
+    );
+
+    expect(seen).toHaveLength(3);
+    expect(seen[0]).toEqual({ step: 1 });
+    expect(seen[1]).toEqual({ step: 2 });
+    expect(seen[2]).toEqual({});
+  });
+
+  it("commandMetadata is a deep clone — commands cannot mutate the WorkflowCommandRef.metadata", async () => {
+    const sharedMetadata = { nested: { val: 1 } };
+
+    const registry = createMockRegistry({
+      mutateMeta: {
+        execute: (_subject, ctx) => {
+          // Attempt to mutate — should throw because frozen
+          expect(() => {
+            (ctx.commandMetadata.nested as { val: number }).val = 999;
+          }).toThrow();
+          return { ok: true };
+        },
+      },
+    });
+    const executor = new CommandExecutor(registry);
+
+    await executor.execute([{ name: "mutateMeta", metadata: sharedMetadata }], {}, createContext());
+
+    // The original metadata is untouched
+    expect(sharedMetadata.nested.val).toBe(1);
+  });
+
+  it("context.context (mutable instance context) still flows across commands in a chain", async () => {
+    const registry = createMockRegistry({
+      writeFoo: {
+        execute: (_subject, ctx) => {
+          ctx.context.foo = "bar";
+          return { ok: true };
+        },
+      },
+      readFoo: {
+        execute: (_subject, ctx) => {
+          return { ok: true, code: String(ctx.context.foo) };
+        },
+      },
+    });
+    const executor = new CommandExecutor(registry);
+
+    const ctx = createContext();
+    const result = await executor.execute([{ name: "writeFoo" }, { name: "readFoo" }], {}, ctx);
+
+    expect(result.outcome).toBe("success");
+    expect(result.commandResults[1].code).toBe("bar");
   });
 });

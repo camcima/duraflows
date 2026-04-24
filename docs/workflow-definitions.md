@@ -288,7 +288,7 @@ interface WorkflowCommandRef {
 | Property   | Type                      | Required | Description                                                                                                                                                                                                                                                                                    |
 | ---------- | ------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`     | `string`                  | Yes      | Stable name that maps to a registered `WorkflowCommand` implementation. In NestJS, use the [`@WorkflowCommand` decorator](nestjs-integration.md#workflowcommand-decorator) or explicit `commands` array to register implementations. Without NestJS, use `InMemoryCommandRegistry.register()`. |
-| `metadata` | `Record<string, unknown>` | No       | Arbitrary per-invocation metadata (not passed to the command handler automatically).                                                                                                                                                                                                           |
+| `metadata` | `Record<string, unknown>` | No       | Arbitrary per-invocation metadata. Delivered to the command handler as `ctx.commandMetadata` (deep-cloned and deep-frozen). Each command in a chain receives its own copy, independent of any other command's metadata.                                                                        |
 
 ### Example
 
