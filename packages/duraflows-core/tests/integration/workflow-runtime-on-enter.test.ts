@@ -1093,4 +1093,95 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     lockSpy.mockRestore();
   });
+
+  // ---------------------------------------------------------------------------
+  // Regression tests: deep-clone at runtime boundaries (Fix P2)
+  // ---------------------------------------------------------------------------
+
+  it("commands mutating nested context do not mutate the workflow definition's default context", async () => {
+    const sharedDefinition: WorkflowDefinition = {
+      name: "definition-integrity",
+      initialState: "ready",
+      states: {
+        ready: {
+          context: { config: { threshold: 10 } }, // definition-level default
+          events: {
+            tweak: {
+              targetState: "done",
+              commands: [{ name: "mutateConfig" }],
+            },
+          },
+        },
+        done: {},
+      },
+    };
+    definitionRegistry.register(sharedDefinition);
+    commandRegistry.register("mutateConfig", {
+      execute: async (_subject, ctx) => {
+        (ctx.context.config as { threshold: number }).threshold = 999;
+        return { ok: true };
+      },
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "definition-integrity" });
+    await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "tweak" });
+
+    // The DEFINITION's default nested config must not have been mutated.
+    expect((sharedDefinition.states.ready.context!.config as { threshold: number }).threshold).toBe(10);
+  });
+
+  it("createInstance deep-clones caller-supplied nested context (caller keeps ownership)", async () => {
+    const definition: WorkflowDefinition = {
+      name: "caller-input-isolation",
+      initialState: "ready",
+      states: { ready: {} },
+    };
+    definitionRegistry.register(definition);
+
+    const callerContext = { audit: { tag: "caller" } };
+    const instance = await runtime.createInstance({
+      workflowName: "caller-input-isolation",
+      context: callerContext,
+    });
+
+    // Caller mutates their own object — must not affect the instance.
+    callerContext.audit.tag = "mutated-by-caller";
+
+    const stored = await instanceStore.findByUuid(instance.uuid);
+    expect((stored!.context.audit as { tag: string }).tag).toBe("caller");
+  });
+
+  it("onEnter merges into instance.context do not alias workflow-definition nested defaults", async () => {
+    const sharedDefinition: WorkflowDefinition = {
+      name: "onenter-def-integrity",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            go: { targetState: "processing" },
+          },
+        },
+        processing: {
+          context: { policy: { retries: 3 } }, // definition-level default merged on hop
+          onEnter: {
+            targetState: "done",
+            commands: [{ name: "mutatePolicy" }],
+          },
+        },
+        done: {},
+      },
+    };
+    definitionRegistry.register(sharedDefinition);
+    commandRegistry.register("mutatePolicy", {
+      execute: async (_subject, ctx) => {
+        (ctx.context.policy as { retries: number }).retries = 99;
+        return { ok: true };
+      },
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "onenter-def-integrity" });
+    await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "go" });
+
+    expect((sharedDefinition.states.processing.context!.policy as { retries: number }).retries).toBe(3);
+  });
 });

@@ -93,8 +93,8 @@ export class WorkflowRuntime {
 
     const stateDef = definition.states[definition.initialState];
     const context: Record<string, unknown> = {
-      ...(stateDef?.context ?? {}),
-      ...(input.context ?? {}),
+      ...structuredClone(stateDef?.context ?? {}),
+      ...structuredClone(input.context ?? {}),
     };
 
     const expiresAt = this.timeoutResolver.computeDeadline(definition, definition.initialState, now);
@@ -107,7 +107,7 @@ export class WorkflowRuntime {
       expiresAt,
       lastTransitionAt: now,
       context,
-      metadata: input.metadata ?? {},
+      metadata: structuredClone(input.metadata ?? {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -220,7 +220,7 @@ export class WorkflowRuntime {
       const newStateDef = definition.states[eventResult.toState];
       instance.context = {
         ...executionContext.context,
-        ...(newStateDef?.context ?? {}),
+        ...structuredClone(newStateDef?.context ?? {}),
       };
 
       instance.expiresAt = this.timeoutResolver.computeDeadline(definition, eventResult.toState, now);
@@ -396,7 +396,7 @@ export class WorkflowRuntime {
     const newStateDef = definition.states[result.toState];
     instance.context = {
       ...executionContext.context,
-      ...(newStateDef?.context ?? {}),
+      ...structuredClone(newStateDef?.context ?? {}),
     };
 
     instance.expiresAt = this.timeoutResolver.computeDeadline(definition, result.toState, now);
@@ -473,7 +473,7 @@ export class WorkflowRuntime {
       const hopStateDef = definition.states[hop.toState];
       instance.context = {
         ...executionContext.context,
-        ...(hopStateDef?.context ?? {}),
+        ...structuredClone(hopStateDef?.context ?? {}),
       };
       // Update execution context so next hop's commands see merged state context
       executionContext.context = { ...instance.context };
