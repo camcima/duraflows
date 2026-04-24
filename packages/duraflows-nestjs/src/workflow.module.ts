@@ -42,12 +42,12 @@ export interface WorkflowModuleFactoryConfig {
   workflows: WorkflowDefinition[];
   persistence: WorkflowPersistenceProvider;
   clock?: WorkflowClock;
+  observers?: WorkflowObserver[];
 }
 
 export interface WorkflowModuleAsyncOptions {
   imports?: Type<unknown>[];
   commands?: WorkflowCommandRegistration[];
-  observers?: WorkflowObserver[];
   enableControllers?: boolean;
   useFactory: (...args: any[]) => Promise<WorkflowModuleFactoryConfig> | WorkflowModuleFactoryConfig;
   inject?: InjectionToken[];
@@ -225,6 +225,7 @@ export class WorkflowModule {
       {
         provide: WORKFLOW_RUNTIME,
         useFactory: (
+          config: WorkflowModuleFactoryConfig,
           definitionRegistry: WorkflowDefinitionRegistry,
           commandRegistry: NestCommandRegistry,
           instanceStore: WorkflowInstanceStore,
@@ -239,9 +240,10 @@ export class WorkflowModule {
             historyStore,
             transactionRunner,
             clock,
-            observers: options.observers,
+            observers: config.observers,
           }),
         inject: [
+          "WORKFLOW_MODULE_OPTIONS",
           WORKFLOW_DEFINITION_REGISTRY,
           WORKFLOW_COMMAND_REGISTRY,
           WORKFLOW_INSTANCE_STORE,

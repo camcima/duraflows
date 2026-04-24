@@ -93,3 +93,4 @@ export {
   InMemoryDefinitionRegistry,
   InMemoryCommandRegistry,
 } from "@duraflows/core";
+export type { WorkflowObserver, StateEnterEvent } from "@duraflows/core";
