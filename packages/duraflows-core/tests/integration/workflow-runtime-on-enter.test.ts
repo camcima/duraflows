@@ -840,6 +840,116 @@ describe("WorkflowRuntime onEnter integration", () => {
     expect(captured!.transitionUuid).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it("processExpiredWorkflows: does not count instances that another worker already processed", async () => {
+    const definition: WorkflowDefinition = {
+      name: "already-processed-not-counted",
+      initialState: "waiting",
+      states: {
+        waiting: {
+          events: {
+            expire: {
+              targetState: "expired",
+              timeout: { afterMinutes: 30 },
+            },
+          },
+        },
+        expired: {},
+      },
+    };
+
+    const definitionRegistry2 = new InMemoryDefinitionRegistry({
+      validator: new WorkflowValidator(),
+      compiler: new WorkflowCompiler(),
+    });
+    const commandRegistry2 = new InMemoryCommandRegistry();
+    const instanceStore2 = new InMemoryInstanceStore();
+    const historyStore2 = new InMemoryHistoryStore();
+    const runtime2 = new WorkflowRuntime({
+      definitionRegistry: definitionRegistry2,
+      commandRegistry: commandRegistry2,
+      instanceStore: instanceStore2,
+      historyStore: historyStore2,
+      transactionRunner: new InMemoryTransactionRunner(),
+      clock,
+    });
+    definitionRegistry2.register(definition);
+
+    const instance = await runtime2.createInstance({ workflowName: "already-processed-not-counted" });
+
+    // Mark expired.
+    const stored = await instanceStore2.findByUuid(instance.uuid);
+    stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    await instanceStore2.update(stored!);
+
+    // Simulate: between findExpired and lockByUuid, another worker cleared expiresAt.
+    const originalLock = instanceStore2.lockByUuid.bind(instanceStore2);
+    const lockSpy = vi.spyOn(instanceStore2, "lockByUuid");
+    lockSpy.mockImplementationOnce(async (uuid: string) => {
+      const row = await originalLock(uuid);
+      if (row) {
+        row.expiresAt = null;
+        await instanceStore2.update(row);
+        return originalLock(uuid);
+      }
+      return row;
+    });
+
+    const result = await runtime2.processExpiredWorkflows();
+
+    expect(result.processed).toBe(0);
+    expect(result.failed).toHaveLength(0);
+
+    // Instance still in "waiting" (not processed).
+    const final = await instanceStore2.findByUuid(instance.uuid);
+    expect(final!.currentState).toBe("waiting");
+
+    lockSpy.mockRestore();
+  });
+
+  it("processExpiredWorkflows: does not count instances whose current state has no timeout event (only clears the deadline)", async () => {
+    const definition: WorkflowDefinition = {
+      name: "cleared-deadline-not-counted",
+      initialState: "idle",
+      states: {
+        idle: {}, // No events at all — no timeout
+      },
+    };
+
+    const definitionRegistry2 = new InMemoryDefinitionRegistry({
+      validator: new WorkflowValidator(),
+      compiler: new WorkflowCompiler(),
+    });
+    const commandRegistry2 = new InMemoryCommandRegistry();
+    const instanceStore2 = new InMemoryInstanceStore();
+    const historyStore2 = new InMemoryHistoryStore();
+    const runtime2 = new WorkflowRuntime({
+      definitionRegistry: definitionRegistry2,
+      commandRegistry: commandRegistry2,
+      instanceStore: instanceStore2,
+      historyStore: historyStore2,
+      transactionRunner: new InMemoryTransactionRunner(),
+      clock,
+    });
+    definitionRegistry2.register(definition);
+
+    const instance = await runtime2.createInstance({ workflowName: "cleared-deadline-not-counted" });
+
+    // Force a stale expiresAt on a state with no timeout event.
+    const stored = await instanceStore2.findByUuid(instance.uuid);
+    stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    await instanceStore2.update(stored!);
+
+    const result = await runtime2.processExpiredWorkflows();
+
+    expect(result.processed).toBe(0);
+    expect(result.failed).toHaveLength(0);
+
+    // Side effect: the stale deadline was cleared, but the instance is still in "idle".
+    const final = await instanceStore2.findByUuid(instance.uuid);
+    expect(final!.currentState).toBe("idle");
+    expect(final!.expiresAt).toBeNull();
+  });
+
   it("processExpiredWorkflows: resolves timeout event from freshly-locked state, not stale snapshot", async () => {
     // Two-state timeout: "waiting" times out to "expired-A"; "racing" times out to "expired-B".
     // An instance starts in "waiting", but BETWEEN findExpired and lockByUuid, another worker moves it to "racing".

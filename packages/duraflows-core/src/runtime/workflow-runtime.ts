@@ -309,6 +309,7 @@ export class WorkflowRuntime {
     // Step 2: process each instance in its own transaction.
     for (const staleInstance of expired) {
       const startIdx = eventsToFire.length;
+      let didProcess = false;
       try {
         await this.transactionRunner.runInTransaction(async () => {
           // Re-lock the instance fresh inside this transaction (locks from Step 1 were released).
@@ -337,8 +338,9 @@ export class WorkflowRuntime {
           }
 
           await this.processTimeoutEvent(instance, definition, eventName, eventsToFire);
+          didProcess = true;
         });
-        processed++;
+        if (didProcess) processed++;
       } catch (error: unknown) {
         // Per-instance transaction rolled back. Drop any events queued for this instance.
         eventsToFire.length = startIdx;
