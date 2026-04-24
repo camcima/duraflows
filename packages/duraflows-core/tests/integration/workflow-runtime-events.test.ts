@@ -273,4 +273,47 @@ describe("WorkflowRuntime.getAvailableEvents", () => {
     expect(captured!.toState).toBe("submitted");
     expect(captured!.transitionUuid).toMatch(/^[0-9a-f-]{36}$/);
   });
+
+  it("processExpiredWorkflows passes fromState, toState, transitionUuid to timeout commands", async () => {
+    const definition: WorkflowDefinition = {
+      name: "ctx-fields-timeout",
+      initialState: "waiting",
+      states: {
+        waiting: {
+          events: {
+            expire: {
+              targetState: "expired",
+              timeout: { afterMinutes: 30 },
+              commands: [{ name: "captureTimeoutCtx" }],
+            },
+          },
+        },
+        expired: {},
+      },
+    };
+
+    definitionRegistry.register(definition);
+
+    let captured: WorkflowExecutionContext | undefined;
+    commandRegistry.register("captureTimeoutCtx", {
+      execute: async (_subject, ctx) => {
+        captured = ctx;
+        return { ok: true };
+      },
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "ctx-fields-timeout" });
+
+    // Force expiration in the past
+    const stored = await instanceStore.findByUuid(instance.uuid);
+    stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    await instanceStore.update(stored!);
+
+    await runtime.processExpiredWorkflows();
+
+    expect(captured).toBeDefined();
+    expect(captured!.fromState).toBe("waiting");
+    expect(captured!.toState).toBe("expired");
+    expect(captured!.transitionUuid).toMatch(/^[0-9a-f-]{36}$/);
+  });
 });

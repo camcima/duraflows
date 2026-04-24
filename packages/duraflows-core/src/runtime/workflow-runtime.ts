@@ -272,11 +272,17 @@ export class WorkflowRuntime {
   ): Promise<void> {
     const compiled = this.compiler.compile(definition);
 
+    const timeoutEventDef = definition.states[instance.currentState]?.events?.[eventName];
+    const prospectiveToState = timeoutEventDef?.targetState ?? instance.currentState;
+
     const executionContext: WorkflowExecutionContext = {
       triggerMetadata: deepFreeze({ source: "timeout" }),
       now: this.clock.now(),
       context: { ...instance.context },
       metadata: deepFreeze({ ...instance.metadata }),
+      fromState: instance.currentState,
+      toState: prospectiveToState,
+      transitionUuid: randomUUID(),
     };
 
     const result = await this.eventExecutor.execute(
