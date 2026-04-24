@@ -74,3 +74,7 @@ export { WorkflowRuntime } from "./runtime/workflow-runtime.js";
 export type { WorkflowRuntimeOptions } from "./runtime/workflow-runtime.js";
 export { WorkflowHandle } from "./runtime/workflow-handle.js";
 export type { WorkflowRuntimeClient } from "./runtime/workflow-handle.js";
+
+// Observer
+export type { WorkflowObserver, StateEnterEvent } from "./types/observer.js";
+export { ObserverRegistry } from "./runtime/observer-registry.js";
