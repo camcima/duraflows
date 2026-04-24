@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { WorkflowDefinition } from "../types/definition.js";
 import type { CommandResult, WorkflowExecutionContext } from "../types/runtime.js";
 import type { CommandExecutor } from "./command-executor.js";
@@ -29,6 +30,7 @@ export class OnEnterExecutor {
     const hops: OnEnterHopResult[] = [];
     let currentState = startingState;
     let depth = 0;
+    let predecessor: string | null = context.fromState;
 
     while (true) {
       const stateDef = definition.states[currentState];
@@ -42,31 +44,35 @@ export class OnEnterExecutor {
       const onEnter = stateDef.onEnter;
       const fromState = currentState;
 
-      // Execute commands (if any)
+      const hopContext: WorkflowExecutionContext = {
+        ...context,
+        fromState: predecessor,
+        toState: currentState,
+        transitionUuid: randomUUID(),
+      };
+
       const commands = onEnter.commands ?? [];
-      const commandExecResult = await this.commandExecutor.execute(commands, subject, context);
+      const commandExecResult = await this.commandExecutor.execute(commands, subject, hopContext);
 
       const outcome = commandExecResult.outcome;
 
       if (outcome === "failure") {
         if (onEnter.errorState) {
-          // Transition to error state
           hops.push({
             fromState,
             toState: onEnter.errorState,
             outcome: "failure",
             commandResults: commandExecResult.commandResults,
           });
+          predecessor = currentState;
           currentState = onEnter.errorState;
           continue;
         }
-        // No errorState — throw CommandFailureError (same as EventExecutor)
         const failedResult = commandExecResult.commandResults[commandExecResult.commandResults.length - 1];
         const failedCommandName = commands[commandExecResult.commandResults.length - 1].name;
         throw new CommandFailureError(instanceUuid, "onEnter", failedCommandName, failedResult);
       }
 
-      // Success
       if (onEnter.targetState) {
         hops.push({
           fromState,
@@ -74,11 +80,11 @@ export class OnEnterExecutor {
           outcome: "success",
           commandResults: commandExecResult.commandResults,
         });
+        predecessor = currentState;
         currentState = onEnter.targetState;
         continue;
       }
 
-      // No targetState — commands ran, stay in current state
       if (commandExecResult.commandResults.length > 0) {
         hops.push({
           fromState,

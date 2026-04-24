@@ -392,4 +392,60 @@ describe("OnEnterExecutor", () => {
     expect(result.hops[0].outcome).toBe("success");
     expect(result.hops[0].commandResults).toHaveLength(0);
   });
+
+  it("generates a fresh transitionUuid per onEnter hop and updates fromState/toState", async () => {
+    const definition: WorkflowDefinition = {
+      name: "ctx-fields-chain",
+      initialState: "stateA",
+      states: {
+        stateA: {
+          onEnter: { targetState: "stateB", commands: [{ name: "capA" }] },
+        },
+        stateB: {
+          onEnter: { targetState: "stateC", commands: [{ name: "capB" }] },
+        },
+        stateC: {},
+      },
+    };
+
+    const seenA: { fromState: string | null; toState: string; transitionUuid: string }[] = [];
+    const seenB: { fromState: string | null; toState: string; transitionUuid: string }[] = [];
+
+    const registry = makeRegistry({
+      capA: {
+        execute: async (_s, ctx) => {
+          seenA.push({ fromState: ctx.fromState, toState: ctx.toState, transitionUuid: ctx.transitionUuid });
+          return { ok: true };
+        },
+      },
+      capB: {
+        execute: async (_s, ctx) => {
+          seenB.push({ fromState: ctx.fromState, toState: ctx.toState, transitionUuid: ctx.transitionUuid });
+          return { ok: true };
+        },
+      },
+    });
+    const commandExecutor = new CommandExecutor(registry);
+    const executor = new OnEnterExecutor(commandExecutor);
+
+    const baseContext = makeContext({
+      fromState: "before-chain",
+      toState: "stateA",
+      transitionUuid: "caller-supplied-uuid",
+    });
+
+    await executor.executeChain(definition, "stateA", "instance-ctx-1", undefined, baseContext, 10);
+
+    expect(seenA).toHaveLength(1);
+    expect(seenA[0].fromState).toBe("before-chain");
+    expect(seenA[0].toState).toBe("stateA");
+    expect(seenA[0].transitionUuid).toMatch(/^[0-9a-f-]{36}$/);
+    expect(seenA[0].transitionUuid).not.toBe("caller-supplied-uuid");
+
+    expect(seenB).toHaveLength(1);
+    expect(seenB[0].fromState).toBe("stateA");
+    expect(seenB[0].toState).toBe("stateB");
+    expect(seenB[0].transitionUuid).toMatch(/^[0-9a-f-]{36}$/);
+    expect(seenB[0].transitionUuid).not.toBe(seenA[0].transitionUuid);
+  });
 });
