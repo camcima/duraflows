@@ -60,9 +60,8 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
         expires_at = $4,
         last_transition_at = $5,
         context_json = $6,
-        metadata_json = $7,
-        updated_at = $8
-      WHERE uuid = $1 AND version = $9`,
+        updated_at = $7
+      WHERE uuid = $1 AND version = $8`,
       [
         instance.uuid,
         instance.currentState,
@@ -70,7 +69,6 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
         instance.expiresAt,
         instance.lastTransitionAt,
         JSON.stringify(instance.context),
-        JSON.stringify(instance.metadata),
         instance.updatedAt,
         expectedVersion,
       ],

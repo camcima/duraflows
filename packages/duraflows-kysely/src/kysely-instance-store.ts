@@ -65,7 +65,6 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
         expires_at: instance.expiresAt,
         last_transition_at: instance.lastTransitionAt,
         context_json: JSON.stringify(instance.context),
-        metadata_json: JSON.stringify(instance.metadata),
         updated_at: instance.updatedAt,
       })
       .where("uuid", "=", instance.uuid)

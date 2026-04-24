@@ -147,8 +147,8 @@ describe("PgWorkflowInstanceStore", () => {
 
       const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("UPDATE workflow_instances");
-      expect(sql).toContain("AND version = $9");
-      expect(params[8]).toBe(0); // expectedVersion = version - 1
+      expect(sql).toContain("AND version = $8");
+      expect(params[7]).toBe(0); // expectedVersion = version - 1
     });
 
     it("throws WorkflowError on optimistic lock failure", async () => {
@@ -158,6 +158,17 @@ describe("PgWorkflowInstanceStore", () => {
       const updated = { ...sampleInstance, version: 1 };
       await expect(store.update(updated)).rejects.toThrow(WorkflowError);
       await expect(store.update(updated)).rejects.toThrow("Optimistic locking failure");
+    });
+
+    it("does not include metadata_json in UPDATE statement (metadata is immutable)", async () => {
+      const pool = createMockPool({ rows: [], rowCount: 1 });
+      const store = new PgWorkflowInstanceStore(pool);
+
+      const updated = { ...sampleInstance, version: 1, metadata: { tenant: "bob" } };
+      await store.update(updated);
+
+      const [sql] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).not.toContain("metadata_json");
     });
   });
 

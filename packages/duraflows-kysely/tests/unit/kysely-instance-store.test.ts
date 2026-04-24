@@ -181,6 +181,20 @@ describe("KyselyWorkflowInstanceStore", () => {
       await expect(store.update(updated)).rejects.toThrow(WorkflowError);
       await expect(store.update(updated)).rejects.toThrow("Optimistic locking failure");
     });
+
+    it("does not include metadata_json in the SET payload (metadata is immutable)", async () => {
+      const { db, executeMock, calls } = createMockDb();
+      executeMock.mockResolvedValue([{ numUpdatedRows: BigInt(1) }]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      const updated = { ...sampleInstance, version: 1, metadata: { tenant: "bob" } };
+      await store.update(updated);
+
+      const setCall = calls.find((c) => c.method === "set");
+      expect(setCall).toBeDefined();
+      const payload = setCall!.args[0] as Record<string, unknown>;
+      expect(payload).not.toHaveProperty("metadata_json");
+    });
   });
 
   describe("findExpired()", () => {
