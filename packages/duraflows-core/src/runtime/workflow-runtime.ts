@@ -275,13 +275,8 @@ export class WorkflowRuntime {
         lastHistoryUuid = onEnterResult.lastHistoryUuid;
       }
 
-      let finalOutcome = eventResult.outcome;
-      if (onEnterResult.commandResults.length > 0) {
-        const lastOnEnterResult = onEnterResult.commandResults[onEnterResult.commandResults.length - 1];
-        if (lastOnEnterResult && !lastOnEnterResult.ok) {
-          finalOutcome = "failure";
-        }
-      }
+      const finalOutcome: "success" | "failure" =
+        eventResult.outcome === "failure" || onEnterResult.chainOutcome === "failure" ? "failure" : "success";
 
       return {
         outcome: finalOutcome,
@@ -430,7 +425,7 @@ export class WorkflowRuntime {
     executionContext: WorkflowExecutionContext,
     subject: unknown,
     eventsToFire: StateEnterEvent[],
-  ): Promise<{ commandResults: CommandResult[]; lastHistoryUuid: string | null }> {
+  ): Promise<{ commandResults: CommandResult[]; lastHistoryUuid: string | null; chainOutcome: "success" | "failure" }> {
     const chainResult = await this.onEnterExecutor.executeChain(
       definition,
       instance.currentState,
@@ -504,7 +499,7 @@ export class WorkflowRuntime {
       allCommandResults.push(...hop.commandResults);
     }
 
-    return { commandResults: allCommandResults, lastHistoryUuid };
+    return { commandResults: allCommandResults, lastHistoryUuid, chainOutcome: chainResult.outcome };
   }
 
   async getAvailableEvents(input: GetAvailableEventsInput): Promise<AvailableWorkflowEvent[]> {

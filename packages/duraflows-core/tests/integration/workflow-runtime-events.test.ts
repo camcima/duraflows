@@ -316,4 +316,79 @@ describe("WorkflowRuntime.getAvailableEvents", () => {
     expect(captured!.toState).toBe("expired");
     expect(captured!.transitionUuid).toMatch(/^[0-9a-f-]{36}$/);
   });
+
+  it("triggerEvent returns outcome=success when a final best-effort command fails", async () => {
+    const definition: WorkflowDefinition = {
+      name: "outcome-besteffort-last",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            go: {
+              targetState: "processing",
+            },
+          },
+        },
+        processing: {
+          onEnter: {
+            targetState: "done",
+            commands: [{ name: "beFail" }],
+          },
+        },
+        done: {},
+      },
+    };
+    definitionRegistry.register(definition);
+
+    commandRegistry.register("beFail", {
+      bestEffort: true,
+      execute: async () => ({ ok: false, code: "BE_FAIL" }),
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "outcome-besteffort-last" });
+    const result = await runtime.triggerEvent({
+      workflowInstanceUuid: instance.uuid,
+      eventName: "go",
+    });
+
+    expect(result.outcome).toBe("success");
+    expect(result.toState).toBe("done");
+  });
+
+  it("triggerEvent returns outcome=failure when an onEnter hop routes to errorState", async () => {
+    const definition: WorkflowDefinition = {
+      name: "outcome-errorstate-routing",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            go: { targetState: "processing" },
+          },
+        },
+        processing: {
+          onEnter: {
+            targetState: "done",
+            errorState: "failed",
+            commands: [{ name: "mandatoryFail" }],
+          },
+        },
+        done: {},
+        failed: {},
+      },
+    };
+    definitionRegistry.register(definition);
+
+    commandRegistry.register("mandatoryFail", {
+      execute: async () => ({ ok: false, code: "BAD" }),
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "outcome-errorstate-routing" });
+    const result = await runtime.triggerEvent({
+      workflowInstanceUuid: instance.uuid,
+      eventName: "go",
+    });
+
+    expect(result.outcome).toBe("failure");
+    expect(result.toState).toBe("failed");
+  });
 });
