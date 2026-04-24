@@ -659,4 +659,46 @@ describe("WorkflowRuntime onEnter integration", () => {
     expect(captured!.toState).toBe("initializing");
     expect(captured!.transitionUuid).toMatch(/^[0-9a-f-]{36}$/);
   });
+
+  it("onEnter chain after event has fromState=event.fromState, toState=current state", async () => {
+    const definition: WorkflowDefinition = {
+      name: "ctx-fields-chain-after-event",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: { targetState: "validating" },
+          },
+        },
+        validating: {
+          onEnter: {
+            targetState: "validated",
+            commands: [{ name: "captureChainCtx" }],
+          },
+        },
+        validated: {},
+      },
+    };
+
+    definitionRegistry.register(definition);
+
+    let captured: WorkflowExecutionContext | undefined;
+    commandRegistry.register("captureChainCtx", {
+      execute: async (_subject, ctx) => {
+        captured = ctx;
+        return { ok: true };
+      },
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "ctx-fields-chain-after-event" });
+    await runtime.triggerEvent({
+      workflowInstanceUuid: instance.uuid,
+      eventName: "submit",
+    });
+
+    expect(captured).toBeDefined();
+    expect(captured!.fromState).toBe("draft");
+    expect(captured!.toState).toBe("validating");
+    expect(captured!.transitionUuid).toMatch(/^[0-9a-f-]{36}$/);
+  });
 });
