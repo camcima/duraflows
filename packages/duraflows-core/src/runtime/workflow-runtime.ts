@@ -311,9 +311,6 @@ export class WorkflowRuntime {
       const startIdx = eventsToFire.length;
       try {
         await this.transactionRunner.runInTransaction(async () => {
-          const definition = this.definitionRegistry.get(staleInstance.workflowName);
-          const eventName = this.timeoutResolver.getTimeoutEventName(definition, staleInstance.currentState);
-
           // Re-lock the instance fresh inside this transaction (locks from Step 1 were released).
           const instance = await this.instanceStore.lockByUuid(staleInstance.uuid);
           if (!instance) {
@@ -325,6 +322,10 @@ export class WorkflowRuntime {
           if (!instance.expiresAt || instance.expiresAt > this.clock.now()) {
             return;
           }
+
+          // Resolve definition + eventName from the FRESHLY-LOCKED state, not the pre-lock snapshot.
+          const definition = this.definitionRegistry.get(instance.workflowName);
+          const eventName = this.timeoutResolver.getTimeoutEventName(definition, instance.currentState);
 
           if (!eventName) {
             // No timeout event for this state; just clear the stale deadline.

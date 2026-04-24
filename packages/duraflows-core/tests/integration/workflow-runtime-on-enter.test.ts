@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { WorkflowRuntime } from "../../src/runtime/workflow-runtime.js";
 import { InMemoryDefinitionRegistry } from "../../src/registry/definition-registry.js";
@@ -838,5 +838,105 @@ describe("WorkflowRuntime onEnter integration", () => {
     expect(captured!.fromState).toBe("draft");
     expect(captured!.toState).toBe("validating");
     expect(captured!.transitionUuid).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("processExpiredWorkflows: resolves timeout event from freshly-locked state, not stale snapshot", async () => {
+    // Two-state timeout: "waiting" times out to "expired-A"; "racing" times out to "expired-B".
+    // An instance starts in "waiting", but BETWEEN findExpired and lockByUuid, another worker moves it to "racing".
+    // With the bug: eventName is resolved from the stale "waiting" state, firing the wrong transition.
+    // With the fix: eventName is resolved from freshly-locked "racing" state, firing the correct one.
+
+    const definition: WorkflowDefinition = {
+      name: "stale-state-race",
+      initialState: "waiting",
+      states: {
+        waiting: {
+          events: {
+            // Normal event so "racing" is in the finita graph (reachable from initial state).
+            race: {
+              targetState: "racing",
+            },
+            expire: {
+              targetState: "expired-A",
+              timeout: { afterMinutes: 30 },
+            },
+          },
+        },
+        racing: {
+          events: {
+            raceTimeout: {
+              targetState: "expired-B",
+              timeout: { afterMinutes: 30 },
+            },
+          },
+        },
+        "expired-A": {},
+        "expired-B": {},
+      },
+    };
+
+    const definitionRegistry2 = new InMemoryDefinitionRegistry({
+      validator: new WorkflowValidator(),
+      compiler: new WorkflowCompiler(),
+    });
+    const commandRegistry2 = new InMemoryCommandRegistry();
+    const instanceStore2 = new InMemoryInstanceStore();
+    const historyStore2 = new InMemoryHistoryStore();
+    const runtime2 = new WorkflowRuntime({
+      definitionRegistry: definitionRegistry2,
+      commandRegistry: commandRegistry2,
+      instanceStore: instanceStore2,
+      historyStore: historyStore2,
+      transactionRunner: new InMemoryTransactionRunner(),
+      clock,
+    });
+
+    definitionRegistry2.register(definition);
+
+    const instance = await runtime2.createInstance({ workflowName: "stale-state-race" });
+
+    // Simulate: instance is in "waiting" with an expired deadline.
+    const stored = await instanceStore2.findByUuid(instance.uuid);
+    stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    await instanceStore2.update(stored!);
+
+    // Race: immediately before the per-instance txn, another worker transitions to "racing" and refreshes the deadline but leaves it past.
+    // We simulate this by patching lockByUuid to transition the state once, on the first call.
+    const originalLock = instanceStore2.lockByUuid.bind(instanceStore2);
+    const lockSpy = vi.spyOn(instanceStore2, "lockByUuid");
+    lockSpy.mockImplementationOnce(async (uuid: string) => {
+      // Another worker already transitioned the instance to "racing" (still expired).
+      const row = await originalLock(uuid);
+      if (row) {
+        row.currentState = "racing";
+        // Keep it expired, still past deadline.
+        row.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+        await instanceStore2.update(row);
+        // Return the fresh lock AFTER the mutation — this is what processExpiredWorkflows should see.
+        return originalLock(uuid);
+      }
+      return row;
+    });
+
+    const observedStates: string[] = [];
+    runtime2.addObserver({
+      name: "capture",
+      onEnter: (event) => {
+        observedStates.push(event.state);
+      },
+    });
+
+    const result = await runtime2.processExpiredWorkflows();
+
+    // With the fix: the timeout event fired is "raceTimeout" (from "racing"), landing in "expired-B".
+    // Without the fix: "expire" (from stale "waiting") would fire, landing in "expired-A" — even though the actual state is "racing".
+    const final = await instanceStore2.findByUuid(instance.uuid);
+    expect(final!.currentState).toBe("expired-B");
+    expect(observedStates).toContain("expired-B");
+    expect(observedStates).not.toContain("expired-A");
+    expect(result.processed).toBe(1);
+    expect(result.failed).toHaveLength(0);
+
+    lockSpy.mockRestore();
   });
 });
