@@ -3,12 +3,13 @@ import { WorkflowDefinitionError } from "../errors/index.js";
 import type { WorkflowValidator, WorkflowValidationOptions } from "../validation/workflow-validator.js";
 import type { WorkflowCompiler } from "../compilation/workflow-compiler.js";
 
-function deepFreeze<T extends Record<string, unknown>>(obj: T): Readonly<T> {
+function deepFreeze<T>(obj: T): Readonly<T> {
+  if (obj === null || typeof obj !== "object" || Object.isFrozen(obj)) {
+    return obj;
+  }
   Object.freeze(obj);
-  for (const value of Object.values(obj)) {
-    if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
-      deepFreeze(value as Record<string, unknown>);
-    }
+  for (const value of Object.values(obj as Record<string, unknown>)) {
+    deepFreeze(value);
   }
   return obj;
 }
@@ -42,7 +43,7 @@ export class InMemoryDefinitionRegistry implements WorkflowDefinitionRegistry {
       throw new WorkflowDefinitionError(definition.name, "A workflow with this name is already registered");
     }
 
-    const frozen = deepFreeze(structuredClone(definition) as Record<string, unknown>) as unknown as WorkflowDefinition;
+    const frozen = deepFreeze(structuredClone(definition));
 
     if (this.validator) {
       const validation = this.validator.validate(frozen, this.validationOptions);
