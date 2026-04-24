@@ -70,7 +70,7 @@ describe("InMemoryDefinitionRegistry", () => {
   it("register and get a definition", () => {
     const registry = new InMemoryDefinitionRegistry();
     registry.register(minimalDefinition);
-    expect(registry.get("test-wf")).toBe(minimalDefinition);
+    expect(registry.get("test-wf")).toEqual(minimalDefinition);
   });
 
   it("has() returns true for registered definition", () => {
@@ -90,8 +90,8 @@ describe("InMemoryDefinitionRegistry", () => {
     registry.register(anotherDefinition);
     const all = registry.getAll();
     expect(all).toHaveLength(2);
-    expect(all).toContain(minimalDefinition);
-    expect(all).toContain(anotherDefinition);
+    expect(all).toContainEqual(minimalDefinition);
+    expect(all).toContainEqual(anotherDefinition);
   });
 
   it("getAll() returns empty array when no definitions registered", () => {
@@ -138,14 +138,14 @@ describe("InMemoryDefinitionRegistry", () => {
     };
     const registry = new InMemoryDefinitionRegistry({ compiler: mockCompiler });
     registry.register(minimalDefinition);
-    expect(mockCompiler.compile).toHaveBeenCalledWith(minimalDefinition);
+    expect(mockCompiler.compile).toHaveBeenCalledWith(expect.objectContaining({ name: "test-wf" }));
   });
 
   it("skips validation and compilation when not provided", () => {
     const registry = new InMemoryDefinitionRegistry();
     // Should not throw — no validator or compiler
     registry.register(minimalDefinition);
-    expect(registry.get("test-wf")).toBe(minimalDefinition);
+    expect(registry.get("test-wf")).toEqual(minimalDefinition);
   });
 
   it("passes validationOptions to validator", () => {
@@ -159,6 +159,55 @@ describe("InMemoryDefinitionRegistry", () => {
     });
 
     registry.register(minimalDefinition);
-    expect(mockValidator.validate).toHaveBeenCalledWith(minimalDefinition, { knownCommandNames: knownCommands });
+    expect(mockValidator.validate).toHaveBeenCalledWith(expect.objectContaining({ name: "test-wf" }), {
+      knownCommandNames: knownCommands,
+    });
+  });
+
+  it("register stores a deep clone — post-registration caller mutations do not affect stored definition", () => {
+    const registry = new InMemoryDefinitionRegistry();
+    const definition: WorkflowDefinition = {
+      name: "mutation-isolation",
+      initialState: "ready",
+      states: {
+        ready: {
+          context: { policy: { retries: 3 } },
+          events: {
+            go: { targetState: "done" },
+          },
+        },
+        done: {},
+      },
+    };
+
+    registry.register(definition);
+
+    // Caller mutates their local reference after registration
+    (definition.states.ready.context!.policy as { retries: number }).retries = 99;
+    definition.states.done.events = { bogus: { targetState: "ready" } };
+
+    const stored = registry.get("mutation-isolation");
+    expect((stored.states.ready.context!.policy as { retries: number }).retries).toBe(3);
+    expect(stored.states.done.events).toBeUndefined();
+  });
+
+  it("the stored definition is deeply frozen", () => {
+    const registry = new InMemoryDefinitionRegistry();
+    const definition: WorkflowDefinition = {
+      name: "frozen-definition",
+      initialState: "ready",
+      states: { ready: { context: { nested: { tag: "initial" } } } },
+    };
+
+    registry.register(definition);
+    const stored = registry.get("frozen-definition");
+
+    // Direct mutation attempts throw in strict mode
+    expect(() => {
+      (stored.states.ready.context!.nested as { tag: string }).tag = "mutated";
+    }).toThrow();
+
+    expect(Object.isFrozen(stored)).toBe(true);
+    expect(Object.isFrozen(stored.states.ready.context!.nested)).toBe(true);
   });
 });
