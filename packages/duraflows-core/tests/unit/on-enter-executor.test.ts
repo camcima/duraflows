@@ -393,6 +393,70 @@ describe("OnEnterExecutor", () => {
     expect(result.hops[0].commandResults).toHaveLength(0);
   });
 
+  it("returns outcome=success when all hops succeed (no errorState routing)", async () => {
+    const definition: WorkflowDefinition = {
+      name: "chain-success-outcome",
+      initialState: "stateA",
+      states: {
+        stateA: { onEnter: { targetState: "stateB" } },
+        stateB: { onEnter: { targetState: "stateC" } },
+        stateC: {},
+      },
+    };
+
+    const registry = makeRegistry({});
+    const commandExecutor = new CommandExecutor(registry);
+    const executor = new OnEnterExecutor(commandExecutor);
+
+    const result = await executor.executeChain(
+      definition,
+      "stateA",
+      "instance-outcome-1",
+      undefined,
+      makeContext(),
+      10,
+    );
+
+    expect(result.outcome).toBe("success");
+    expect(result.finalState).toBe("stateC");
+  });
+
+  it("returns outcome=failure when a hop routes to errorState", async () => {
+    const definition: WorkflowDefinition = {
+      name: "chain-failure-outcome",
+      initialState: "processing",
+      states: {
+        processing: {
+          onEnter: {
+            targetState: "done",
+            errorState: "failed",
+            commands: [{ name: "process" }],
+          },
+        },
+        done: {},
+        failed: {},
+      },
+    };
+
+    const registry = makeRegistry({
+      process: failureCommand(),
+    });
+    const commandExecutor = new CommandExecutor(registry);
+    const executor = new OnEnterExecutor(commandExecutor);
+
+    const result = await executor.executeChain(
+      definition,
+      "processing",
+      "instance-outcome-2",
+      undefined,
+      makeContext(),
+      10,
+    );
+
+    expect(result.outcome).toBe("failure");
+    expect(result.finalState).toBe("failed");
+  });
+
   it("generates a fresh transitionUuid per onEnter hop and updates fromState/toState", async () => {
     const definition: WorkflowDefinition = {
       name: "ctx-fields-chain",

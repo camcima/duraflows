@@ -14,6 +14,7 @@ export interface OnEnterHopResult {
 
 export interface OnEnterChainResult {
   finalState: string;
+  outcome: "success" | "failure";
   hops: OnEnterHopResult[];
 }
 
@@ -32,6 +33,7 @@ export class OnEnterExecutor {
     let currentState = startingState;
     let depth = 0;
     let predecessor: string | null = context.fromState;
+    let chainOutcome: "success" | "failure" = "success";
 
     while (true) {
       const stateDef = definition.states[currentState];
@@ -67,6 +69,7 @@ export class OnEnterExecutor {
             outcome: "failure",
             commandResults: commandExecResult.commandResults,
           });
+          chainOutcome = "failure";
           predecessor = currentState;
           currentState = onEnter.errorState;
           continue;
@@ -101,6 +104,6 @@ export class OnEnterExecutor {
       break;
     }
 
-    return { finalState: currentState, hops };
+    return { finalState: currentState, outcome: chainOutcome, hops };
   }
 }
