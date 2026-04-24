@@ -15,6 +15,9 @@ export interface WorkflowExecutionContext {
   now: Date;
   context: Record<string, unknown>;
   metadata: Readonly<Record<string, unknown>>;
+  readonly fromState: string | null;
+  readonly toState: string;
+  readonly transitionUuid: string;
 }
 
 export interface WorkflowInstance {
