@@ -18,13 +18,16 @@
 
 A durable workflow runtime for TypeScript built on top of [@camcima/finita](https://github.com/camcima/finita). Supports named states, event-triggered transitions, sequential command execution with success/failure branching, timeout-driven transitions, mutable workflow context, and full audit history.
 
-Designed as a family of three packages:
+Designed as a family of packages:
 
-| Package             | Purpose                                                                    |
-| ------------------- | -------------------------------------------------------------------------- |
-| `@duraflows/core`   | Framework-agnostic runtime, types, and persistence interfaces              |
-| `@duraflows/pg`     | PostgreSQL persistence adapter using `pg`                                  |
-| `@duraflows/nestjs` | NestJS module integration with DI, services, and optional REST controllers |
+| Package             | Purpose                                                                                        |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| `@duraflows/core`   | Framework-agnostic runtime, types, and persistence interfaces                                  |
+| `@duraflows/pg`     | PostgreSQL persistence adapter using `pg`                                                      |
+| `@duraflows/kysely` | PostgreSQL persistence adapter using `kysely` (for apps already using kysely as query builder) |
+| `@duraflows/nestjs` | NestJS module integration with DI, services, and optional REST controllers                     |
+
+Pick `@duraflows/pg` for the simpler default (raw `pg` pool, minimal deps). Pick `@duraflows/kysely` when your app already uses kysely and you want workflow state to participate in the same transactions as the rest of your data.
 
 ## Key Features
 
@@ -45,8 +48,9 @@ Designed as a family of three packages:
 # Core runtime (always required)
 pnpm add @duraflows/core
 
-# PostgreSQL adapter (if using pg)
-pnpm add @duraflows/pg pg
+# Pick ONE persistence adapter:
+pnpm add @duraflows/pg pg          # raw pg pool
+pnpm add @duraflows/kysely kysely  # kysely query builder (also needs pg as a peer dep)
 
 # NestJS integration (if using NestJS)
 pnpm add @duraflows/nestjs
