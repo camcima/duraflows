@@ -38,7 +38,7 @@ import { TimeoutResolver } from "../execution/timeout-resolver.js";
 import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
 import { WorkflowError } from "../errors/index.js";
 import { WorkflowHandle } from "./workflow-handle.js";
-import type { WorkflowObserver, StateEnterEvent } from "../types/observer.js";
+import type { WorkflowObserver, StateEnterEvent, ObserverErrorHandler } from "../types/observer.js";
 import { ObserverRegistry } from "./observer-registry.js";
 
 const DEFAULT_MAX_ON_ENTER_DEPTH = 10;
@@ -52,6 +52,7 @@ export interface WorkflowRuntimeOptions {
   clock: WorkflowClock;
   maxOnEnterDepth?: number;
   observers?: readonly WorkflowObserver[];
+  onObserverError?: ObserverErrorHandler;
 }
 
 export class WorkflowRuntime {
@@ -79,7 +80,7 @@ export class WorkflowRuntime {
     this.onEnterExecutor = new OnEnterExecutor(commandExecutor);
     this.timeoutResolver = new TimeoutResolver();
     this.maxOnEnterDepth = options.maxOnEnterDepth ?? DEFAULT_MAX_ON_ENTER_DEPTH;
-    this.observerRegistry = new ObserverRegistry(options.observers ?? []);
+    this.observerRegistry = new ObserverRegistry(options.observers ?? [], options.onObserverError);
   }
 
   addObserver(observer: WorkflowObserver): void {

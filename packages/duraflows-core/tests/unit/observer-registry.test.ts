@@ -104,4 +104,49 @@ describe("ObserverRegistry", () => {
 
     warnSpy.mockRestore();
   });
+
+  it("invokes the provided error handler when an observer throws", async () => {
+    const handler = vi.fn();
+    const secondSpy = vi.fn();
+    const registry = new ObserverRegistry([], handler);
+    registry.add({
+      name: "failing",
+      onEnter: () => {
+        throw new Error("boom");
+      },
+    });
+    registry.add({
+      name: "second",
+      onEnter: secondSpy,
+    });
+
+    const event = makeEvent();
+    await registry.fireOnEnter(event);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    const [error, observer, capturedEvent] = handler.mock.calls[0] as [unknown, { name: string }, StateEnterEvent];
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("boom");
+    expect(observer.name).toBe("failing");
+    expect(capturedEvent).toBe(event);
+
+    // Second observer still fires (error containment)
+    expect(secondSpy).toHaveBeenCalled();
+  });
+
+  it("falls back to default handler (console.warn) when no error handler is provided", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const registry = new ObserverRegistry();
+    registry.add({
+      name: "failing",
+      onEnter: () => {
+        throw new Error("boom");
+      },
+    });
+
+    await registry.fireOnEnter(makeEvent());
+
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
 });

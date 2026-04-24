@@ -16,3 +16,9 @@ export interface WorkflowObserver {
   readonly name: string;
   onEnter?(event: StateEnterEvent): void | Promise<void>;
 }
+
+export type ObserverErrorHandler = (
+  error: unknown,
+  observer: { readonly name: string },
+  event: StateEnterEvent,
+) => void;

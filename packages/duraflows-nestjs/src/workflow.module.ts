@@ -9,6 +9,7 @@ import type {
   WorkflowTransactionRunner,
   WorkflowDefinitionRegistry,
   WorkflowObserver,
+  ObserverErrorHandler,
 } from "@duraflows/core";
 import { InMemoryDefinitionRegistry, WorkflowRuntime, WorkflowValidator, WorkflowCompiler } from "@duraflows/core";
 import { NestCommandRegistry, type WorkflowCommandRegistration } from "./providers/nest-command-registry.js";
@@ -33,6 +34,7 @@ export interface WorkflowModuleOptions {
   workflows: WorkflowDefinition[];
   commands?: WorkflowCommandRegistration[];
   observers?: WorkflowObserver[];
+  onObserverError?: ObserverErrorHandler;
   persistence: WorkflowPersistenceProvider;
   clock?: WorkflowClock;
   enableControllers?: boolean;
@@ -43,6 +45,7 @@ export interface WorkflowModuleFactoryConfig {
   persistence: WorkflowPersistenceProvider;
   clock?: WorkflowClock;
   observers?: WorkflowObserver[];
+  onObserverError?: ObserverErrorHandler;
 }
 
 export interface WorkflowModuleAsyncOptions<TArgs extends unknown[] = unknown[]> {
@@ -137,6 +140,7 @@ export class WorkflowModule {
             transactionRunner,
             clock: wfClock,
             observers: options.observers,
+            onObserverError: options.onObserverError,
           }),
         inject: [
           WORKFLOW_DEFINITION_REGISTRY,
@@ -241,6 +245,7 @@ export class WorkflowModule {
             transactionRunner,
             clock,
             observers: config.observers,
+            onObserverError: config.onObserverError,
           }),
         inject: [
           "WORKFLOW_MODULE_OPTIONS",

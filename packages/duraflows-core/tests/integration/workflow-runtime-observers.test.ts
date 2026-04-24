@@ -418,6 +418,42 @@ describe("WorkflowRuntime observers", () => {
     expect(Object.isFrozen(callerMetadata.audit)).toBe(false);
   });
 
+  it("uses the runtime's onObserverError handler for thrown observer errors", async () => {
+    const handler = vi.fn();
+
+    const runtime2 = new WorkflowRuntime({
+      definitionRegistry,
+      commandRegistry,
+      instanceStore,
+      historyStore,
+      transactionRunner: new InMemoryTransactionRunner(),
+      clock,
+      onObserverError: handler,
+    });
+
+    const definition: WorkflowDefinition = {
+      name: "observer-error-handler",
+      initialState: "ready",
+      states: { ready: {} },
+    };
+    definitionRegistry.register(definition);
+
+    runtime2.addObserver({
+      name: "throwing",
+      onEnter: () => {
+        throw new Error("observer crashed");
+      },
+    });
+
+    await runtime2.createInstance({ workflowName: "observer-error-handler" });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    const [error, observer, event] = handler.mock.calls[0] as [unknown, { name: string }, StateEnterEvent];
+    expect((error as Error).message).toBe("observer crashed");
+    expect(observer.name).toBe("throwing");
+    expect(event.state).toBe("ready");
+  });
+
   it("instance.metadata nested objects remain mutable after triggerEvent returns", async () => {
     const definition: WorkflowDefinition = {
       name: "instance-metadata-isolation",
