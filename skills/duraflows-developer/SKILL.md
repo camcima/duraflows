@@ -558,7 +558,7 @@ All extend `WorkflowError` which extends `Error`.
 - Creating deep onEnter chains without considering the depth limit
 - Calling external APIs without idempotency keys
 - Throwing exceptions for business failures instead of returning `{ ok: false }`
-- Mutating `ctx.metadata` (it's frozen -- writes are silently ignored)
+- Mutating `ctx.metadata` — it's `deepFreeze`d, so under strict mode the assignment throws `TypeError`. ESM source files run in strict mode by default, so in practice you get a runtime error, not a silent no-op. Write through `ctx.context` instead.
 - (v1.0.0) Catching errors and returning `{ ok: true }` from a notification/metric/compensation command — use `bestEffort = true` instead, so the failure is recorded honestly without aborting the chain
 - (v1.0.0) Doing business-critical work in an observer — observers are post-commit and at-most-once; use a workflow command if the work must run inside the transaction or must retry
 - (v1.0.0) Putting `observers` at the top level of `WorkflowModule.forRootAsync` — it was removed; return them from `useFactory` inside `WorkflowModuleFactoryConfig`

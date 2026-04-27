@@ -789,7 +789,7 @@ it("command-only events fire observer with fromState === toState", async () => {
 
 ## Testing Guards (v1.1.0)
 
-A guard is a read-only predicate that runs **before** any commands. If it returns `false`, the event short-circuits with `outcome: "guard-rejected"`, no commands run, no state change. There are five things worth pinning down with tests.
+A guard is a read-only predicate that runs **before** any commands. If it returns `false`, the event short-circuits with `outcome: "guard-rejected"`, no commands run, no state change. The patterns below cover the contract: pass-through, rejection short-circuit, history row, the `errorState` boundary, purity, and ref-name-vs-implementation-name divergence — plus timeout interaction and bootstrap validation.
 
 ### 1. Pass-through: guard returns true, commands run, state changes
 
@@ -850,14 +850,16 @@ it("appends a history row with outcome guard-rejected", async () => {
   });
 
   const history = await historyStore.findByInstanceUuid(instance.uuid);
-  const last = history[history.length - 1]; // depending on store ordering
-  expect(last).toMatchObject({
+  // findByInstanceUuid is contracted to return newest-first (created_at DESC),
+  // so the most recent row is at index 0.
+  const latest = history[0];
+  expect(latest).toMatchObject({
     eventName: "Submit",
     fromState: "draft",
     toState: "draft",
     outcome: "guard-rejected",
     rejectedBy: "isVerified", // ref name from the definition
-    commandResults: [],
+    commandResultsJson: [], // WorkflowHistoryRecord field name is commandResultsJson
   });
 });
 ```
@@ -1109,12 +1111,16 @@ expect(history[0].commandResults[0].code).toBe("CHARGED");
 // Assert trigger metadata
 expect(history[0].triggerMetadata?.actor).toBe("user-123");
 
-// v1.1.0 — guard-rejected row
-expect(history[2]).toMatchObject({
+// v1.1.0 — guard-rejected row.
+// findByInstanceUuid returns rows newest-first (created_at DESC), so the
+// most recent row is at history[0]; locate the guard-rejected one explicitly
+// instead of guessing an index.
+const rejected = history.find((r) => r.outcome === "guard-rejected");
+expect(rejected).toMatchObject({
   outcome: "guard-rejected",
   rejectedBy: "isVerified", // ref name; null becomes undefined when read back from PG
   fromState: "draft",
   toState: "draft",
-  commandResults: [],
+  commandResultsJson: [], // WorkflowHistoryRecord field name (the runtime result uses commandResults)
 });
 ```

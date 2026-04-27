@@ -231,17 +231,17 @@ context: row.context_json as Record<string, unknown>,
 
 ## WorkflowHistoryRecord Fields
 
-| Field                  | Type                                         | Storage Notes                                                                                                                                                      |
-| ---------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `workflowInstanceUuid` | `string`                                     | FK to workflow_instances                                                                                                                                           |
-| `fromState`            | `string \| null`                             | Null for creation records                                                                                                                                          |
-| `eventName`            | `string`                                     | "onEnter" for auto-transitions                                                                                                                                     |
-| `toState`              | `string`                                     | Target state (== `fromState` for guard-rejected and command-only events)                                                                                           |
-| `outcome`              | `"success" \| "failure" \| "guard-rejected"` | Constrained string. **(v1.1.0)** `"guard-rejected"` was added; CHECK constraint must accept it.                                                                    |
-| `errorMessage`         | `string \| undefined`                        | Optional. Map DB `NULL` → `undefined` on read.                                                                                                                     |
-| `rejectedBy`           | `string \| undefined`                        | **(v1.1.0)** declared `eventDef.guard.name` for guard-rejected rows; `undefined` otherwise. Map `NULL → undefined` on read, the same convention as `errorMessage`. |
-| `commandResults`       | `CommandResult[]`                            | JSON array. Empty `[]` for guard-rejected rows.                                                                                                                    |
-| `triggerMetadata`      | `Record<string, unknown> \| undefined`       | JSON object                                                                                                                                                        |
+| Field                  | Type                                         | Storage Notes                                                                                                                                                          |
+| ---------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflowInstanceUuid` | `string`                                     | FK to workflow_instances                                                                                                                                               |
+| `fromState`            | `string \| null`                             | Null for creation records                                                                                                                                              |
+| `eventName`            | `string`                                     | "onEnter" for auto-transitions                                                                                                                                         |
+| `toState`              | `string`                                     | Target state (== `fromState` for guard-rejected and command-only events)                                                                                               |
+| `outcome`              | `"success" \| "failure" \| "guard-rejected"` | Constrained string. **(v1.1.0)** `"guard-rejected"` was added; CHECK constraint must accept it.                                                                        |
+| `errorMessage`         | `string \| undefined`                        | Optional. Map DB `NULL` → `undefined` on read.                                                                                                                         |
+| `rejectedBy`           | `string \| undefined`                        | **(v1.1.0)** declared `eventDef.guard.name` for guard-rejected rows; `undefined` otherwise. Map `NULL → undefined` on read, the same convention as `errorMessage`.     |
+| `commandResultsJson`   | `CommandResult[]`                            | JSON array. Empty `[]` for guard-rejected rows. (Field name on the public type ends in `Json` — distinct from the runtime's `WorkflowExecutionResult.commandResults`.) |
+| `triggerMetadata`      | `Record<string, unknown> \| undefined`       | JSON object. Optional on the public type — map DB `NULL` → `undefined` on read.                                                                                        |
 
 `append()` must return a string UUID for the created record.
 
