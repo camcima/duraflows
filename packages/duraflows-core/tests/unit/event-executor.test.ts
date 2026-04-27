@@ -6,6 +6,21 @@ import { InvalidEventError, CommandFailureError } from "../../src/errors/index.j
 import type { WorkflowDefinition } from "../../src/types/definition.js";
 import type { WorkflowCommand, WorkflowExecutionContext, CommandResult } from "../../src/types/runtime.js";
 import type { WorkflowCommandRegistry } from "../../src/registry/command-registry.js";
+import type { WorkflowGuard } from "../../src/types/runtime.js";
+import type { WorkflowGuardRegistry } from "../../src/registry/guard-registry.js";
+
+function makeGuardRegistry(guards: Record<string, WorkflowGuard>): WorkflowGuardRegistry {
+  return {
+    get(name) {
+      const g = guards[name];
+      if (!g) throw new Error(`Guard "${name}" not found`);
+      return g;
+    },
+    has(name) {
+      return name in guards;
+    },
+  };
+}
 
 function makeContext(overrides: Partial<WorkflowExecutionContext> = {}): WorkflowExecutionContext {
   return {
@@ -257,5 +272,360 @@ describe("EventExecutor", () => {
     expect(result.outcome).toBe("success");
     expect(capturedValue).toBe(true);
     expect(ctx.context["enriched"]).toBe(true);
+  });
+
+  it("runs commands when guard returns true", async () => {
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              guard: { name: "isVerified" },
+              targetState: "submitted",
+              commands: [{ name: "validate" }],
+            },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    const cmdRegistry = makeRegistry({ validate: successCommand() });
+    const guardRegistry = makeGuardRegistry({
+      isVerified: { name: "isVerified", evaluate: () => true },
+    });
+    const executor = new EventExecutor(new CommandExecutor(cmdRegistry), guardRegistry);
+
+    const result = await executor.execute(compiled, "draft", "submit", "instance-1", {}, makeContext());
+
+    expect(result.outcome).toBe("success");
+    expect(result.toState).toBe("submitted");
+    expect(result.commandResults).toHaveLength(1);
+    expect(result.rejectedBy).toBeUndefined();
+  });
+
+  it("short-circuits with guard-rejected when guard returns false", async () => {
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              guard: { name: "isVerified" },
+              targetState: "submitted",
+              commands: [{ name: "validate" }],
+            },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    let validateCalls = 0;
+    const cmdRegistry = makeRegistry({
+      validate: {
+        execute: async () => {
+          validateCalls++;
+          return { ok: true };
+        },
+      },
+    });
+    const guardRegistry = makeGuardRegistry({
+      isVerified: { name: "isVerified", evaluate: () => false },
+    });
+    const executor = new EventExecutor(new CommandExecutor(cmdRegistry), guardRegistry);
+
+    const result = await executor.execute(compiled, "draft", "submit", "instance-1", {}, makeContext());
+
+    expect(result.outcome).toBe("guard-rejected");
+    expect(result.fromState).toBe("draft");
+    expect(result.toState).toBe("draft");
+    expect(result.commandResults).toEqual([]);
+    expect(result.rejectedBy).toBe("isVerified");
+    expect(validateCalls).toBe(0);
+  });
+
+  it("supports async guards", async () => {
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              guard: { name: "isVerified" },
+              targetState: "submitted",
+            },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    const guardRegistry = makeGuardRegistry({
+      isVerified: { name: "isVerified", evaluate: async () => false },
+    });
+    const executor = new EventExecutor(new CommandExecutor(makeRegistry({})), guardRegistry);
+
+    const result = await executor.execute(compiled, "draft", "submit", "instance-1", {}, makeContext());
+
+    expect(result.outcome).toBe("guard-rejected");
+    expect(result.rejectedBy).toBe("isVerified");
+  });
+
+  it("propagates errors thrown by the guard", async () => {
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              guard: { name: "boom" },
+              targetState: "submitted",
+            },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    const guardRegistry = makeGuardRegistry({
+      boom: {
+        name: "boom",
+        evaluate: () => {
+          throw new Error("guard exploded");
+        },
+      },
+    });
+    const executor = new EventExecutor(new CommandExecutor(makeRegistry({})), guardRegistry);
+
+    await expect(executor.execute(compiled, "draft", "submit", "instance-1", {}, makeContext())).rejects.toThrow(
+      "guard exploded",
+    );
+  });
+
+  it("exposes guard ref metadata via commandMetadata during evaluate", async () => {
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              guard: { name: "hasRole", metadata: { requiredRole: "manager" } },
+              targetState: "submitted",
+            },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    let observed: unknown;
+    const guardRegistry = makeGuardRegistry({
+      hasRole: {
+        name: "hasRole",
+        evaluate: (_subject, ctx) => {
+          observed = ctx.commandMetadata;
+          return true;
+        },
+      },
+    });
+    const executor = new EventExecutor(new CommandExecutor(makeRegistry({})), guardRegistry);
+
+    await executor.execute(compiled, "draft", "submit", "instance-1", {}, makeContext());
+
+    expect(observed).toEqual({ requiredRole: "manager" });
+  });
+
+  it("passes triggerMetadata and instance context through to the guard", async () => {
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              guard: { name: "checkBoth" },
+              targetState: "submitted",
+            },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    let seenTrigger: unknown;
+    let seenContext: unknown;
+    const guardRegistry = makeGuardRegistry({
+      checkBoth: {
+        name: "checkBoth",
+        evaluate: (_subject, ctx) => {
+          seenTrigger = ctx.triggerMetadata;
+          seenContext = ctx.context;
+          return true;
+        },
+      },
+    });
+    const executor = new EventExecutor(new CommandExecutor(makeRegistry({})), guardRegistry);
+
+    await executor.execute(
+      compiled,
+      "draft",
+      "submit",
+      "instance-1",
+      {},
+      makeContext({
+        triggerMetadata: { actor: "user-42" },
+        context: { submitterVerified: true },
+      }),
+    );
+
+    expect(seenTrigger).toEqual({ actor: "user-42" });
+    expect(seenContext).toEqual({ submitterVerified: true });
+  });
+
+  it("passes the subject through to the guard", async () => {
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              guard: { name: "subjectAware" },
+              targetState: "submitted",
+            },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    let seenSubject: unknown;
+    const guardRegistry = makeGuardRegistry({
+      subjectAware: {
+        name: "subjectAware",
+        evaluate: (subject) => {
+          seenSubject = subject;
+          return true;
+        },
+      },
+    });
+    const executor = new EventExecutor(new CommandExecutor(makeRegistry({})), guardRegistry);
+    const subject = { orderId: "abc-123" };
+
+    await executor.execute(compiled, "draft", "submit", "instance-1", subject, makeContext());
+
+    expect(seenSubject).toBe(subject);
+  });
+
+  it("returns guard-rejected (not failure routed to errorState) when guard rejects on an event with errorState", async () => {
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              guard: { name: "isVerified" },
+              targetState: "submitted",
+              errorState: "submitFailed",
+              commands: [{ name: "validate" }],
+            },
+          },
+        },
+        submitted: {},
+        submitFailed: {},
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    const cmdRegistry = makeRegistry({ validate: successCommand() });
+    const guardRegistry = makeGuardRegistry({
+      isVerified: { name: "isVerified", evaluate: () => false },
+    });
+    const executor = new EventExecutor(new CommandExecutor(cmdRegistry), guardRegistry);
+
+    const result = await executor.execute(compiled, "draft", "submit", "instance-1", {}, makeContext());
+
+    expect(result.outcome).toBe("guard-rejected");
+    expect(result.toState).toBe("draft"); // not "submitFailed"
+    expect(result.commandResults).toEqual([]);
+    expect(result.rejectedBy).toBe("isVerified");
+  });
+
+  it("rejects a command-only event with no targetState/errorState when guard returns false", async () => {
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "active",
+      states: {
+        active: {
+          events: {
+            ping: {
+              guard: { name: "isAllowed" },
+              commands: [{ name: "log" }],
+            },
+          },
+        },
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    let logCalls = 0;
+    const cmdRegistry = makeRegistry({
+      log: {
+        execute: async () => {
+          logCalls++;
+          return { ok: true };
+        },
+      },
+    });
+    const guardRegistry = makeGuardRegistry({
+      isAllowed: { name: "isAllowed", evaluate: () => false },
+    });
+    const executor = new EventExecutor(new CommandExecutor(cmdRegistry), guardRegistry);
+
+    const result = await executor.execute(compiled, "active", "ping", "instance-1", {}, makeContext());
+
+    expect(result.outcome).toBe("guard-rejected");
+    expect(result.toState).toBe("active");
+    expect(logCalls).toBe(0);
+  });
+
+  it("throws when an event declares a guard but no guard registry is configured", async () => {
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              guard: { name: "isVerified" },
+              targetState: "submitted",
+            },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    const executor = new EventExecutor(new CommandExecutor(makeRegistry({})));
+
+    await expect(executor.execute(compiled, "draft", "submit", "instance-1", {}, makeContext())).rejects.toThrow(
+      /guard "isVerified" but no guard registry/,
+    );
   });
 });
