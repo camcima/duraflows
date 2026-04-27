@@ -322,6 +322,92 @@ describe("WorkflowRuntime guards", () => {
     expect(rejectedRowsAfterSecond).toHaveLength(1); // still just one, no new row
   });
 
+  it("processExpiredWorkflows tallies processed and rejected separately across mixed outcomes", async () => {
+    let clockTime = new Date("2026-04-27T00:00:00Z");
+    const clock = { now: () => clockTime };
+
+    const mixedDefinition: WorkflowDefinition = {
+      name: "mixed-timeout-wf",
+      initialState: "waiting",
+      states: {
+        waiting: {
+          events: {
+            expire: {
+              guard: { name: "canExpire" },
+              targetState: "expired",
+              timeout: { afterMinutes: 1 },
+            },
+          },
+        },
+        expired: {},
+      },
+    };
+
+    const cmdRegistry = new InMemoryCommandRegistry();
+    const guardRegistry = new InMemoryGuardRegistry();
+    // Guard passes only when context.canPass === true.
+    guardRegistry.register("canExpire", {
+      name: "canExpire",
+      evaluate: (_subject, ctx) => ctx.context.canPass === true,
+    });
+
+    const definitionRegistry = new InMemoryDefinitionRegistry({
+      validator: new WorkflowValidator(),
+      compiler: new WorkflowCompiler(),
+      validationOptions: {
+        knownCommandNames: new Set<string>(),
+        knownGuardNames: new Set(["canExpire"]),
+      },
+    });
+    definitionRegistry.register(mixedDefinition);
+
+    const instanceStore = new InMemoryInstanceStore();
+    const historyStore = new InMemoryHistoryStore();
+    const transactionRunner = new InMemoryTransactionRunner();
+
+    const runtime = new WorkflowRuntime({
+      definitionRegistry,
+      commandRegistry: cmdRegistry,
+      guardRegistry,
+      instanceStore,
+      historyStore,
+      transactionRunner,
+      clock,
+    });
+
+    // Two instances will pass, one will be rejected.
+    const passA = await runtime.createInstance({
+      workflowName: "mixed-timeout-wf",
+      context: { canPass: true },
+    });
+    const rejectB = await runtime.createInstance({
+      workflowName: "mixed-timeout-wf",
+      context: { canPass: false },
+    });
+    const passC = await runtime.createInstance({
+      workflowName: "mixed-timeout-wf",
+      context: { canPass: true },
+    });
+
+    // Advance clock past the 1-minute timeout deadline for all three.
+    clockTime = new Date("2026-04-27T00:02:00Z");
+
+    const result = await runtime.processExpiredWorkflows();
+
+    expect(result.processed).toBe(2);
+    expect(result.rejected).toBe(1);
+    expect(result.failed).toHaveLength(0);
+
+    // Pass instances must have transitioned; rejected instance must remain in waiting.
+    const afterA = await instanceStore.findByUuid(passA.uuid);
+    const afterB = await instanceStore.findByUuid(rejectB.uuid);
+    const afterC = await instanceStore.findByUuid(passC.uuid);
+    expect(afterA?.currentState).toBe("expired");
+    expect(afterB?.currentState).toBe("waiting");
+    expect(afterC?.currentState).toBe("expired");
+    expect(afterB?.expiresAt).toBeNull(); // rejected instance had its deadline disarmed
+  });
+
   it("when guard passes and a command fails, normal failure path still routes to errorState", async () => {
     // Regression: ensure the new short-circuit didn't break the existing failure path.
     const cmdRegistry = new InMemoryCommandRegistry();
