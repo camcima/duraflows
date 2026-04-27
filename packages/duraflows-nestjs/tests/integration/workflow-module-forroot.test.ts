@@ -304,6 +304,42 @@ describe("WorkflowModule.forRoot()", () => {
     expect(definitionRegistry.has("guarded-wf")).toBe(true);
   });
 
+  it("accepts an empty guards array alongside a custom guardRegistry without false-rejecting refs", async () => {
+    // Regression: previously knownGuardNames was derived purely from `guards`,
+    // so `guards: []` + custom `guardRegistry` produced an empty Set and
+    // bootstrap validation rejected every ref the custom registry could resolve.
+    const customRegistry = new InMemoryGuardRegistry();
+    customRegistry.register("isVerified", { name: "isVerified", evaluate: () => true });
+
+    const guardedDefinition: WorkflowDefinition = {
+      name: "guarded-empty-array-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: { guard: { name: "isVerified" }, targetState: "submitted" },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const mod = await Test.createTestingModule({
+      imports: [
+        WorkflowModule.forRoot({
+          ...defaultOptions(),
+          workflows: [guardedDefinition],
+          commands: [],
+          guards: [],
+          guardRegistry: customRegistry,
+        }),
+      ],
+    }).compile();
+
+    const definitionRegistry = mod.get<WorkflowDefinitionRegistry>(WORKFLOW_DEFINITION_REGISTRY);
+    expect(definitionRegistry.has("guarded-empty-array-wf")).toBe(true);
+  });
+
   it("throws when both guards and guardRegistry are supplied", () => {
     const customRegistry = new InMemoryGuardRegistry();
     customRegistry.register("isVerified", { name: "isVerified", evaluate: () => true });

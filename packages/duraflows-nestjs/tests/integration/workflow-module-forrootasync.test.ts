@@ -261,6 +261,44 @@ describe("WorkflowModule.forRootAsync()", () => {
     });
   });
 
+  it("accepts an empty guards array alongside a custom guardRegistry in forRootAsync", async () => {
+    // Regression: previously `guards: []` + custom `guardRegistry` produced
+    // an empty knownGuardNames Set that bootstrap validation used to reject
+    // every ref the custom registry could resolve.
+    const { InMemoryGuardRegistry } = await import("@duraflows/core");
+    const customRegistry = new InMemoryGuardRegistry();
+    customRegistry.register("isVerified", { name: "isVerified", evaluate: () => true });
+
+    const guardedDefinition: WorkflowDefinition = {
+      name: "guarded-async-empty-array-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: { guard: { name: "isVerified" }, targetState: "submitted" },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const mod = await Test.createTestingModule({
+      imports: [
+        WorkflowModule.forRootAsync({
+          useFactory: () => ({
+            workflows: [guardedDefinition],
+            persistence: stubPersistence,
+            guards: [],
+            guardRegistry: customRegistry,
+          }),
+        }),
+      ],
+    }).compile();
+
+    const definitionRegistry = mod.get<WorkflowDefinitionRegistry>(WORKFLOW_DEFINITION_REGISTRY);
+    expect(definitionRegistry.has("guarded-async-empty-array-wf")).toBe(true);
+  });
+
   it("throws when forRootAsync useFactory returns both guards and guardRegistry", async () => {
     const { InMemoryGuardRegistry } = await import("@duraflows/core");
     const customRegistry = new InMemoryGuardRegistry();

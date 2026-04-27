@@ -130,7 +130,11 @@ export class WorkflowModule {
         provide: WORKFLOW_DEFINITION_REGISTRY,
         useFactory: (commandRegistry: NestCommandRegistry) => {
           const knownCommandNames = commandRegistry.getRegisteredNames();
-          const knownGuardNames = options.guards !== undefined ? new Set(options.guards.map((g) => g.name)) : undefined;
+          // Validate guard refs only when we own the registry (built-in path).
+          // With a custom guardRegistry we can't enumerate names, so skip;
+          // unresolved refs surface at runtime as WorkflowError.
+          const knownGuardNames =
+            options.guardRegistry !== undefined ? undefined : new Set((options.guards ?? []).map((g) => g.name));
           const registry = new InMemoryDefinitionRegistry({
             validator: new WorkflowValidator(),
             compiler: new WorkflowCompiler(),
@@ -251,7 +255,11 @@ export class WorkflowModule {
         provide: WORKFLOW_DEFINITION_REGISTRY,
         useFactory: (config: WorkflowModuleFactoryConfig, commandRegistry: NestCommandRegistry) => {
           const knownCommandNames = commandRegistry.getRegisteredNames();
-          const knownGuardNames = config.guards !== undefined ? new Set(config.guards.map((g) => g.name)) : undefined;
+          // Validate guard refs only when we own the registry (built-in path).
+          // With a custom guardRegistry we can't enumerate names, so skip;
+          // unresolved refs surface at runtime as WorkflowError.
+          const knownGuardNames =
+            config.guardRegistry !== undefined ? undefined : new Set((config.guards ?? []).map((g) => g.name));
           const registry = new InMemoryDefinitionRegistry({
             validator: new WorkflowValidator(),
             compiler: new WorkflowCompiler(),
