@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.1.0](https://github.com/camcima/duraflows/compare/v1.0.0...v1.1.0) (2026-04-27)
+
+### Features
+
+* complete public guard API exports ([ceb79f8](https://github.com/camcima/duraflows/commit/ceb79f843518446e2401db46c886b2df82fde727))
+* **core:** add guard types and widen outcome to include "guard-rejected" ([8238d47](https://github.com/camcima/duraflows/commit/8238d4713b3bded723d9478d2c7f7001cae1d2cf))
+* **core:** add WorkflowGuardRegistry and InMemoryGuardRegistry ([19e16d6](https://github.com/camcima/duraflows/commit/19e16d6d9349cdf32df6c7b0f502ddcaeeee3491))
+* **core:** eventExecutor evaluates guard before commands ([9f765cc](https://github.com/camcima/duraflows/commit/9f765cc7c43234314f96c04ee48f101b8f25f457))
+* **core:** validate guard refs against knownGuardNames ([3196811](https://github.com/camcima/duraflows/commit/3196811fe2f82c115f062e2a7fa28f4f31945212))
+* **core:** wire guardRegistry into WorkflowRuntime; persist rejections ([1843499](https://github.com/camcima/duraflows/commit/1843499b52b8c1bb5af123eca6be3634d50f5885))
+* **nestjs:** add guards/guardRegistry options to WorkflowModule ([d9c248b](https://github.com/camcima/duraflows/commit/d9c248b4978a29ca4759a658a63479ccb9495e77))
+* **pg:** persist guard-rejected outcome with rejected_by column ([b136672](https://github.com/camcima/duraflows/commit/b136672393dc2f79476998fc2b0ecbb6983b0535))
+
+### Bug Fixes
+
+* address copilot review feedback on event guards ([33040e2](https://github.com/camcima/duraflows/commit/33040e205cd012545fa612b057f5d51fc945bf4c))
+* address final code-review blockers for event guards ([55bf4fd](https://github.com/camcima/duraflows/commit/55bf4fd0b93210b6323bb9e91f81c183d4e35669))
+* **core:** apply Task 5 review fixes ([66db778](https://github.com/camcima/duraflows/commit/66db77856f9c6e92ae8f35af94481ea717fbf969))
+* **core:** isolate guard's context.context from the persisted state ([3bb6369](https://github.com/camcima/duraflows/commit/3bb6369876692414b250b175ae98acf4315318b2))
+* **kysely:** persist and read rejectedBy on history records ([91f7d4c](https://github.com/camcima/duraflows/commit/91f7d4c936bed22651a2d7f6c27fded4614f9498))
+* **nestjs:** branch guard-name validation on guardRegistry, not guards ([324a165](https://github.com/camcima/duraflows/commit/324a1650428fb5f970eaad539e770909901064cb))
+* **nestjs:** export WORKFLOW_GUARD_REGISTRY token from public index ([4c2bdef](https://github.com/camcima/duraflows/commit/4c2bdef7f18001b0c84650f6a9a052d2b6f095a9))
+* update pnpm lockfile core version ([3cd5ea5](https://github.com/camcima/duraflows/commit/3cd5ea5531e3e4f5d438758b4ab3aea98c739208))
+
 ## [1.0.0](https://github.com/camcima/duraflows/compare/v0.5.1...v1.0.0) (2026-04-24)
 
 ### ⚠ BREAKING CHANGES
