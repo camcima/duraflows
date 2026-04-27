@@ -42,8 +42,14 @@ class InMemoryHistoryStore implements WorkflowHistoryStore {
     this.records.push({ ...entry, uuid });
     return uuid;
   }
-  async findByInstanceUuid(workflowInstanceUuid: string): Promise<WorkflowHistoryRecord[]> {
-    return this.records.filter((r) => r.workflowInstanceUuid === workflowInstanceUuid);
+  async findByInstanceUuid(
+    workflowInstanceUuid: string,
+    options?: { limit?: number; offset?: number },
+  ): Promise<WorkflowHistoryRecord[]> {
+    const matching = this.records.filter((r) => r.workflowInstanceUuid === workflowInstanceUuid);
+    const offset = options?.offset ?? 0;
+    const limit = options?.limit ?? matching.length;
+    return matching.slice(offset, offset + limit);
   }
 }
 

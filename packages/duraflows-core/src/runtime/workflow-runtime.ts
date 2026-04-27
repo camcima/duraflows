@@ -303,7 +303,7 @@ export class WorkflowRuntime {
         lastHistoryUuid = onEnterResult.lastHistoryUuid;
       }
 
-      const finalOutcome: "success" | "failure" | "guard-rejected" =
+      const finalOutcome: "success" | "failure" =
         eventResult.outcome === "failure" || onEnterResult.chainOutcome === "failure" ? "failure" : "success";
 
       return {
@@ -415,6 +415,20 @@ export class WorkflowRuntime {
       undefined,
       executionContext,
     );
+
+    if (result.outcome === "guard-rejected") {
+      await this.historyStore.append({
+        workflowInstanceUuid: instance.uuid,
+        fromState: result.fromState,
+        eventName,
+        toState: result.toState,
+        outcome: "guard-rejected",
+        rejectedBy: result.rejectedBy,
+        commandResultsJson: [],
+        triggerMetadata: { source: "timeout" },
+      });
+      return;
+    }
 
     const now = this.clock.now();
     instance.currentState = result.toState;
