@@ -8,6 +8,7 @@ import {
   WorkflowTimeoutService,
   WORKFLOW_RUNTIME,
   WORKFLOW_COMMAND_REGISTRY,
+  WORKFLOW_DEFINITION_REGISTRY,
   WorkflowInstanceController,
   WorkflowEventController,
   WorkflowQueryController,
@@ -17,6 +18,7 @@ import {
 import {
   WorkflowRuntime,
   type WorkflowDefinition,
+  type WorkflowGuard,
   type WorkflowCommand,
   type CommandResult,
   type WorkflowExecutionContext,
@@ -28,6 +30,7 @@ import {
   type WorkflowPersistenceProvider,
   type WorkflowClock,
   type WorkflowCommandRegistry,
+  type WorkflowDefinitionRegistry,
   type StateEnterEvent,
 } from "@duraflows/core";
 
@@ -256,6 +259,38 @@ describe("WorkflowModule.forRootAsync()", () => {
       expect(capturedUrl).toBe("postgres://localhost/test");
       expect(mod.get(WORKFLOW_RUNTIME)).toBeInstanceOf(WorkflowRuntime);
     });
+  });
+
+  it("accepts guards via the async factory config", async () => {
+    const guards: WorkflowGuard[] = [{ name: "isVerified", evaluate: () => true }];
+
+    const guardedDefinition: WorkflowDefinition = {
+      name: "guarded-async-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: { guard: { name: "isVerified" }, targetState: "submitted" },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const module = await Test.createTestingModule({
+      imports: [
+        WorkflowModule.forRootAsync({
+          useFactory: () => ({
+            workflows: [guardedDefinition],
+            persistence: stubPersistence,
+            guards,
+          }),
+        }),
+      ],
+    }).compile();
+
+    const definitionRegistry = module.get<WorkflowDefinitionRegistry>(WORKFLOW_DEFINITION_REGISTRY);
+    expect(definitionRegistry.has("guarded-async-wf")).toBe(true);
   });
 
   it("forwards observers returned from forRootAsync useFactory config to WorkflowRuntime", async () => {
