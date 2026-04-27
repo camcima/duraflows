@@ -5,6 +5,7 @@ import type { CompiledWorkflow } from "../compilation/workflow-compiler.js";
 import type { CommandExecutor } from "./command-executor.js";
 import type { WorkflowGuardRegistry } from "../registry/guard-registry.js";
 import { InvalidEventError, CommandFailureError, WorkflowError } from "../errors/index.js";
+import { deepFreeze } from "../util/deep-freeze.js";
 
 export interface EventExecutionResult {
   outcome: "success" | "failure" | "guard-rejected";
@@ -12,16 +13,6 @@ export interface EventExecutionResult {
   toState: string;
   commandResults: CommandResult[];
   rejectedBy?: string;
-}
-
-function deepFreeze<T extends Record<string, unknown>>(obj: T): Readonly<T> {
-  Object.freeze(obj);
-  for (const value of Object.values(obj)) {
-    if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
-      deepFreeze(value as Record<string, unknown>);
-    }
-  }
-  return obj;
 }
 
 export class EventExecutor {

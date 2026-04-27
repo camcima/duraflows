@@ -78,6 +78,7 @@ export interface ProcessExpiredWorkflowsInput {
 
 export interface ProcessExpiredWorkflowsResult {
   processed: number;
+  rejected: number;
   failed: Array<{ uuid: string; error: string }>;
 }
 

@@ -1,6 +1,7 @@
 import type { CommandResult, WorkflowCommand, WorkflowExecutionContext } from "../types/runtime.js";
 import type { WorkflowCommandRef } from "../types/definition.js";
 import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
+import { deepFreeze } from "../util/deep-freeze.js";
 
 function toSerializableError(value: unknown): { name: string; message: string; stack?: string } {
   if (value instanceof Error) {
@@ -11,16 +12,6 @@ function toSerializableError(value: unknown): { name: string; message: string; s
     };
   }
   return { name: "UnknownError", message: String(value) };
-}
-
-function deepFreeze<T extends Record<string, unknown>>(obj: T): Readonly<T> {
-  Object.freeze(obj);
-  for (const value of Object.values(obj)) {
-    if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
-      deepFreeze(value as Record<string, unknown>);
-    }
-  }
-  return obj;
 }
 
 export interface CommandExecutionResult {

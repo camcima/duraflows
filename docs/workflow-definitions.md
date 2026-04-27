@@ -213,6 +213,8 @@ interface WorkflowGuardRef {
 
 A guard is a pure predicate that decides whether an event may fire. Register a `WorkflowGuard` (matching `name`) in the runtime's guard registry; the executor calls `evaluate(subject, ctx)` before any commands. A `false` result short-circuits the event with `outcome: "guard-rejected"` and no state change.
 
+> **Guards must be pure.** A guard's `evaluate` should be a read-only predicate: inspect the subject and context, return a boolean. Do not mutate the subject, do not call external services, do not write to databases. Side effects belong in commands, which run after the guard passes. Guards may be re-evaluated (for example, if a timeout sweep retries an instance) and any side effects performed inside them will repeat without compensation. If you need to call an external system to make the decision, do that work in a command on a prior transition and stash the result in `context` for the guard to read.
+
 ```ts
 const definition: WorkflowDefinition = {
   name: "lifecycle-wf",

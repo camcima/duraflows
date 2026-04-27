@@ -1,16 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { WorkflowDefinitionRegistry } from "../registry/definition-registry.js";
 import type { WorkflowDefinition } from "../types/definition.js";
-
-function deepFreeze<T extends Record<string, unknown>>(obj: T): Readonly<T> {
-  Object.freeze(obj);
-  for (const value of Object.values(obj)) {
-    if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
-      deepFreeze(value as Record<string, unknown>);
-    }
-  }
-  return obj;
-}
+import { deepFreeze } from "../util/deep-freeze.js";
 import type {
   WorkflowInstanceStore,
   WorkflowHistoryStore,
@@ -327,6 +318,7 @@ export class WorkflowRuntime {
     const now = this.clock.now();
     const eventsToFire: StateEnterEvent[] = [];
     let processed = 0;
+    let rejected = 0;
     const failed: Array<{ uuid: string; error: string }> = [];
 
     // Step 1: find expired instances (short-lived txn; locks released immediately).
@@ -337,7 +329,7 @@ export class WorkflowRuntime {
     // Step 2: process each instance in its own transaction.
     for (const staleInstance of expired) {
       const startIdx = eventsToFire.length;
-      let didProcess = false;
+      let outcome: "transitioned" | "rejected" | null = null;
       try {
         await this.transactionRunner.runInTransaction(async () => {
           // Re-lock the instance fresh inside this transaction (locks from Step 1 were released).
@@ -365,10 +357,10 @@ export class WorkflowRuntime {
             return;
           }
 
-          await this.processTimeoutEvent(instance, definition, eventName, eventsToFire);
-          didProcess = true;
+          outcome = await this.processTimeoutEvent(instance, definition, eventName, eventsToFire);
         });
-        if (didProcess) processed++;
+        if (outcome === "transitioned") processed++;
+        else if (outcome === "rejected") rejected++;
       } catch (error: unknown) {
         // Per-instance transaction rolled back. Drop any events queued for this instance.
         eventsToFire.length = startIdx;
@@ -382,7 +374,7 @@ export class WorkflowRuntime {
       await this.observerRegistry.fireOnEnter(event);
     }
 
-    return { processed, failed };
+    return { processed, rejected, failed };
   }
 
   private async processTimeoutEvent(
@@ -390,7 +382,7 @@ export class WorkflowRuntime {
     definition: WorkflowDefinition,
     eventName: string,
     eventsToFire: StateEnterEvent[],
-  ): Promise<void> {
+  ): Promise<"transitioned" | "rejected"> {
     const compiled = this.compiler.compile(definition);
 
     const timeoutEventDef = definition.states[instance.currentState]?.events?.[eventName];
@@ -434,7 +426,7 @@ export class WorkflowRuntime {
         commandResultsJson: [],
         triggerMetadata: { source: "timeout" },
       });
-      return;
+      return "rejected";
     }
 
     const now = this.clock.now();
@@ -489,6 +481,7 @@ export class WorkflowRuntime {
     executionContext.context = { ...instance.context };
 
     await this.processOnEnterChain(instance, definition, executionContext, undefined, eventsToFire);
+    return "transitioned";
   }
 
   private async processOnEnterChain(

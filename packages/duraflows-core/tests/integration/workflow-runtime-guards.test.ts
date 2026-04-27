@@ -296,7 +296,8 @@ describe("WorkflowRuntime guards", () => {
     clockTime = new Date("2026-04-27T00:02:00Z");
 
     const firstResult = await runtime.processExpiredWorkflows();
-    expect(firstResult.processed).toBe(1);
+    expect(firstResult.processed).toBe(0);
+    expect(firstResult.rejected).toBe(1);
     expect(firstResult.failed).toHaveLength(0);
 
     // expiresAt must be disarmed and state unchanged.
@@ -314,6 +315,7 @@ describe("WorkflowRuntime guards", () => {
     // Second sweep must NOT pick up the instance again (expiresAt is null).
     const secondResult = await runtime.processExpiredWorkflows();
     expect(secondResult.processed).toBe(0);
+    expect(secondResult.rejected).toBe(0);
 
     const historyAfterSecond = await historyStore.findByInstanceUuid(created.uuid);
     const rejectedRowsAfterSecond = historyAfterSecond.filter((h) => h.outcome === "guard-rejected");

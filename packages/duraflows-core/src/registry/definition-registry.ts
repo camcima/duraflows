@@ -2,17 +2,7 @@ import type { WorkflowDefinition } from "../types/definition.js";
 import { WorkflowDefinitionError } from "../errors/index.js";
 import type { WorkflowValidator, WorkflowValidationOptions } from "../validation/workflow-validator.js";
 import type { WorkflowCompiler } from "../compilation/workflow-compiler.js";
-
-function deepFreeze<T>(obj: T): Readonly<T> {
-  if (obj === null || typeof obj !== "object" || Object.isFrozen(obj)) {
-    return obj;
-  }
-  Object.freeze(obj);
-  for (const value of Object.values(obj as Record<string, unknown>)) {
-    deepFreeze(value);
-  }
-  return obj;
-}
+import { deepFreeze } from "../util/deep-freeze.js";
 
 export interface WorkflowDefinitionRegistry {
   get(workflowName: string): WorkflowDefinition;
