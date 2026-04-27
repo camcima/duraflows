@@ -21,6 +21,7 @@ export class KyselyWorkflowHistoryStore implements WorkflowHistoryStore {
         to_state: entry.toState,
         outcome: entry.outcome,
         error_message: entry.errorMessage ?? null,
+        rejected_by: entry.rejectedBy ?? null,
         command_results_json: JSON.stringify(entry.commandResultsJson),
         trigger_metadata_json: JSON.stringify(entry.triggerMetadata ?? {}),
       })
@@ -52,8 +53,9 @@ export class KyselyWorkflowHistoryStore implements WorkflowHistoryStore {
       fromState: row.from_state,
       eventName: row.event_name,
       toState: row.to_state,
-      outcome: row.outcome as "success" | "failure",
+      outcome: row.outcome as "success" | "failure" | "guard-rejected",
       errorMessage: row.error_message ?? undefined,
+      rejectedBy: row.rejected_by ?? undefined,
       commandResultsJson: row.command_results_json as unknown as WorkflowHistoryRecord["commandResultsJson"],
       triggerMetadata: row.trigger_metadata_json as Record<string, unknown> | undefined,
     }));

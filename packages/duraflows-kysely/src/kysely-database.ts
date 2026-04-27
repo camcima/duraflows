@@ -36,6 +36,7 @@ export interface WorkflowHistoryTable {
   to_state: string;
   outcome: string;
   error_message: string | null;
+  rejected_by: string | null;
   command_results_json: JsonArrayColumn;
   trigger_metadata_json: JsonObjectColumn;
   created_at: Generated<Date>;
