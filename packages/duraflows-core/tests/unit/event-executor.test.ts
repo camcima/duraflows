@@ -350,6 +350,47 @@ describe("EventExecutor", () => {
     expect(validateCalls).toBe(0);
   });
 
+  it("throws if a guard mutates ctx.context (guards are contractually pure)", async () => {
+    // Defends the documented contract that guards are read-only predicates.
+    // Without isolation, a mutation would silently leak into the persisted
+    // instance.context downstream.
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              guard: { name: "naughty" },
+              targetState: "submitted",
+            },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    const guardRegistry = makeGuardRegistry({
+      naughty: {
+        name: "naughty",
+        evaluate: (_subject, ctx) => {
+          (ctx.context as Record<string, unknown>).leak = "should not stick";
+          return true;
+        },
+      },
+    });
+    const executor = new EventExecutor(new CommandExecutor(makeRegistry({})), guardRegistry);
+    const baseContext = makeContext({ context: { existing: 1 } });
+
+    await expect(executor.execute(compiled, "draft", "submit", "instance-1", {}, baseContext)).rejects.toThrow(
+      /Cannot add property leak|object is not extensible|read[- ]only/i,
+    );
+
+    // Verify the original caller-owned context was not mutated.
+    expect(baseContext.context).toEqual({ existing: 1 });
+  });
+
   it("supports async guards", async () => {
     const definition: WorkflowDefinition = {
       name: "guarded-wf",

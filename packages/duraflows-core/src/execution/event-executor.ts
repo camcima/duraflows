@@ -47,8 +47,12 @@ export class EventExecutor {
         );
       }
       const guard = this.guardRegistry.get(eventDef.guard.name);
+      // Guards are contractually pure: clone+freeze `context` so an attempted
+      // mutation throws (strict mode) instead of silently leaking into the
+      // persisted instance.context downstream.
       const guardContext: WorkflowExecutionContext = {
         ...context,
+        context: deepFreeze(structuredClone(context.context)) as Record<string, unknown>,
         commandMetadata: deepFreeze(structuredClone(eventDef.guard.metadata ?? {})),
       };
       const passed = await guard.evaluate(subject, guardContext);
