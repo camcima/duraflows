@@ -1,0 +1,29 @@
+{
+  "skill_name": "duraflows-builder",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Build me a duraflows workflow for an e-commerce order. Flow: order placed -> payment processing -> payment confirmed -> shipping -> delivered. If payment fails, cancel the order. If the item isn't delivered within 7 days of shipping, escalate to customer support. We're using NestJS and @duraflows/pg.",
+      "expected_output": "Should produce a complete WorkflowDefinition with states (pending, processing_payment, payment_confirmed, shipping, delivered, cancelled, escalated), events with commands, errorState on payment event pointing to cancelled, a 7-day timeout on the shipping state transitioning to escalated. Should include command stubs with proper signatures (execute(subject, ctx) returning CommandResult). Should wire up with NestJS module config.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I need a duraflows workflow for user email verification after signup. After registration, send a verification email and wait up to 24 hours. If they click the link, activate the account and send a welcome email. If 24 hours pass with no verification, send a reminder and wait another 24 hours. If still not verified after the reminder, deactivate the account.",
+      "expected_output": "Should produce a WorkflowDefinition with states (awaiting_verification, awaiting_reverification, active, deactivated), timeout events (24h on awaiting_verification -> send reminder -> awaiting_reverification, 24h on awaiting_reverification -> deactivate), a verify event on both waiting states, onEnter chains for sending emails. Commands should use ctx.now for timestamps, not Date.now().",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I need a content moderation workflow in duraflows. Content gets submitted, auto-scanned by an AI service, if flagged goes to human review queue, if clean it's auto-approved. Humans can approve or reject. Rejections notify the content author. Approved content gets published. If human review takes more than 48 hours, auto-approve with a flag.",
+      "expected_output": "Should produce a WorkflowDefinition with states (submitted, scanning, pending_review, approved, rejected, published), onEnter on scanning state to run AI scan command, conditional transition based on scan result (flagged -> pending_review, clean -> approved), human review events (approve/reject), 48-hour timeout on pending_review, notification command on rejection. Should handle the scan command failure with errorState.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Build me a duraflows subscription-renewal workflow for a SaaS product. Flow: a renewal job kicks off 3 days before period_end, charges the saved card, and on success the subscription continues. Send the customer an email AND an in-app notification (don't fail the renewal if either is down — they can be retried offline). On charge failure, retry up to 3 times with 24h between attempts; after 3 failures, mark past_due. From past_due the customer can update_payment to retry, or after 7 days the subscription is canceled. We're on NestJS + @duraflows/pg. Also: our finance team wants every state transition logged to a separate audit_log table for compliance — show me how.",
+      "expected_output": "Should produce: (1) A WorkflowDefinition covering scheduled, charging, active, past_due, canceled with timeout-driven transitions (3-day initial, 24h retry, 7-day grace) and a retryCount in context. (2) Notification commands (sendEmail, sendInAppNotification) marked `readonly bestEffort = true;` so charge can succeed even if a notification is down. The notification commands should ideally be one handler driven by per-command metadata (channel/template) on WorkflowCommandRef, read via ctx.commandMetadata. (3) A WorkflowObserver implementation that writes to audit_log; wired via WorkflowModule.forRootAsync's useFactory RETURN VALUE (not top-level — that's the v1.0.0 BREAKING change). (4) The observer registration via the OrderObserversModule pattern (separate module, exports observer, imported by forRootAsync) is the cleanest pattern. (5) charge command remains MANDATORY (no bestEffort) with an errorState routing to retry/past_due. SHOULD NOT use the v0.x pattern of catching errors in notification commands and returning ok:true.",
+      "files": []
+    }
+  ]
+}

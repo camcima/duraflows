@@ -1,0 +1,29 @@
+{
+  "skill_name": "duraflows-tester",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I have an order processing duraflows workflow. I need to write a vitest test that creates the workflow, triggers a 'start_processing' event, and verifies it transitions from 'pending' to 'processing' with the right context values set by the command. The command calls an external inventory API. Show me the full test setup.",
+      "expected_output": "Should set up InMemoryInstanceStore, InMemoryHistoryStore, InMemoryTransactionRunner (with structuredClone), a fixed clock, mock the inventory command (not the real API), create WorkflowRuntime, use runtime.createWorkflow() then runtime.triggerEvent(). Should assert on instance.currentState and instance.context. Should NOT hit any real external API.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "How do I test timeout behavior in my duraflows workflow? I have a 'waiting_for_approval' state with a 2-hour timeout that should transition to 'escalated'. I want to simulate the timeout firing in my test without actually waiting 2 hours.",
+      "expected_output": "Should show the advanceable clock pattern (start with a fixed date, then advance past the 2-hour mark), call processExpiredWorkflows() to trigger the timeout, and assert the state changed to 'escalated'. Should use InMemoryInstanceStore.findExpired() which respects the clock. Should NOT suggest using vitest fake timers or setTimeout mocking.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I need to test that when my 'charge_payment' command returns { ok: false, code: 'INSUFFICIENT_FUNDS' }, the workflow transitions from 'charging' to 'payment_failed' (the errorState). Also need to verify the error is recorded in history. Can you write this test?",
+      "expected_output": "Should create a mock command that returns { ok: false, code: 'INSUFFICIENT_FUNDS', message: '...' }, register it in the command registry, trigger the event, assert currentState is 'payment_failed', and query history to verify the outcome is 'failure' with the right error details. Should use the failureCommand helper or equivalent pattern.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "We just upgraded to duraflows 1.0 and added a `bestEffort: true` notification command in our checkout flow. I need three vitest tests: (1) when the notification command returns ok:false, the workflow still transitions normally and outcome is 'success'; (2) when the notification command throws an exception, same — workflow still completes successfully and the throw is captured in commandResults; (3) verify our new audit observer fires once per state entry, including initial createInstance and onEnter hops, and that the observer's transitionUuid matches what the command saw on ctx.transitionUuid for the same state entry. Use vitest, the in-memory test doubles, and the duraflows runtime directly.",
+      "expected_output": "Should produce three tests covering: (1) bestEffort returned ok:false — outcome stays 'success', commandResults[i].ok is false, next mandatory command still runs; (2) bestEffort thrown — runtime captures it as { ok: false, code: 'BEST_EFFORT_THROWN', error: { name, message, stack? } } (serializable shape, NOT the raw Error), outcome still 'success'; (3) recording-observer fixture (a WorkflowObserver that pushes events into an array) registered via WorkflowRuntimeOptions.observers, asserting the events array contains entries for the createInstance entry (fromState: null), each event-driven transition, AND each onEnter hop. The transitionUuid correlation test: a command that records ctx.transitionUuid into a captured variable, then assert observer's matching event.transitionUuid equals it. Should use the v1.0.0 transition-fields (fromState/toState/transitionUuid) on WorkflowExecutionContext. Should NOT suggest the deprecated v0.x top-level observer placement on NestJS forRootAsync.",
+      "files": []
+    }
+  ]
+}

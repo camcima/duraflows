@@ -1,0 +1,35 @@
+{
+  "skill_name": "duraflows-developer",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I'm working on a duraflows command that charges a customer's credit card via Stripe. The command writes the charge ID to ctx.context.chargeId. But we're seeing duplicate charges in production — looks like the command runs twice sometimes. The event has an errorState defined and we're inside a transaction. What's going wrong and how do I fix it?",
+      "expected_output": "Should identify the idempotency problem: if the transaction rolls back after the Stripe call succeeds (e.g., a subsequent command fails or DB error), the event can be re-triggered and the command runs again. Should recommend checking ctx.context.chargeId before calling Stripe (guard pattern) and/or using Stripe idempotency keys. Should NOT suggest removing the errorState or changing the transaction model.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "My duraflows workflow test is flaky. The command sets ctx.context.expiresAt = new Date(Date.now() + 3600000).toISOString() and my test asserts on the exact value. Sometimes it's off by a millisecond. I'm using vitest with the duraflows runtime.",
+      "expected_output": "Should identify that Date.now() is the problem — duraflows provides ctx.now (injected clock) specifically for deterministic timestamps. Should show how to use a fixed clock in tests and ctx.now in the command. Should NOT suggest using fake timers or toBeCloseTo() as the primary fix.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I have a duraflows workflow where state 'processing' has a context patch `context: { status: 'in_progress' }` and my command also writes `ctx.context.status = 'processing_started'`. In production the status always ends up as 'in_progress'. Is this a bug in duraflows?",
+      "expected_output": "Should explain the context merge order: state-defined context patches are applied AFTER command writes, so state context wins for the same key. This is by design, not a bug. Should recommend either removing the duplicate key from the state context patch, or using a different key name in the command.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Just upgraded our duraflows from 0.5 to 1.0. Two things I'm confused about: (1) we have a sendOrderEmail command in our 'paid' onEnter chain and SendGrid was down for 5 minutes yesterday — every order in that window threw and got rolled back, even though the email isn't business-critical. The whole transaction died. How should we wire this in 1.0 so a flaky email provider can't block payments? (2) Our NestJS module had `WorkflowModule.forRootAsync({ observers: [auditObserver], useFactory: ... })` — startup is now broken with a TypeScript error about 'observers does not exist'. What changed?",
+      "expected_output": "Should identify (1) the v1.0.0 fix is `bestEffort: true` on SendOrderEmailCommand — explain that bestEffort failures (returned ok:false OR thrown) are recorded in history but DO NOT abort the chain or taint outcome. Should show a code snippet adding `readonly bestEffort = true;` to the command class. Should NOT suggest catching the error inside the command and returning ok:true (the v0.x anti-pattern). (2) v1.0.0 BREAKING: observers moved from top-level WorkflowModuleAsyncOptions into the WorkflowModuleFactoryConfig returned by useFactory. Should show the fix: move `observers: [auditObserver]` inside the object useFactory returns. Should mention forRoot (sync) is unaffected.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "I'm trying to add an audit trail to my duraflows workflows. I tried implementing a NestJS interceptor that wraps WorkflowService.triggerEvent but it's clunky — I have to remember to log every state, including the ones reached via onEnter chains and timeouts. Is there a built-in way?",
+      "expected_output": "Should recommend the v1.0.0 WorkflowObserver pattern. Should explain that observers fire post-commit on EVERY state entry — events, onEnter hops, timeouts, and the initial createInstance entry — so the interceptor approach misses onEnter and timeout transitions. Should show a minimal WorkflowObserver implementation (name + onEnter), and how to wire it in NestJS via WorkflowModule.forRootAsync's useFactory return value (mentioning observers belong in the factory config in v1.0.0, not at the top level). Should mention transitionUuid for correlating with command logs, and the at-most-once semantics so the auditor knows it's not a guaranteed-delivery system.",
+      "files": []
+    }
+  ]
+}
