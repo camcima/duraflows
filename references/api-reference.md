@@ -1,6 +1,6 @@
 # duraflows API Reference
 
-> Corresponds to duraflows **v1.0.0**. For the latest, check the source at [github.com/camcima/duraflows](https://github.com/camcima/duraflows).
+> Corresponds to duraflows **v1.1.0**. For the latest, check the source at [github.com/camcima/duraflows](https://github.com/camcima/duraflows).
 
 ---
 
@@ -9,10 +9,10 @@
 ### @duraflows/core
 
 **Types:**
-`WorkflowDefinition`, `WorkflowStateDefinition`, `WorkflowEventDefinition`, `WorkflowOnEnterDefinition`, `WorkflowCommandRef`, `WorkflowTimeoutDefinition`, `WorkflowCommand`, `CommandResult`, `WorkflowExecutionContext`, `WorkflowInstance`, `WorkflowExecutionResult`, `OnEnterChainResult`, `OnEnterHopResult`, `AvailableWorkflowEvent`, `WorkflowHistoryRecord`, `CreateWorkflowInstanceInput`, `TriggerWorkflowEventInput`, `ProcessExpiredWorkflowsInput`, `ProcessExpiredWorkflowsResult`, `GetAvailableEventsInput`, `WorkflowInstanceStore`, `WorkflowHistoryStore`, `WorkflowTransactionRunner`, `WorkflowClock`, `WorkflowPersistenceProvider`, `WorkflowDefinitionRegistry`, `WorkflowCommandRegistry`, `WorkflowObserver`, `StateEnterEvent`, `ObserverErrorHandler`, `WorkflowRuntimeOptions`
+`WorkflowDefinition`, `WorkflowStateDefinition`, `WorkflowEventDefinition`, `WorkflowOnEnterDefinition`, `WorkflowCommandRef`, `WorkflowGuardRef`, `WorkflowTimeoutDefinition`, `WorkflowCommand`, `WorkflowGuard`, `CommandResult`, `WorkflowExecutionContext`, `WorkflowInstance`, `WorkflowExecutionResult`, `OnEnterChainResult`, `OnEnterHopResult`, `AvailableWorkflowEvent`, `WorkflowHistoryRecord`, `CreateWorkflowInstanceInput`, `TriggerWorkflowEventInput`, `ProcessExpiredWorkflowsInput`, `ProcessExpiredWorkflowsResult`, `GetAvailableEventsInput`, `WorkflowInstanceStore`, `WorkflowHistoryStore`, `WorkflowTransactionRunner`, `WorkflowClock`, `WorkflowPersistenceProvider`, `WorkflowDefinitionRegistry`, `WorkflowCommandRegistry`, `WorkflowGuardRegistry`, `WorkflowObserver`, `StateEnterEvent`, `ObserverErrorHandler`, `WorkflowRuntimeOptions`
 
 **Classes:**
-`WorkflowRuntime`, `WorkflowHandle`, `WorkflowValidator`, `WorkflowCompiler`, `CommandExecutor`, `EventExecutor`, `OnEnterExecutor`, `TimeoutResolver`, `InMemoryDefinitionRegistry`, `InMemoryCommandRegistry`, `ObserverRegistry`
+`WorkflowRuntime`, `WorkflowHandle`, `WorkflowValidator`, `WorkflowCompiler`, `CommandExecutor`, `EventExecutor`, `OnEnterExecutor`, `TimeoutResolver`, `InMemoryDefinitionRegistry`, `InMemoryCommandRegistry`, `InMemoryGuardRegistry`, `ObserverRegistry`
 
 **Functions:**
 `toMermaidDiagram(definition, options?)` — renders a Mermaid flowchart for a `WorkflowDefinition` (added v0.3.0).
@@ -33,7 +33,7 @@
 
 ### @duraflows/nestjs
 
-`WorkflowModule`, `WorkflowService`, `WorkflowTimeoutService`, `WorkflowCommand` (decorator), `WORKFLOW_RUNTIME`, `WORKFLOW_INSTANCE_STORE`, `WORKFLOW_HISTORY_STORE`, `WORKFLOW_COMMAND_REGISTRY`, `WORKFLOW_DEFINITION_REGISTRY`, `WORKFLOW_TRANSACTION_RUNNER`, `WORKFLOW_CLOCK`. Also re-exports the entire `@duraflows/core` public API (including observer types) so apps can import everything from a single package.
+`WorkflowModule`, `WorkflowService`, `WorkflowTimeoutService`, `WorkflowCommand` (decorator), `WORKFLOW_RUNTIME`, `WORKFLOW_INSTANCE_STORE`, `WORKFLOW_HISTORY_STORE`, `WORKFLOW_COMMAND_REGISTRY`, `WORKFLOW_DEFINITION_REGISTRY`, `WORKFLOW_GUARD_REGISTRY` (v1.1.0), `WORKFLOW_TRANSACTION_RUNNER`, `WORKFLOW_CLOCK`. Also re-exports the entire `@duraflows/core` public API (including observer + guard types) so apps can import everything from a single package.
 
 ---
 
@@ -64,6 +64,7 @@ interface WorkflowStateDefinition {
 
 ```ts
 interface WorkflowEventDefinition {
+  guard?: WorkflowGuardRef; // v1.1.0: precondition evaluated BEFORE commands
   targetState?: string; // state on success (omit for command-only events)
   errorState?: string; // state on command failure
   commands?: WorkflowCommandRef[]; // sequential, fail-fast (best-effort commands continue on failure)
@@ -76,6 +77,8 @@ interface WorkflowEventDefinition {
 
 - **Command-only event** (no `targetState`): runs commands as side effects, stays in current state. Still appends a history record. The observer fires as a self-transition with `fromState === toState`.
 - **Failure-only event**: only an `errorState` and `commands`, no `targetState`. Useful when the event exists purely to trap a failure and route to recovery.
+
+**v1.1.0:** Optional `guard` runs before any commands. If it returns `false`, the event short-circuits with `outcome: "guard-rejected"`, no commands run, no state change, and a history row with `rejectedBy: "<guard-name>"` is appended. `errorState` is for **command** failures only — it does not catch guard rejections. See [Guards](#guards-v110).
 
 ### WorkflowOnEnterDefinition
 
@@ -98,6 +101,17 @@ interface WorkflowCommandRef {
 ```
 
 **v1.0.0:** the `metadata` field is exposed to the command handler via `WorkflowExecutionContext.commandMetadata` — deep-cloned and deep-frozen per command so each ref in a chain sees its own metadata, never a sibling's. Use this to drive one handler with different parameters from many call sites (channel/template/vendor selection, A/B variants, etc.).
+
+### WorkflowGuardRef (v1.1.0)
+
+```ts
+interface WorkflowGuardRef {
+  name: string; // resolved against the WorkflowGuardRegistry
+  metadata?: Record<string, unknown>; // exposed to the guard via ctx.commandMetadata
+}
+```
+
+The guard's `metadata` reaches the handler through the same `WorkflowExecutionContext.commandMetadata` slot used by commands — deep-cloned and deep-frozen for the duration of the evaluation. Use this for guard parameters like `{ maxDays: 30 }` or `{ minTier: "gold" }` so one `WorkflowGuard` implementation can serve many call sites.
 
 ### WorkflowTimeoutDefinition
 
@@ -188,11 +202,12 @@ interface WorkflowInstance {
 
 ```ts
 interface WorkflowExecutionResult {
-  outcome: "success" | "failure";
+  outcome: "success" | "failure" | "guard-rejected"; // v1.1.0: added "guard-rejected"
   fromState: string;
-  toState: string; // final state after any onEnter chain
-  commandResults: CommandResult[];
+  toState: string; // final state after any onEnter chain (== fromState when guard-rejected)
+  commandResults: CommandResult[]; // empty when guard-rejected
   historyUuid: string;
+  rejectedBy?: string; // v1.1.0: the guard ref name when outcome === "guard-rejected"
 }
 ```
 
@@ -205,6 +220,8 @@ outcome = eventResult.outcome === "failure" || onEnterChain.outcome === "failure
 ```
 
 A best-effort command returning `ok: false` does **not** taint `outcome`. A mandatory command routing to `errorState` surfaces as `outcome: "failure"` even if subsequent onEnter hops succeed.
+
+**v1.1.0 — `"guard-rejected"`:** when an event's guard returns `false`, the runtime short-circuits before commands or state change. `toState === fromState`, `commandResults` is empty, `rejectedBy` is the declared `eventDef.guard.name` (the workflow-definition ref name, not the registered guard's `.name` property — these can diverge with custom registries). Guard rejections are **not** routed to `errorState` — `errorState` is for command failures.
 
 ### OnEnterChainResult
 
@@ -247,14 +264,17 @@ interface WorkflowHistoryRecord {
   workflowInstanceUuid: string;
   fromState: string | null; // null for creation
   eventName: string; // "onEnter" for auto-transitions
-  toState: string;
-  outcome: "success" | "failure";
+  toState: string; // == fromState for guard-rejected and command-only events
+  outcome: "success" | "failure" | "guard-rejected"; // v1.1.0: added "guard-rejected"
   errorMessage?: string;
+  rejectedBy?: string; // v1.1.0: guard ref name when outcome === "guard-rejected"
   commandResults: CommandResult[];
   triggerMetadata: Record<string, unknown>;
   createdAt: Date;
 }
 ```
+
+**v1.1.0:** a guard rejection writes a row with `outcome: "guard-rejected"`, `rejectedBy: "<guard-name>"`, `fromState === toState`, and an empty `commandResults` array. Both the underlying CHECK constraint and the `rejected_by` column are added by migration `003_event_guards.sql` in `@duraflows/pg`; custom adapters must persist `rejectedBy` on append and map `null → undefined` on read.
 
 ---
 
@@ -294,10 +314,13 @@ interface ProcessExpiredWorkflowsInput {
 
 ```ts
 interface ProcessExpiredWorkflowsResult {
-  processed: number;
+  processed: number; // timeout fired and the instance transitioned
+  rejected: number; // v1.1.0: timeout fired but a guard rejected — instance stays in place
   failed: Array<{ uuid: string; error: string }>;
 }
 ```
+
+**v1.1.0 — `rejected`:** when a timeout-driven event has a guard that returns `false`, the runtime additionally clears `expiresAt` so the next sweep won't re-pick the instance. The history row is still appended with `outcome: "guard-rejected"`. Track `rejected` separately from `processed` so observability dashboards don't conflate "timeout fired and progressed" with "timeout fired and was held back."
 
 ### GetAvailableEventsInput
 
@@ -377,17 +400,18 @@ interface WorkflowPersistenceProvider {
 new WorkflowRuntime(options: WorkflowRuntimeOptions)
 ```
 
-| Option               | Type                          | Description                                                                       |
-| -------------------- | ----------------------------- | --------------------------------------------------------------------------------- |
-| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                  |
-| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                      |
-| `instanceStore`      | `WorkflowInstanceStore`       | Instance persistence                                                              |
-| `historyStore`       | `WorkflowHistoryStore`        | History persistence                                                               |
-| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                            |
-| `clock`              | `WorkflowClock`               | Clock for timestamps                                                              |
-| `maxOnEnterDepth`    | `number`                      | Max onEnter chain depth (default: 10)                                             |
-| `observers`          | `readonly WorkflowObserver[]` | v1.0.0: lifecycle observers fired post-commit on every state entry                |
-| `onObserverError`    | `ObserverErrorHandler`        | v1.0.0: handler invoked when an observer throws (default logs via `console.warn`) |
+| Option               | Type                          | Description                                                                          |
+| -------------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
+| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                     |
+| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                         |
+| `instanceStore`      | `WorkflowInstanceStore`       | Instance persistence                                                                 |
+| `historyStore`       | `WorkflowHistoryStore`        | History persistence                                                                  |
+| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                               |
+| `clock`              | `WorkflowClock`               | Clock for timestamps                                                                 |
+| `maxOnEnterDepth`    | `number`                      | Max onEnter chain depth (default: 10)                                                |
+| `observers`          | `readonly WorkflowObserver[]` | v1.0.0: lifecycle observers fired post-commit on every state entry                   |
+| `onObserverError`    | `ObserverErrorHandler`        | v1.0.0: handler invoked when an observer throws (default logs via `console.warn`)    |
+| `guardRegistry`      | `WorkflowGuardRegistry`       | v1.1.0: registry of guard implementations; required when any definition uses `guard` |
 
 ### Methods
 
@@ -477,6 +501,55 @@ type ObserverErrorHandler = (error: unknown, observer: { readonly name: string }
 
 ---
 
+## Guards (v1.1.0)
+
+Per-event preconditions. A guard is a read-only predicate that decides whether an event is allowed to fire. Guards run **before** any commands; if they return `false`, the event short-circuits with `outcome: "guard-rejected"`, no commands run, no state change, and a history row is appended.
+
+### WorkflowGuard
+
+```ts
+interface WorkflowGuard<TSubject = unknown> {
+  readonly name: string;
+  evaluate(subject: TSubject, context: WorkflowExecutionContext): boolean | Promise<boolean>;
+}
+```
+
+The `name` field on the implementation is informational; the runtime resolves the registry by the **ref name** (`eventDef.guard.name`) and reports that ref name in `rejectedBy`. With aliasing custom registries, the two can diverge — definitions are the source of truth.
+
+### WorkflowGuardRegistry
+
+```ts
+interface WorkflowGuardRegistry {
+  get(name: string): WorkflowGuard;
+  has(name: string): boolean;
+}
+```
+
+A built-in `InMemoryGuardRegistry` is provided. Custom registries (DI-backed, lazy-loading, etc.) just need to satisfy the interface. The runtime cannot enumerate names from a custom registry, which has implications for bootstrap validation — see [WorkflowValidator](#workflowvalidator).
+
+```ts
+import { InMemoryGuardRegistry } from "@duraflows/core";
+
+const guardRegistry = new InMemoryGuardRegistry();
+guardRegistry.register("isVerified", { name: "isVerified", evaluate: (s, ctx) => ctx.context.verified === true });
+```
+
+### Firing semantics
+
+- **Inside the same transaction** — guard evaluation, the rejection-or-pass decision, and the resulting history append all run inside the per-event transaction.
+- **Pure** — the runtime hands the guard a `deepFreeze`d clone of `ctx.context`. Mutations throw under strict mode rather than silently leaking into persisted state. Side effects (DB writes, external calls) belong in commands, which run **after** the guard passes.
+- **Re-evaluable** — a timeout sweep retries an instance the next tick if the deadline isn't cleared. Anything non-idempotent inside a guard would repeat without compensation.
+- **Not catchable by `errorState`** — `errorState` is for command failures. A guard rejection is meaningful business state ("event not allowed right now"), not a fault.
+- **Timeout interaction** — when a guard rejects a timeout-driven event, the runtime additionally clears `expiresAt` so the sweep won't re-pick the instance. The rejection counts toward `ProcessExpiredWorkflowsResult.rejected`, not `processed`.
+
+### Bootstrap validation
+
+When you supply guards via the convenience array path (`InMemoryGuardRegistry` registered through the registered guard names) and pass `knownGuardNames` to the validator, every `eventDef.guard.name` reference is checked at registration. An unresolved ref fails registration with `WorkflowDefinitionError`.
+
+Custom registries can't be enumerated, so when only `guardRegistry` is supplied, validation skips guard refs — they surface only at first use as `WorkflowError` (`Guard "<name>" not found in registry`). The NestJS module follows the same rule: branch on `guardRegistry`, validate when the built-in path is used.
+
+---
+
 ## WorkflowHandle
 
 Lightweight proxy. No cached state. Every method call hits persistence.
@@ -528,7 +601,7 @@ const validator = new WorkflowValidator();
 const result = validator.validate(definition, options?);
 ```
 
-**Options:** `{ knownCommandNames?: Set<string> }`
+**Options:** `{ knownCommandNames?: Set<string>; knownGuardNames?: Set<string> }`
 
 **Returns:** `{ valid: boolean; errors: Array<{ path: string; message: string }> }`
 
@@ -545,6 +618,7 @@ const result = validator.validate(definition, options?);
 9. All command names must exist in `knownCommandNames` (if provided)
 10. No cycles in the `onEnter` graph (DFS-based detection)
 11. Definitions are **deep-cloned and deep-frozen** at registration (v1.0.0) — caller mutations to the source object after `register()` cannot corrupt the registered definition
+12. **(v1.1.0)** All `guard.name` refs must exist in `knownGuardNames` (if provided). When using a custom `WorkflowGuardRegistry` (which can't be enumerated), pass `undefined` for `knownGuardNames` and let unresolved refs surface at first use as `WorkflowError`.
 
 ---
 
@@ -569,15 +643,17 @@ Caches by definition name. Invalidates on definition change (JSON hash compariso
 WorkflowModule.forRoot(options: WorkflowModuleOptions)
 ```
 
-| Option              | Type                            | Description                                                  |
-| ------------------- | ------------------------------- | ------------------------------------------------------------ |
-| `workflows`         | `WorkflowDefinition[]`          | Definitions to register                                      |
-| `commands`          | `WorkflowCommandRegistration[]` | Explicit command registrations `{ name, useClass }`          |
-| `observers`         | `WorkflowObserver[]`            | v1.0.0: lifecycle observers                                  |
-| `onObserverError`   | `ObserverErrorHandler`          | v1.0.0: handler for observer throws (default `console.warn`) |
-| `persistence`       | `WorkflowPersistenceProvider`   | Persistence providers                                        |
-| `clock`             | `WorkflowClock`                 | Optional clock override                                      |
-| `enableControllers` | `boolean`                       | Enable REST endpoints                                        |
+| Option              | Type                            | Description                                                                                              |
+| ------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `workflows`         | `WorkflowDefinition[]`          | Definitions to register                                                                                  |
+| `commands`          | `WorkflowCommandRegistration[]` | Explicit command registrations `{ name, useClass }`                                                      |
+| `guards`            | `WorkflowGuard[]`               | v1.1.0: built-in guard implementations. Module wires them into an `InMemoryGuardRegistry` automatically. |
+| `guardRegistry`     | `WorkflowGuardRegistry`         | v1.1.0: prebuilt custom registry. Mutually exclusive with `guards`; throws synchronously if both given.  |
+| `observers`         | `WorkflowObserver[]`            | v1.0.0: lifecycle observers                                                                              |
+| `onObserverError`   | `ObserverErrorHandler`          | v1.0.0: handler for observer throws (default `console.warn`)                                             |
+| `persistence`       | `WorkflowPersistenceProvider`   | Persistence providers                                                                                    |
+| `clock`             | `WorkflowClock`                 | Optional clock override                                                                                  |
+| `enableControllers` | `boolean`                       | Enable REST endpoints                                                                                    |
 
 ### WorkflowModule.forRootAsync()
 
@@ -606,6 +682,8 @@ WorkflowModule.forRootAsync<TArgs extends unknown[] = unknown[]>(
 | `clock`           | `WorkflowClock`               | Optional clock override                                                                                       |
 | `observers`       | `WorkflowObserver[]`          | v1.0.0: observers — moved here from top-level (BREAKING in v1.0.0) so they can compose from injected services |
 | `onObserverError` | `ObserverErrorHandler`        | v1.0.0: handler for observer throws                                                                           |
+| `guards`          | `WorkflowGuard[]`             | v1.1.0: built-in guards composed into an `InMemoryGuardRegistry`. Mutually exclusive with `guardRegistry`.    |
+| `guardRegistry`   | `WorkflowGuardRegistry`       | v1.1.0: prebuilt custom registry. Mutually exclusive with `guards`.                                           |
 
 **v1.0.0 BREAKING — observers moved into `useFactory`:**
 
@@ -686,15 +764,16 @@ export class MyScheduler {
 
 ### Injection Tokens
 
-| Token                          | Type                         |
-| ------------------------------ | ---------------------------- |
-| `WORKFLOW_RUNTIME`             | `WorkflowRuntime`            |
-| `WORKFLOW_INSTANCE_STORE`      | `WorkflowInstanceStore`      |
-| `WORKFLOW_HISTORY_STORE`       | `WorkflowHistoryStore`       |
-| `WORKFLOW_COMMAND_REGISTRY`    | `WorkflowCommandRegistry`    |
-| `WORKFLOW_DEFINITION_REGISTRY` | `WorkflowDefinitionRegistry` |
-| `WORKFLOW_TRANSACTION_RUNNER`  | `WorkflowTransactionRunner`  |
-| `WORKFLOW_CLOCK`               | `WorkflowClock`              |
+| Token                          | Type                             |
+| ------------------------------ | -------------------------------- |
+| `WORKFLOW_RUNTIME`             | `WorkflowRuntime`                |
+| `WORKFLOW_INSTANCE_STORE`      | `WorkflowInstanceStore`          |
+| `WORKFLOW_HISTORY_STORE`       | `WorkflowHistoryStore`           |
+| `WORKFLOW_COMMAND_REGISTRY`    | `WorkflowCommandRegistry`        |
+| `WORKFLOW_DEFINITION_REGISTRY` | `WorkflowDefinitionRegistry`     |
+| `WORKFLOW_GUARD_REGISTRY`      | `WorkflowGuardRegistry` (v1.1.0) |
+| `WORKFLOW_TRANSACTION_RUNNER`  | `WorkflowTransactionRunner`      |
+| `WORKFLOW_CLOCK`               | `WorkflowClock`                  |
 
 ### REST Controllers (enableControllers: true)
 
@@ -771,18 +850,19 @@ const { up, down } = generateMigrationSql({ uuidStrategy: "uuidv7" }); // PG 18+
 
 **workflow_history:**
 
-| Column                   | Type          | Notes                                     |
-| ------------------------ | ------------- | ----------------------------------------- |
-| `uuid`                   | `uuid`        | PK, auto-generated                        |
-| `workflow_instance_uuid` | `uuid`        | FK -> workflow_instances                  |
-| `from_state`             | `text`        | NULL for creation                         |
-| `event_name`             | `text`        | NOT NULL ("onEnter" for auto-transitions) |
-| `to_state`               | `text`        | NOT NULL                                  |
-| `outcome`                | `text`        | CHECK ('success', 'failure')              |
-| `error_message`          | `text`        |                                           |
-| `command_results_json`   | `jsonb`       | NOT NULL, DEFAULT '[]'                    |
-| `trigger_metadata_json`  | `jsonb`       | NOT NULL, DEFAULT '{}'                    |
-| `created_at`             | `timestamptz` | NOT NULL                                  |
+| Column                   | Type          | Notes                                                                                                             |
+| ------------------------ | ------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `uuid`                   | `uuid`        | PK, auto-generated                                                                                                |
+| `workflow_instance_uuid` | `uuid`        | FK -> workflow_instances                                                                                          |
+| `from_state`             | `text`        | NULL for creation                                                                                                 |
+| `event_name`             | `text`        | NOT NULL ("onEnter" for auto-transitions)                                                                         |
+| `to_state`               | `text`        | NOT NULL                                                                                                          |
+| `outcome`                | `text`        | CHECK ('success', 'failure', 'guard-rejected') (v1.1.0 extends CHECK)                                             |
+| `error_message`          | `text`        |                                                                                                                   |
+| `rejected_by`            | `text`        | v1.1.0: declared `eventDef.guard.name` for guard-rejected rows; NULL otherwise (migration `003_event_guards.sql`) |
+| `command_results_json`   | `jsonb`       | NOT NULL, DEFAULT '[]'                                                                                            |
+| `trigger_metadata_json`  | `jsonb`       | NOT NULL, DEFAULT '{}'                                                                                            |
+| `created_at`             | `timestamptz` | NOT NULL                                                                                                          |
 
 **Indexes:**
 
