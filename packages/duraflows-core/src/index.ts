@@ -5,6 +5,7 @@ export type {
   WorkflowEventDefinition,
   WorkflowOnEnterDefinition,
   WorkflowCommandRef,
+  WorkflowGuardRef,
   WorkflowTimeoutDefinition,
 } from "./types/definition.js";
 

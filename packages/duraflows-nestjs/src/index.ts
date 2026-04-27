@@ -93,5 +93,7 @@ export {
   WorkflowHandle,
   InMemoryDefinitionRegistry,
   InMemoryCommandRegistry,
+  InMemoryGuardRegistry,
 } from "@duraflows/core";
 export type { WorkflowObserver, StateEnterEvent, ObserverErrorHandler } from "@duraflows/core";
+export type { WorkflowGuard, WorkflowGuardRef, WorkflowGuardRegistry } from "@duraflows/core";
