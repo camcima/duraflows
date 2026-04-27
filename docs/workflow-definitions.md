@@ -191,15 +191,46 @@ interface WorkflowEventDefinition {
 }
 ```
 
-| Property      | Type                        | Required | Description                                                                                       |
-| ------------- | --------------------------- | -------- | ------------------------------------------------------------------------------------------------- |
-| `targetState` | `string`                    | No       | State to transition to on success. Must reference a valid state name.                             |
-| `errorState`  | `string`                    | No       | State to transition to on command failure. Must reference a valid state name.                     |
-| `commands`    | `WorkflowCommandRef[]`      | No       | Ordered list of commands to execute when the event is triggered.                                  |
-| `timeout`     | `WorkflowTimeoutDefinition` | No       | Timeout configuration for automatic triggering. At most one event per state may define a timeout. |
-| `metadata`    | `Record<string, unknown>`   | No       | Arbitrary event metadata.                                                                         |
+| Property      | Type                        | Required | Description                                                                                                             |
+| ------------- | --------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `targetState` | `string`                    | No       | State to transition to on success. Must reference a valid state name.                                                   |
+| `errorState`  | `string`                    | No       | State to transition to on command failure. Must reference a valid state name.                                           |
+| `commands`    | `WorkflowCommandRef[]`      | No       | Ordered list of commands to execute when the event is triggered.                                                        |
+| `guard`       | `WorkflowGuardRef`          | No       | Optional precondition. Evaluated before commands run; if it returns `false`, no commands run and no transition happens. |
+| `timeout`     | `WorkflowTimeoutDefinition` | No       | Timeout configuration for automatic triggering. At most one event per state may define a timeout.                       |
+| `metadata`    | `Record<string, unknown>`   | No       | Arbitrary event metadata.                                                                                               |
 
 An event must define at least one of `targetState`, `errorState`, or `commands`. A completely empty event is rejected as a declarative no-op.
+
+### WorkflowGuardRef
+
+```ts
+interface WorkflowGuardRef {
+  name: string; // resolved against the WorkflowGuardRegistry
+  metadata?: Record<string, unknown>; // surfaces as ctx.commandMetadata inside evaluate()
+}
+```
+
+A guard is a pure predicate that decides whether an event may fire. Register a `WorkflowGuard` (matching `name`) in the runtime's guard registry; the executor calls `evaluate(subject, ctx)` before any commands. A `false` result short-circuits the event with `outcome: "guard-rejected"` and no state change.
+
+```ts
+const definition: WorkflowDefinition = {
+  name: "lifecycle-wf",
+  initialState: "draft",
+  states: {
+    draft: {
+      events: {
+        submit: {
+          guard: { name: "submitterIsVerified" },
+          targetState: "submitted",
+          commands: [{ name: "validate" }],
+        },
+      },
+    },
+    submitted: {},
+  },
+};
+```
 
 ### Event Shapes
 

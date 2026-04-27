@@ -11,6 +11,7 @@ Part of the [duraflows](https://github.com/camcima/duraflows) monorepo.
 - `WorkflowTimeoutService` for processing expired workflows
 - Optional REST controllers for full HTTP API
 - `@WorkflowCommand` decorator with automatic discovery
+- `guards` option for registering declarative event preconditions
 - Re-exports all types from `@duraflows/core` for convenience
 
 ## Installation

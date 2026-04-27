@@ -115,14 +115,16 @@ export class AppModule {}
 
 **WorkflowModuleOptions:**
 
-| Property            | Type                            | Required | Description                                                                             |
-| ------------------- | ------------------------------- | -------- | --------------------------------------------------------------------------------------- |
-| `workflows`         | `WorkflowDefinition[]`          | Yes      | Workflow definitions to register                                                        |
-| `commands`          | `WorkflowCommandRegistration[]` | No       | Explicit command handler registrations. Optional if using `@WorkflowCommand` decorator. |
-| `observers`         | `WorkflowObserver[]`            | No       | Lifecycle observers registered with the runtime. See [Observers](#observers).           |
-| `persistence`       | `WorkflowPersistenceProvider`   | Yes      | Persistence implementations (instance store, history store, transaction runner)         |
-| `clock`             | `WorkflowClock`                 | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                   |
-| `enableControllers` | `boolean`                       | No       | If `true`, registers REST controllers. Defaults to `false`                              |
+| Property            | Type                            | Required | Description                                                                                                    |
+| ------------------- | ------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------- |
+| `workflows`         | `WorkflowDefinition[]`          | Yes      | Workflow definitions to register                                                                               |
+| `commands`          | `WorkflowCommandRegistration[]` | No       | Explicit command handler registrations. Optional if using `@WorkflowCommand` decorator.                        |
+| `guards`            | `WorkflowGuard[]`               | No       | Guard implementations. Registered into an `InMemoryGuardRegistry` at module bootstrap. See [Guards](#guards).  |
+| `guardRegistry`     | `WorkflowGuardRegistry`         | No       | Prebuilt guard registry. Mutually exclusive with `guards`. Use when you need a custom registry implementation. |
+| `observers`         | `WorkflowObserver[]`            | No       | Lifecycle observers registered with the runtime. See [Observers](#observers).                                  |
+| `persistence`       | `WorkflowPersistenceProvider`   | Yes      | Persistence implementations (instance store, history store, transaction runner)                                |
+| `clock`             | `WorkflowClock`                 | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                                          |
+| `enableControllers` | `boolean`                       | No       | If `true`, registers REST controllers. Defaults to `false`                                                     |
 
 ### forRootAsync()
 
@@ -271,6 +273,27 @@ WorkflowModule.forRootAsync({
   inject: [AuditService],
 });
 ```
+
+## Guards
+
+Pass guard implementations via the `guards` option:
+
+```ts
+WorkflowModule.forRoot({
+  workflows: [
+    /* ... */
+  ],
+  guards: [
+    {
+      name: "submitterIsVerified",
+      evaluate: (_subject, ctx) => ctx.context.submitterVerified === true,
+    },
+  ],
+  persistence,
+});
+```
+
+Or supply a prebuilt registry via `guardRegistry`. Guard names referenced from definitions are validated against this set at module bootstrap; an unresolved ref fails registration with `WorkflowDefinitionError`.
 
 ## WorkflowCommandRegistration
 

@@ -14,6 +14,7 @@ Part of the [duraflows](https://github.com/camcima/duraflows) monorepo.
 - Immutable metadata for identity labels that never change after creation
 - Full audit history of every transition with command results
 - Persistence-agnostic -- bring your own database adapter
+- **Event guards** — declarative preconditions that block transitions without running commands; rejections surface as `outcome: "guard-rejected"` and are recorded in history.
 - Mermaid diagram generation from workflow definitions
 
 ## Installation

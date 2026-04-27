@@ -18,16 +18,17 @@ new WorkflowRuntime(options: WorkflowRuntimeOptions)
 
 **WorkflowRuntimeOptions:**
 
-| Property             | Type                          | Description                                                    |
-| -------------------- | ----------------------------- | -------------------------------------------------------------- |
-| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                               |
-| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                   |
-| `instanceStore`      | `WorkflowInstanceStore`       | Persistence for workflow instances                             |
-| `historyStore`       | `WorkflowHistoryStore`        | Persistence for history records                                |
-| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                         |
-| `clock`              | `WorkflowClock`               | Clock for timestamps (injectable for testing)                  |
-| `maxOnEnterDepth`    | `number`                      | Maximum depth for onEnter auto-transition chains (default: 10) |
-| `observers`          | `readonly WorkflowObserver[]` | Optional observers notified post-commit on every state entry   |
+| Property             | Type                          | Description                                                                                            |
+| -------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                                       |
+| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                                           |
+| `instanceStore`      | `WorkflowInstanceStore`       | Persistence for workflow instances                                                                     |
+| `historyStore`       | `WorkflowHistoryStore`        | Persistence for history records                                                                        |
+| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                                                 |
+| `clock`              | `WorkflowClock`               | Clock for timestamps (injectable for testing)                                                          |
+| `maxOnEnterDepth`    | `number`                      | Maximum depth for onEnter auto-transition chains (default: 10)                                         |
+| `observers`          | `readonly WorkflowObserver[]` | Optional observers notified post-commit on every state entry                                           |
+| `guardRegistry`      | `WorkflowGuardRegistry`       | Optional registry of guard implementations; required when any workflow definition references a `guard` |
 
 ### createInstance()
 
@@ -139,6 +140,44 @@ console.log(result.fromState); // "exportable"
 console.log(result.toState); // "exported" or "export_failed"
 console.log(result.commandResults.length); // 2
 console.log(result.commandResults[0].ok); // true
+```
+
+### Guard-rejected outcome
+
+When an event has a `guard` and the guard returns `false`, the runtime returns:
+
+```ts
+{
+  outcome: "guard-rejected",
+  fromState: "<currentState>",
+  toState: "<currentState>",   // unchanged
+  commandResults: [],
+  rejectedBy: "<guard name>",
+  historyUuid: "<id of the recorded rejection>",
+}
+```
+
+A history row is appended (with `outcome = "guard-rejected"` and `rejectedBy` set), but:
+
+- the instance state, version, and context are **not** updated
+- `onEnter` chains do **not** run for the unchanged state
+- observer `onEnter` events do **not** fire (no transition occurred)
+
+Register guards via the `guardRegistry` option:
+
+```ts
+import { InMemoryGuardRegistry, WorkflowRuntime } from "@duraflows/core";
+
+const guardRegistry = new InMemoryGuardRegistry();
+guardRegistry.register("submitterIsVerified", {
+  name: "submitterIsVerified",
+  evaluate: (subject, ctx) => ctx.context.submitterVerified === true,
+});
+
+const runtime = new WorkflowRuntime({
+  /* ... */
+  guardRegistry,
+});
 ```
 
 ### processExpiredWorkflows()

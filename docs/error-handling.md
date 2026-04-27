@@ -223,6 +223,10 @@ try {
 
 **How to fix:** Review the onEnter chain for unintended loops. The static cycle detector at registration time catches direct cycles, but complex chains with many hops (without cycles) can still exceed the depth limit. Increase `maxOnEnterDepth` in `WorkflowRuntimeOptions` if the chain depth is intentional.
 
+## Guard rejection vs. invalid event
+
+`InvalidEventError` is thrown when an event isn't even registered for the current state — a definition-level mismatch. **Guard rejection is different**: the event is registered, but its guard returned `false` at runtime. That isn't an error; it's a normal outcome surfaced via `result.outcome === "guard-rejected"` and `result.rejectedBy`. Callers should branch on `outcome` to distinguish success, command failure, and guard rejection rather than catching exceptions.
+
 ## Command Exceptions vs. Command Failures
 
 There are two distinct failure modes for commands:
