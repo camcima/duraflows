@@ -47,7 +47,7 @@
     "build": "tsc --build"
   },
   "dependencies": {
-    "@duraflows/core": "^1.0.0",
+    "@duraflows/core": "workspace:^",
     "pg": "^8.13.0"
   },
   "devDependencies": {

@@ -36,11 +36,17 @@ export interface WorkflowInstance {
 }
 
 export interface WorkflowExecutionResult {
-  outcome: "success" | "failure";
+  outcome: "success" | "failure" | "guard-rejected";
   fromState: string;
   toState: string;
   commandResults: CommandResult[];
   historyUuid: string;
+  rejectedBy?: string;
+}
+
+export interface WorkflowGuard<TSubject = unknown> {
+  readonly name: string;
+  evaluate(subject: TSubject, context: WorkflowExecutionContext): boolean | Promise<boolean>;
 }
 
 export interface AvailableWorkflowEvent {

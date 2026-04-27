@@ -278,7 +278,7 @@ export class WorkflowRuntime {
         lastHistoryUuid = onEnterResult.lastHistoryUuid;
       }
 
-      const finalOutcome: "success" | "failure" =
+      const finalOutcome: "success" | "failure" | "guard-rejected" =
         eventResult.outcome === "failure" || onEnterResult.chainOutcome === "failure" ? "failure" : "success";
 
       return {

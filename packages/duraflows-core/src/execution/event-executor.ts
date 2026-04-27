@@ -6,10 +6,11 @@ import type { CommandExecutor } from "./command-executor.js";
 import { InvalidEventError, CommandFailureError } from "../errors/index.js";
 
 export interface EventExecutionResult {
-  outcome: "success" | "failure";
+  outcome: "success" | "failure" | "guard-rejected";
   fromState: string;
   toState: string;
   commandResults: CommandResult[];
+  rejectedBy?: string;
 }
 
 export class EventExecutor {

@@ -80,8 +80,9 @@ export interface WorkflowHistoryRecord {
   fromState: string | null;
   eventName: string;
   toState: string;
-  outcome: "success" | "failure";
+  outcome: "success" | "failure" | "guard-rejected";
   errorMessage?: string;
+  rejectedBy?: string;
   commandResultsJson: CommandResult[];
   triggerMetadata?: Record<string, unknown>;
 }
