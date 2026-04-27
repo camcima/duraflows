@@ -393,10 +393,10 @@ See the [Persistence Guide](docs/persistence.md) for details and examples.
 
 ## AI Agent Skills
 
-If you use AI coding agents (Claude Code, Cursor, Copilot, etc.), install the [duraflows agent skills](https://github.com/camcima/duraflows-skills) to give your agent domain knowledge about duraflows APIs, patterns, and best practices:
+If you use AI coding agents (Claude Code, Cursor, Copilot, etc.), install the duraflows agent skills (shipped from this repo under `skills/`) to give your agent domain knowledge about duraflows APIs, patterns, and best practices:
 
 ```bash
-npx skills add camcima/duraflows-skills
+npx skills add camcima/duraflows
 ```
 
 This installs 5 skills that automatically activate when the agent detects duraflows-related code or workflow-building requests:

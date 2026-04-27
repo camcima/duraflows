@@ -1,0 +1,23 @@
+{
+  "skill_name": "duraflows-persistence-adapter",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I'm using Prisma with PostgreSQL in my NestJS app. I want to use duraflows but don't want to add the raw pg package. How do I implement the three persistence interfaces (WorkflowInstanceStore, WorkflowHistoryStore, WorkflowTransactionRunner) using Prisma? I need the full implementation with proper locking.",
+      "expected_output": "Should implement all three interfaces. lockByUuid must use $queryRaw with FOR UPDATE (Prisma doesn't support native FOR UPDATE). update must check version for optimistic locking and throw WorkflowError on mismatch. findExpired must use FOR UPDATE SKIP LOCKED. TransactionRunner should use AsyncLocalStorage to share the transaction context with stores, support nesting (reuse existing tx). Should include the Prisma migration/schema for both tables. Should wire up with WorkflowModule.forRootAsync().",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I'm migrating from @duraflows/pg to Drizzle ORM because the rest of my app uses Drizzle. What do I need to implement? I'm especially worried about getting the concurrent timeout processing right — we run 3 worker instances.",
+      "expected_output": "Should implement WorkflowInstanceStore, WorkflowHistoryStore, WorkflowTransactionRunner using Drizzle syntax. findExpired must use .for('update', { skipLocked: true }) or raw SQL equivalent — critical for 3 concurrent workers. Should explain why SKIP LOCKED matters (workers pick up different expired instances instead of blocking each other). lockByUuid must use .for('update'). Should show the Drizzle schema definition for both tables.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I just finished my Drizzle adapter for duraflows (about 400 lines across instance-store, history-store, transaction-runner) and we're targeting duraflows v1.0.0. Before I ship it I want to make sure I haven't missed any contract requirements — concurrency, locking, the metadata immutability stuff I keep hearing about. What's the right way to verify my adapter is actually correct against the duraflows contract? What's the most reliable way to catch contract drift in CI as duraflows evolves?",
+      "expected_output": "Should recommend the v1.0.0 conformance suite: `runInstanceStoreConformance` from `@duraflows/core/testing`. Should show the exact import path and a usage example: `import { runInstanceStoreConformance } from '@duraflows/core/testing';` then a vitest describe block calling it with a setup factory that returns { store, transactionRunner, teardown }. Should explain that the suite verifies: lockByUuid row-level locking + transaction-required, update optimistic concurrency on version, the metadata write-once contract (UPDATE must NOT touch metadata_json — v1.0.0 enforced), findExpired ordering + limit + SKIP LOCKED, nested-transaction reuse. Should mention that @duraflows/pg and @duraflows/kysely both run this in CI. Should ideally point to @duraflows/kysely as a worked second-adapter reference. Should NOT just suggest hand-rolling tests for each behavior.",
+      "files": []
+    }
+  ]
+}
