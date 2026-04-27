@@ -85,6 +85,12 @@ const EXPORTED_TOKENS = [
 @Module({})
 export class WorkflowModule {
   static forRoot(options: WorkflowModuleOptions): DynamicModule {
+    if (options.guardRegistry && options.guards && options.guards.length > 0) {
+      throw new Error(
+        "WorkflowModule: cannot supply both `guards` and `guardRegistry` — they are mutually exclusive. Pass guards or a custom registry, not both.",
+      );
+    }
+
     const controllers = options.enableControllers
       ? [WorkflowInstanceController, WorkflowEventController, WorkflowQueryController, WorkflowTimeoutController]
       : [];
@@ -107,6 +113,11 @@ export class WorkflowModule {
       {
         provide: WORKFLOW_GUARD_REGISTRY,
         useFactory: () => {
+          if (options.guardRegistry && options.guards && options.guards.length > 0) {
+            throw new Error(
+              "WorkflowModule: cannot supply both `guards` and `guardRegistry` — they are mutually exclusive. Pass guards or a custom registry, not both.",
+            );
+          }
           if (options.guardRegistry) return options.guardRegistry;
           const registry = new InMemoryGuardRegistry();
           for (const guard of options.guards ?? []) {
@@ -222,6 +233,11 @@ export class WorkflowModule {
       {
         provide: WORKFLOW_GUARD_REGISTRY,
         useFactory: (config: WorkflowModuleFactoryConfig) => {
+          if (config.guardRegistry && config.guards && config.guards.length > 0) {
+            throw new Error(
+              "WorkflowModule: cannot supply both `guards` and `guardRegistry` — they are mutually exclusive. Pass guards or a custom registry, not both.",
+            );
+          }
           if (config.guardRegistry) return config.guardRegistry;
           const registry = new InMemoryGuardRegistry();
           for (const guard of config.guards ?? []) {

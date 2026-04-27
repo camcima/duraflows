@@ -30,8 +30,10 @@ class InMemoryInstanceStore implements WorkflowInstanceStore {
   async update(instance: WorkflowInstance): Promise<void> {
     this.instances.set(instance.uuid, structuredClone(instance));
   }
-  async findExpired(): Promise<WorkflowInstance[]> {
-    return [];
+  async findExpired(_limit: number, now: Date): Promise<WorkflowInstance[]> {
+    return [...this.instances.values()].filter(
+      (i) => i.expiresAt !== null && i.expiresAt !== undefined && i.expiresAt <= now,
+    );
   }
 }
 
@@ -233,6 +235,89 @@ describe("WorkflowRuntime guards", () => {
     const second = await runtime.triggerEvent({ workflowInstanceUuid: created.uuid, eventName: "submit" });
     expect(second.outcome).toBe("success");
     expect(second.toState).toBe("indexed");
+  });
+
+  it("timeout guard rejection: disarms expiresAt, writes one history row, second sweep adds no rows", async () => {
+    // Mutable clock so we can advance time.
+    let clockTime = new Date("2026-04-27T00:00:00Z");
+    const clock = { now: () => clockTime };
+
+    const timeoutDefinition: WorkflowDefinition = {
+      name: "timeout-guarded-wf",
+      initialState: "waiting",
+      states: {
+        waiting: {
+          events: {
+            expire: {
+              guard: { name: "isVerified" },
+              targetState: "expired",
+              timeout: { afterMinutes: 1 },
+            },
+          },
+        },
+        expired: {},
+      },
+    };
+
+    const cmdRegistry = new InMemoryCommandRegistry();
+    const guardRegistry = new InMemoryGuardRegistry();
+    guardRegistry.register("isVerified", {
+      name: "isVerified",
+      evaluate: () => false, // always reject
+    });
+
+    const definitionRegistry = new InMemoryDefinitionRegistry({
+      validator: new WorkflowValidator(),
+      compiler: new WorkflowCompiler(),
+      validationOptions: {
+        knownCommandNames: new Set<string>(),
+        knownGuardNames: new Set(["isVerified"]),
+      },
+    });
+    definitionRegistry.register(timeoutDefinition);
+
+    const instanceStore = new InMemoryInstanceStore();
+    const historyStore = new InMemoryHistoryStore();
+    const transactionRunner = new InMemoryTransactionRunner();
+
+    const runtime = new WorkflowRuntime({
+      definitionRegistry,
+      commandRegistry: cmdRegistry,
+      guardRegistry,
+      instanceStore,
+      historyStore,
+      transactionRunner,
+      clock,
+    });
+
+    const created = await runtime.createInstance({ workflowName: "timeout-guarded-wf" });
+
+    // Advance clock past the 1-minute timeout deadline.
+    clockTime = new Date("2026-04-27T00:02:00Z");
+
+    const firstResult = await runtime.processExpiredWorkflows();
+    expect(firstResult.processed).toBe(1);
+    expect(firstResult.failed).toHaveLength(0);
+
+    // expiresAt must be disarmed and state unchanged.
+    const afterFirst = await instanceStore.findByUuid(created.uuid);
+    expect(afterFirst?.expiresAt).toBeNull();
+    expect(afterFirst?.currentState).toBe("waiting");
+
+    // Exactly one guard-rejected history row.
+    const historyAfterFirst = await historyStore.findByInstanceUuid(created.uuid);
+    const rejectedRows = historyAfterFirst.filter((h) => h.outcome === "guard-rejected");
+    expect(rejectedRows).toHaveLength(1);
+    expect(rejectedRows[0].eventName).toBe("expire");
+    expect(rejectedRows[0].rejectedBy).toBe("isVerified");
+
+    // Second sweep must NOT pick up the instance again (expiresAt is null).
+    const secondResult = await runtime.processExpiredWorkflows();
+    expect(secondResult.processed).toBe(0);
+
+    const historyAfterSecond = await historyStore.findByInstanceUuid(created.uuid);
+    const rejectedRowsAfterSecond = historyAfterSecond.filter((h) => h.outcome === "guard-rejected");
+    expect(rejectedRowsAfterSecond).toHaveLength(1); // still just one, no new row
   });
 
   it("when guard passes and a command fails, normal failure path still routes to errorState", async () => {

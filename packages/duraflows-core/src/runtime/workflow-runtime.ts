@@ -417,6 +417,13 @@ export class WorkflowRuntime {
     );
 
     if (result.outcome === "guard-rejected") {
+      const now = this.clock.now();
+      instance.expiresAt = null;
+      instance.version++;
+      instance.lastTransitionAt = now;
+      instance.updatedAt = now;
+      await this.instanceStore.update(instance);
+
       await this.historyStore.append({
         workflowInstanceUuid: instance.uuid,
         fromState: result.fromState,

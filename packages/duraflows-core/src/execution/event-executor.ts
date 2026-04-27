@@ -4,7 +4,7 @@ import type { CommandResult, WorkflowExecutionContext } from "../types/runtime.j
 import type { CompiledWorkflow } from "../compilation/workflow-compiler.js";
 import type { CommandExecutor } from "./command-executor.js";
 import type { WorkflowGuardRegistry } from "../registry/guard-registry.js";
-import { InvalidEventError, CommandFailureError } from "../errors/index.js";
+import { InvalidEventError, CommandFailureError, WorkflowError } from "../errors/index.js";
 
 export interface EventExecutionResult {
   outcome: "success" | "failure" | "guard-rejected";
@@ -51,7 +51,7 @@ export class EventExecutor {
     // Evaluate guard before any side effects.
     if (eventDef.guard) {
       if (!this.guardRegistry) {
-        throw new Error(
+        throw new WorkflowError(
           `Event "${eventName}" on state "${currentState}" declares guard "${eventDef.guard.name}" but no guard registry is configured`,
         );
       }

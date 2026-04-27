@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { EventExecutor } from "../../src/execution/event-executor.js";
 import { CommandExecutor } from "../../src/execution/command-executor.js";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
-import { InvalidEventError, CommandFailureError } from "../../src/errors/index.js";
+import { InvalidEventError, CommandFailureError, WorkflowError } from "../../src/errors/index.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
 import type { WorkflowCommand, WorkflowExecutionContext, CommandResult } from "../../src/types/runtime.js";
 import type { WorkflowCommandRegistry } from "../../src/registry/command-registry.js";
@@ -624,6 +624,9 @@ describe("EventExecutor", () => {
     const compiled = compiler.compile(definition);
     const executor = new EventExecutor(new CommandExecutor(makeRegistry({})));
 
+    await expect(executor.execute(compiled, "draft", "submit", "instance-1", {}, makeContext())).rejects.toThrow(
+      WorkflowError,
+    );
     await expect(executor.execute(compiled, "draft", "submit", "instance-1", {}, makeContext())).rejects.toThrow(
       /guard "isVerified" but no guard registry/,
     );

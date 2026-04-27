@@ -304,6 +304,34 @@ describe("WorkflowModule.forRoot()", () => {
     expect(definitionRegistry.has("guarded-wf")).toBe(true);
   });
 
+  it("throws when both guards and guardRegistry are supplied", () => {
+    const customRegistry = new InMemoryGuardRegistry();
+    customRegistry.register("isVerified", { name: "isVerified", evaluate: () => true });
+
+    const guardedDefinition: WorkflowDefinition = {
+      name: "guarded-conflict-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: { guard: { name: "isVerified" }, targetState: "submitted" },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    expect(() =>
+      WorkflowModule.forRoot({
+        ...defaultOptions(),
+        workflows: [guardedDefinition],
+        commands: [],
+        guards: [{ name: "isVerified", evaluate: () => false }],
+        guardRegistry: customRegistry,
+      }),
+    ).toThrow(/cannot supply both `guards` and `guardRegistry`/);
+  });
+
   it("forwards observers from WorkflowModule.forRoot to WorkflowRuntime", async () => {
     const captured: { state: string }[] = [];
 
