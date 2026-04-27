@@ -44,6 +44,7 @@ Each user action, external trigger, or automated transition becomes an event:
 - Determine `targetState` (where does success lead?). **v1.0.0:** `targetState` is now optional — see _command-only events_ below.
 - Does this event involve commands that can fail? If yes, define `errorState` (or mark non-critical commands as `bestEffort` — see Step 4c).
 - Is this event time-triggered? Define `timeout` with `afterMinutes`/`afterHours`/`afterDays`
+- Is the event gated by a precondition that should run **before** any commands? Define a `guard` (v1.1.0). See Step 4d.
 - Remember: at most **one timeout event per state**
 
 **Event shapes (v1.0.0):** an event must define at least one of `targetState`, `errorState`, or `commands`. Three valid combinations:
@@ -105,7 +106,56 @@ commands: [
 
 Inside the handler, read `ctx.commandMetadata.channel` etc. Each ref's metadata is deep-cloned + frozen, isolated from siblings.
 
-### Step 4d: Conditional Branching
+### Step 4d: Event Guards (v1.1.0)
+
+For preconditions that gate an event **before any commands run**, use a `WorkflowGuard` instead of a routing `errorState`. A guard is a read-only predicate; if it returns `false`, the event short-circuits with `outcome: "guard-rejected"`, no commands execute, no state change.
+
+```ts
+class IsVerifiedGuard implements WorkflowGuard<Customer> {
+  readonly name = "isVerified";
+  evaluate(subject: Customer, ctx: WorkflowExecutionContext): boolean {
+    return subject.verified === true;
+  }
+}
+
+// In the workflow:
+events: {
+  Submit: {
+    guard: { name: "isVerified" },          // ref name resolved against the guard registry
+    targetState: "submitted",
+    commands: [{ name: "createOrder" }],
+  },
+}
+```
+
+**When a guard is the right choice:**
+
+- The decision is read-only ("is this allowed right now?") — no I/O, no DB writes
+- Rejection is normal business behavior (the caller can try again later or pick a different event)
+- You want to short-circuit **before** any side effects run
+- The same logic applies to multiple events (define once, reference from many)
+
+**Choose `errorState` instead when** the failure represents a fault to capture, the workflow needs an alternate path with full command results recorded, or the decision depends on side-effecting work (an external check, a DB lookup that can't be precomputed into context).
+
+**Per-event metadata.** Like commands, a guard ref can carry metadata that reaches the implementation through `ctx.commandMetadata` (deep-cloned + frozen). Use this so one `WorkflowGuard` implementation can serve many call sites:
+
+```ts
+events: {
+  ApplyDiscount: { guard: { name: "minTier", metadata: { minTier: "gold" } }, /* ... */ },
+  Refund:        { guard: { name: "minTier", metadata: { minTier: "silver" } }, /* ... */ },
+}
+```
+
+**Critical constraints (the runtime enforces these):**
+
+- The guard receives a `deepFreeze`d clone of `ctx.context`. Any mutation throws under strict mode.
+- Guards run inside the per-event transaction. Do not call external services or write to DBs from a guard — non-idempotent I/O will repeat on timeout sweeps.
+- `errorState` does NOT catch guard rejections. They are not faults.
+- The guard ref name (`eventDef.guard.name`) is what appears in `WorkflowExecutionResult.rejectedBy` and the history `rejected_by` column — definitions are the source of truth.
+
+**Timeout interaction.** When a guard rejects a timeout-driven event, the runtime additionally clears `expiresAt` so the next sweep won't re-pick the instance. The rejection counts toward `ProcessExpiredWorkflowsResult.rejected`, not `processed`.
+
+### Step 4e: Conditional Branching
 
 duraflows doesn't have a native "if/else" transition from a single command result. Use these patterns:
 
@@ -223,6 +273,7 @@ WorkflowModule.forRoot({
   workflows: [myWorkflow],
   persistence: pgWorkflowProviders(pool),
   observers: [auditObserver], // v1.0.0: top-level for forRoot only
+  guards: [new IsVerifiedGuard()], // v1.1.0: array form composes an InMemoryGuardRegistry; OR pass guardRegistry (mutually exclusive)
 });
 ```
 
@@ -235,6 +286,7 @@ WorkflowModule.forRootAsync<[pg.Pool, AuditObserver]>({
     workflows: [myWorkflow],
     persistence: pgWorkflowProviders(pool),
     observers: [audit], // v1.0.0: observers go INSIDE useFactory return value
+    guards: [new IsVerifiedGuard()], // v1.1.0; or guardRegistry — never both
     onObserverError: (err, obs, evt) => logger.warn(`${obs.name} failed: ${err}`),
   }),
   inject: [PG_POOL, AuditObserver],
@@ -244,9 +296,13 @@ WorkflowModule.forRootAsync<[pg.Pool, AuditObserver]>({
 **Standalone:**
 
 ```ts
+const guardRegistry = new InMemoryGuardRegistry(); // v1.1.0: only required if any event uses a guard
+guardRegistry.register("isVerified", new IsVerifiedGuard());
+
 const runtime = new WorkflowRuntime({
   definitionRegistry,
   commandRegistry,
+  guardRegistry, // omit if no events declare a guard
   ...pgWorkflowProviders(pool),
   clock: { now: () => new Date() },
   observers: [auditObserver],
@@ -290,27 +346,31 @@ Observers fire **post-commit, at-most-once, sequential, error-contained**. They 
 
 ## Requirement-to-Primitive Mapping
 
-| User Says                                                                | duraflows Primitive                                                                                   |
-| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| "when X happens"                                                         | Event on a state                                                                                      |
-| "then do Y"                                                              | Command in event's `commands` list                                                                    |
-| "if Y fails, go to Z"                                                    | `errorState` on the event                                                                             |
-| "wait for X"                                                             | State with events but no `onEnter`                                                                    |
-| "automatically do X when entering state"                                 | `onEnter` with commands                                                                               |
-| "if nothing happens in N hours/days"                                     | Timeout event: `timeout: { afterHours: N }`                                                           |
-| "retry up to N times"                                                    | `errorState` -> state with Retry event, `retryCount` in context                                       |
-| "do X, then Y, then Z automatically"                                     | onEnter chain: gateway1 -> gateway2 -> gateway3                                                       |
-| "if any step fails, undo previous steps"                                 | Saga: error states with compensation onEnter chains; mark cancel/rollback commands `bestEffort: true` |
-| "needs human approval"                                                   | Waiting state with Approve/Reject events                                                              |
-| "escalate after N hours"                                                 | Timeout event -> escalated state                                                                      |
-| "track who did it"                                                       | `triggerMetadata: { actor: userId }` (stored in history)                                              |
-| "set status to X in this state"                                          | `context: { status: "X" }` on state definition                                                        |
-| "remember the result for later"                                          | Command writes to `ctx.context`                                                                       |
-| "identify by order ID"                                                   | `metadata: { orderId }` at creation (immutable)                                                       |
-| "send a notification but don't fail the order if email is down"          | `bestEffort: true` on the notification command (v1.0.0)                                               |
-| "let an operator add a note without changing state"                      | Command-only event — `commands` only, no `targetState` (v1.0.0)                                       |
-| "use the same handler with different parameters at different call sites" | Per-`WorkflowCommandRef.metadata`, read via `ctx.commandMetadata` (v1.0.0)                            |
-| "log/audit every state transition"                                       | Register a `WorkflowObserver` (v1.0.0) — post-commit, at-most-once                                    |
+| User Says                                                                 | duraflows Primitive                                                                                         |
+| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| "when X happens"                                                          | Event on a state                                                                                            |
+| "then do Y"                                                               | Command in event's `commands` list                                                                          |
+| "if Y fails, go to Z"                                                     | `errorState` on the event                                                                                   |
+| "wait for X"                                                              | State with events but no `onEnter`                                                                          |
+| "automatically do X when entering state"                                  | `onEnter` with commands                                                                                     |
+| "if nothing happens in N hours/days"                                      | Timeout event: `timeout: { afterHours: N }`                                                                 |
+| "retry up to N times"                                                     | `errorState` -> state with Retry event, `retryCount` in context                                             |
+| "do X, then Y, then Z automatically"                                      | onEnter chain: gateway1 -> gateway2 -> gateway3                                                             |
+| "if any step fails, undo previous steps"                                  | Saga: error states with compensation onEnter chains; mark cancel/rollback commands `bestEffort: true`       |
+| "needs human approval"                                                    | Waiting state with Approve/Reject events                                                                    |
+| "escalate after N hours"                                                  | Timeout event -> escalated state                                                                            |
+| "track who did it"                                                        | `triggerMetadata: { actor: userId }` (stored in history)                                                    |
+| "set status to X in this state"                                           | `context: { status: "X" }` on state definition                                                              |
+| "remember the result for later"                                           | Command writes to `ctx.context`                                                                             |
+| "identify by order ID"                                                    | `metadata: { orderId }` at creation (immutable)                                                             |
+| "send a notification but don't fail the order if email is down"           | `bestEffort: true` on the notification command (v1.0.0)                                                     |
+| "let an operator add a note without changing state"                       | Command-only event — `commands` only, no `targetState` (v1.0.0)                                             |
+| "use the same handler with different parameters at different call sites"  | Per-`WorkflowCommandRef.metadata`, read via `ctx.commandMetadata` (v1.0.0)                                  |
+| "log/audit every state transition"                                        | Register a `WorkflowObserver` (v1.0.0) — post-commit, at-most-once                                          |
+| "only allow this event if the user is verified / cart total ≥ N / etc."   | `guard: { name: "..." }` on the event (v1.1.0) — read-only predicate, runs before any commands              |
+| "block the timeout from auto-progressing until X is true"                 | Same event guard; on timeout the runtime additionally clears `expiresAt` to avoid sweep churn (v1.1.0)      |
+| "the same precondition with different thresholds at different call sites" | One `WorkflowGuard` implementation; pass `guard.metadata: { ... }`, read via `ctx.commandMetadata` (v1.1.0) |
+| "the rejection should NOT be treated as an error"                         | Use a `guard` rather than an `errorState` — `errorState` catches command failures only (v1.1.0)             |
 
 ---
 

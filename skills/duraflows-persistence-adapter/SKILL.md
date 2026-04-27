@@ -231,16 +231,17 @@ context: row.context_json as Record<string, unknown>,
 
 ## WorkflowHistoryRecord Fields
 
-| Field                  | Type                                   | Storage Notes                  |
-| ---------------------- | -------------------------------------- | ------------------------------ |
-| `workflowInstanceUuid` | `string`                               | FK to workflow_instances       |
-| `fromState`            | `string \| null`                       | Null for creation records      |
-| `eventName`            | `string`                               | "onEnter" for auto-transitions |
-| `toState`              | `string`                               | Target state                   |
-| `outcome`              | `"success" \| "failure"`               | Constrained string             |
-| `errorMessage`         | `string \| undefined`                  | Optional                       |
-| `commandResults`       | `CommandResult[]`                      | JSON array                     |
-| `triggerMetadata`      | `Record<string, unknown> \| undefined` | JSON object                    |
+| Field                  | Type                                         | Storage Notes                                                                                                                                                          |
+| ---------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflowInstanceUuid` | `string`                                     | FK to workflow_instances                                                                                                                                               |
+| `fromState`            | `string \| null`                             | Null for creation records                                                                                                                                              |
+| `eventName`            | `string`                                     | "onEnter" for auto-transitions                                                                                                                                         |
+| `toState`              | `string`                                     | Target state (== `fromState` for guard-rejected and command-only events)                                                                                               |
+| `outcome`              | `"success" \| "failure" \| "guard-rejected"` | Constrained string. **(v1.1.0)** `"guard-rejected"` was added; CHECK constraint must accept it.                                                                        |
+| `errorMessage`         | `string \| undefined`                        | Optional. Map DB `NULL` → `undefined` on read.                                                                                                                         |
+| `rejectedBy`           | `string \| undefined`                        | **(v1.1.0)** declared `eventDef.guard.name` for guard-rejected rows; `undefined` otherwise. Map `NULL → undefined` on read, the same convention as `errorMessage`.     |
+| `commandResultsJson`   | `CommandResult[]`                            | JSON array. Empty `[]` for guard-rejected rows. (Field name on the public type ends in `Json` — distinct from the runtime's `WorkflowExecutionResult.commandResults`.) |
+| `triggerMetadata`      | `Record<string, unknown> \| undefined`       | JSON object. Optional on the public type — map DB `NULL` → `undefined` on read.                                                                                        |
 
 `append()` must return a string UUID for the created record.
 
@@ -272,8 +273,11 @@ CREATE TABLE workflow_history (
   from_state              text,
   event_name              text NOT NULL,
   to_state                text NOT NULL,
-  outcome                 text NOT NULL CHECK (outcome IN ('success', 'failure')),
+  -- v1.1.0: CHECK extended to allow 'guard-rejected'.
+  outcome                 text NOT NULL CHECK (outcome IN ('success', 'failure', 'guard-rejected')),
   error_message           text,
+  -- v1.1.0: declared eventDef.guard.name for guard-rejected rows; NULL otherwise.
+  rejected_by             text,
   command_results_json    jsonb NOT NULL DEFAULT '[]'::jsonb,
   trigger_metadata_json   jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at              timestamptz NOT NULL DEFAULT now()
@@ -287,6 +291,25 @@ CREATE INDEX workflow_history_instance_created_idx ON workflow_history (workflow
 ```
 
 Adapt column types for your database (e.g., MySQL uses `JSON` instead of `JSONB`, `DATETIME` instead of `TIMESTAMPTZ`).
+
+### v1.1.0 — Adding event guards to an existing schema
+
+If you're upgrading an existing v1.0.x adapter to v1.1.0, you need two changes to `workflow_history`:
+
+```sql
+-- 1. Drop the old CHECK constraint and add the extended one
+ALTER TABLE workflow_history DROP CONSTRAINT workflow_history_outcome_check;
+ALTER TABLE workflow_history
+  ADD CONSTRAINT workflow_history_outcome_check
+  CHECK (outcome IN ('success', 'failure', 'guard-rejected'));
+
+-- 2. Add the rejected_by column (NULL for all pre-v1.1.0 rows)
+ALTER TABLE workflow_history ADD COLUMN rejected_by text;
+```
+
+`@duraflows/pg` ships this as `003_event_guards.sql`. If you wrap a different ORM, mirror the two operations in the migration tool of your choice. There's no backfill — pre-v1.1.0 rows keep `rejected_by IS NULL`, which maps cleanly to `rejectedBy: undefined` on read.
+
+`workflow_instances` has no schema changes for v1.1.0.
 
 ---
 
@@ -353,6 +376,9 @@ WorkflowModule.forRootAsync({
 - [ ] JSON fields (`context`, `metadata`, `commandResults`, `triggerMetadata`) survive round-trips
 - [ ] `null` handling for `expiresAt`, `fromState`, `errorMessage`
 - [ ] **(v1.0.0)** `runInstanceStoreConformance` from `@duraflows/core/testing` passes against your adapter
+- [ ] **(v1.1.0)** `workflow_history.outcome` CHECK constraint accepts `'guard-rejected'` (in addition to `'success'`/`'failure'`)
+- [ ] **(v1.1.0)** `rejected_by` column exists on `workflow_history`; persisted on `append()` for guard-rejected rows; mapped `NULL → undefined` on read (same convention as `errorMessage`)
+- [ ] **(v1.1.0)** Guard-rejected rows are persisted with `commandResults: []` and `toState === fromState` — verify your write path doesn't strip or rewrite either
 
 ---
 

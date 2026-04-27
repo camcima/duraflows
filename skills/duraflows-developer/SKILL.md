@@ -64,6 +64,7 @@ Events trigger state transitions. Each event can have:
 - **`targetState`** (optional, v1.0.0): State to transition to on success. Omit for command-only events that run side effects without changing state.
 - **`errorState`** (optional): State to transition to on command failure
 - **`commands`**: Ordered list of `{ name: string, metadata? }` command references, executed sequentially (fail-fast for mandatory commands; bestEffort commands continue on failure)
+- **`guard`** (optional, v1.1.0): `{ name: string, metadata? }` reference to a registered `WorkflowGuard`. Evaluated **before** any commands. If it returns `false`, the event short-circuits with `outcome: "guard-rejected"`, no commands run, no state change. See [Guards](#guards-v110)
 - **`timeout`**: Auto-trigger after duration. Fields `afterMinutes`, `afterHours`, `afterDays` are **additive**
 - **`metadata`**: Arbitrary event metadata
 
@@ -77,13 +78,85 @@ Events trigger state transitions. Each event can have:
 
 **Outcome rules** (mandatory commands; see [bestEffort](#besteffort-commands) for the relaxed semantics):
 
-| Scenario                                                             | Result                                                    |
-| -------------------------------------------------------------------- | --------------------------------------------------------- |
-| No commands                                                          | `success` -> `targetState` (or stays if no `targetState`) |
-| All commands return `{ ok: true }`                                   | `success` -> `targetState` (or stays)                     |
-| Any mandatory command returns `{ ok: false }` + `errorState` defined | `failure` -> `errorState`                                 |
-| Any mandatory command returns `{ ok: false }` + no `errorState`      | Throws `CommandFailureError`, no transition               |
-| Any mandatory command throws                                         | Exception propagates, transaction rolls back              |
+| Scenario                                                             | Result                                                                                            |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Guard returns `false` (v1.1.0)                                       | `guard-rejected`, stays in current state, no commands run, history row appended with `rejectedBy` |
+| Guard throws (v1.1.0)                                                | Exception propagates, transaction rolls back (treat as infrastructure error)                      |
+| No commands                                                          | `success` -> `targetState` (or stays if no `targetState`)                                         |
+| All commands return `{ ok: true }`                                   | `success` -> `targetState` (or stays)                                                             |
+| Any mandatory command returns `{ ok: false }` + `errorState` defined | `failure` -> `errorState`                                                                         |
+| Any mandatory command returns `{ ok: false }` + no `errorState`      | Throws `CommandFailureError`, no transition                                                       |
+| Any mandatory command throws                                         | Exception propagates, transaction rolls back                                                      |
+
+**v1.1.0:** `errorState` catches **command** failures only — it does not catch guard rejections. Guard rejection means "this event is not allowed right now," which is a meaningful business signal (let the caller retry later or pick a different event) — not a fault to recover from.
+
+### Guards (v1.1.0)
+
+Per-event preconditions. A guard is a **read-only** predicate that decides whether an event is allowed to fire **before** any commands run. Use guards for:
+
+- "Is the user verified?" → block events that require KYC
+- "Is the cart total ≥ minimum?" → block submission below threshold
+- "Is the deadline reached?" + a timeout → only auto-progress past business hours
+
+```ts
+import type { WorkflowGuard, WorkflowExecutionContext } from "@duraflows/core";
+
+class IsVerifiedGuard implements WorkflowGuard<Customer> {
+  readonly name = "isVerified";
+  evaluate(subject: Customer, ctx: WorkflowExecutionContext): boolean {
+    return subject.verified === true;
+  }
+}
+```
+
+Then reference it from a workflow event:
+
+```ts
+events: {
+  Submit: {
+    guard: { name: "isVerified" },          // ref name resolved against the guard registry
+    targetState: "submitted",
+    commands: [{ name: "createOrder" }],
+  },
+}
+```
+
+**Semantics:**
+
+- **Pure / read-only.** The runtime hands the guard a `deepFreeze`d clone of `ctx.context`. Mutations throw under strict mode rather than silently leaking into persisted state. Side effects (DB writes, external calls) belong in commands, which run **after** the guard passes.
+- **Inside the same transaction.** Guard evaluation, the rejection-or-pass decision, and the resulting history append all run inside the per-event transaction.
+- **Re-evaluable.** A timeout sweep retries an instance the next tick if the deadline isn't cleared. Anything non-idempotent inside a guard would repeat without compensation.
+- **Not catchable by `errorState`.** A guard rejection is meaningful business state ("event not allowed right now"), not a fault.
+- **Timeout interaction.** When a guard rejects a timeout-driven event, the runtime additionally clears `expiresAt` so the sweep won't re-pick the instance. The rejection counts toward `ProcessExpiredWorkflowsResult.rejected`, not `processed`.
+
+**Per-event metadata.** A `guard.metadata` object reaches the implementation through `ctx.commandMetadata` (deep-cloned + frozen for the evaluation), the same channel commands use. This lets one guard implementation serve many events with different parameters:
+
+```ts
+// In the workflow:
+events: {
+  ApplyDiscount: { guard: { name: "minTier", metadata: { minTier: "gold" } }, /* ... */ },
+  Refund:        { guard: { name: "minTier", metadata: { minTier: "silver" } }, /* ... */ },
+}
+
+// In the guard:
+const minTier = ctx.commandMetadata.minTier as Tier;
+return tierAtLeast(subject.tier, minTier);
+```
+
+**Ref names vs implementation names.** The runtime resolves the registry by `eventDef.guard.name` and reports that ref name in `WorkflowExecutionResult.rejectedBy`. With aliasing custom registries, the ref name and the registered guard's `.name` property can diverge — definitions are the source of truth. Tests asserting on `rejectedBy` should match the **ref name**.
+
+**Registries.** A built-in `InMemoryGuardRegistry` is provided. The NestJS module composes a registry from a `guards: WorkflowGuard[]` option, or accepts a prebuilt `guardRegistry: WorkflowGuardRegistry` for DI-backed or lazy-loading registries. The two options are mutually exclusive — passing both throws synchronously. When a custom registry is used, the validator can't enumerate names, so `eventDef.guard.name` refs are checked **at first use** and surface as `WorkflowError("Guard \"<name>\" not found in registry")` rather than at startup.
+
+**Guard vs `errorState`.** The choice is semantic, not just structural:
+
+| Use a guard when                                            | Use `errorState` when                                            |
+| ----------------------------------------------------------- | ---------------------------------------------------------------- |
+| The decision is read-only ("is this allowed?")              | A command can fail and the workflow should branch to recovery    |
+| Rejection is normal business behavior                       | Failure represents a fault to capture and handle                 |
+| The caller may simply try again later or pick another event | The caller is committed and the workflow needs an alternate path |
+| You want to short-circuit before any side effect runs       | You want command outcomes recorded with full context             |
+
+Note: `getAvailableEvents` lists events by state shape — it does **not** evaluate guards. UI code that wants to hide events whose guard would reject must call the guard itself or expose a separate predicate; the runtime won't filter the list for you.
 
 ### Commands
 
@@ -317,6 +390,7 @@ import { pgWorkflowProviders } from "@duraflows/pg";
 WorkflowModule.forRoot({
   workflows: [orderWorkflow],
   commands: [{ name: "chargePayment", useClass: ChargePaymentCommand }],
+  guards: [new IsVerifiedGuard()], // v1.1.0: built-in guards composed into an InMemoryGuardRegistry
   persistence: pgWorkflowProviders(pool),
   enableControllers: true, // optional REST endpoints
 });
@@ -334,6 +408,7 @@ WorkflowModule.forRootAsync<[ConfigService, AuditService]>({
     workflows: [orderWorkflow],
     persistence: pgWorkflowProviders(new Pool({ connectionString: config.get("DATABASE_URL") })),
     observers: [{ name: "audit", onEnter: (e) => audit.record(e) }],
+    guards: [new IsVerifiedGuard()], // v1.1.0; or pass a prebuilt guardRegistry instead (mutually exclusive)
     onObserverError: (error, observer, event) => {
       logger.warn(`Observer "${observer.name}" failed for ${event.instanceUuid}: ${String(error)}`);
     },
@@ -378,7 +453,12 @@ export class ChargePaymentCommand implements WorkflowCommandInterface {
 ### Standalone (no framework)
 
 ```ts
-import { WorkflowRuntime, InMemoryDefinitionRegistry, InMemoryCommandRegistry } from "@duraflows/core";
+import {
+  WorkflowRuntime,
+  InMemoryDefinitionRegistry,
+  InMemoryCommandRegistry,
+  InMemoryGuardRegistry, // v1.1.0
+} from "@duraflows/core";
 import { pgWorkflowProviders } from "@duraflows/pg";
 
 const persistence = pgWorkflowProviders(pool);
@@ -388,9 +468,14 @@ definitionRegistry.register(orderWorkflow);
 const commandRegistry = new InMemoryCommandRegistry();
 commandRegistry.register("chargePayment", new ChargePaymentCommand(gateway));
 
+// v1.1.0: only required if any definition uses an event guard
+const guardRegistry = new InMemoryGuardRegistry();
+guardRegistry.register("isVerified", new IsVerifiedGuard());
+
 const runtime = new WorkflowRuntime({
   definitionRegistry,
   commandRegistry,
+  guardRegistry, // omit if no events declare a guard
   ...persistence,
   clock: { now: () => new Date() },
 });
@@ -446,19 +531,19 @@ async handleTimeouts() {
 await runtime.processExpiredWorkflows({ limit: 100 });
 ```
 
-Returns `{ processed: number, failed: Array<{ uuid, error }> }`.
+Returns `{ processed: number, rejected: number (v1.1.0), failed: Array<{ uuid, error }> }`. v1.1.0: a timeout-driven event whose guard returns `false` is counted as `rejected` (not `processed`); the runtime clears `expiresAt` so the next sweep won't re-pick the instance until something else updates the deadline.
 
 ---
 
 ## Error Hierarchy
 
-| Error                       | When Thrown                                                          |
-| --------------------------- | -------------------------------------------------------------------- |
-| `WorkflowError`             | Instance not found, optimistic lock failure, command not in registry |
-| `WorkflowDefinitionError`   | Invalid/duplicate definition, unknown workflow name                  |
-| `InvalidEventError`         | Event not available on current state                                 |
-| `CommandFailureError`       | Command returned `{ ok: false }` with no `errorState` defined        |
-| `OnEnterDepthExceededError` | onEnter chain exceeded `maxOnEnterDepth`                             |
+| Error                       | When Thrown                                                                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WorkflowError`             | Instance not found, optimistic lock failure, command not in registry, **(v1.1.0)** guard ref not in registry                                      |
+| `WorkflowDefinitionError`   | Invalid/duplicate definition, unknown workflow name, **(v1.1.0)** unresolved `guard.name` ref at registration when `knownGuardNames` was supplied |
+| `InvalidEventError`         | Event not available on current state                                                                                                              |
+| `CommandFailureError`       | Command returned `{ ok: false }` with no `errorState` defined (note: guard rejections don't throw — see Outcome rules)                            |
+| `OnEnterDepthExceededError` | onEnter chain exceeded `maxOnEnterDepth`                                                                                                          |
 
 All extend `WorkflowError` which extends `Error`.
 
@@ -473,10 +558,15 @@ All extend `WorkflowError` which extends `Error`.
 - Creating deep onEnter chains without considering the depth limit
 - Calling external APIs without idempotency keys
 - Throwing exceptions for business failures instead of returning `{ ok: false }`
-- Mutating `ctx.metadata` (it's frozen -- writes are silently ignored)
+- Mutating `ctx.metadata` — it's `deepFreeze`d, so under strict mode the assignment throws `TypeError`. ESM source files run in strict mode by default, so in practice you get a runtime error, not a silent no-op. Write through `ctx.context` instead.
 - (v1.0.0) Catching errors and returning `{ ok: true }` from a notification/metric/compensation command — use `bestEffort = true` instead, so the failure is recorded honestly without aborting the chain
 - (v1.0.0) Doing business-critical work in an observer — observers are post-commit and at-most-once; use a workflow command if the work must run inside the transaction or must retry
 - (v1.0.0) Putting `observers` at the top level of `WorkflowModule.forRootAsync` — it was removed; return them from `useFactory` inside `WorkflowModuleFactoryConfig`
+- (v1.1.0) Mutating `ctx.context` from inside a `WorkflowGuard.evaluate` — the runtime hands you a `deepFreeze`d clone; mutations throw under strict mode. Move side effects into a command that runs after the guard passes
+- (v1.1.0) Calling external services or DBs from a guard — guards re-run on timeout sweeps and inside the same transaction; non-idempotent I/O will repeat. Compute the predicate from `subject` + `ctx.context` + `ctx.commandMetadata` only
+- (v1.1.0) Routing a guard rejection to `errorState` — `errorState` catches **command** failures only. A guard rejection means "not allowed right now"; either let the caller try again or model the rejection as an explicit alternate event
+- (v1.1.0) Asserting on a guard implementation's `.name` property in tests of `rejectedBy` — the runtime reports the **declared `eventDef.guard.name` ref** (definition is the source of truth). With aliasing custom registries the two can diverge
+- (v1.1.0) Passing both `guards` and `guardRegistry` to `WorkflowModule.forRoot[Async]` — they're mutually exclusive and the module throws synchronously if both are present
 
 ---
 

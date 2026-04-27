@@ -167,6 +167,9 @@ beforeEach(() => {
     historyStore,
     transactionRunner: new InMemoryTransactionRunner(),
     clock: { now: () => new Date("2025-06-15T12:00:00.000Z") },
+    // v1.1.0: only required if any registered definition uses an event guard.
+    // Pass an `InMemoryGuardRegistry` (or any `WorkflowGuardRegistry`) here.
+    // guardRegistry,
   });
 });
 ```
@@ -262,6 +265,44 @@ function makeRegistry(commands: Record<string, WorkflowCommand>): WorkflowComman
   };
 }
 ```
+
+### Mock Guards (v1.1.0)
+
+A `WorkflowGuard` is a read-only predicate. Helpers parallel to the command helpers:
+
+```ts
+import type { WorkflowGuard } from "@duraflows/core";
+
+function passingGuard(name = "pass"): WorkflowGuard {
+  return { name, evaluate: () => true };
+}
+
+function rejectingGuard(name = "reject"): WorkflowGuard {
+  return { name, evaluate: () => false };
+}
+
+// Read commandMetadata to drive the predicate from the workflow definition
+function metadataGuard(name = "minTier"): WorkflowGuard {
+  return {
+    name,
+    evaluate: (subject: { tier: string }, ctx) => {
+      const required = ctx.commandMetadata.minTier as string;
+      return tierAtLeast(subject.tier, required);
+    },
+  };
+}
+```
+
+For test isolation, register guards into an `InMemoryGuardRegistry`:
+
+```ts
+import { InMemoryGuardRegistry } from "@duraflows/core";
+
+const guardRegistry = new InMemoryGuardRegistry();
+guardRegistry.register("isVerified", passingGuard("isVerified"));
+```
+
+The guard's `name` property is informational — the runtime resolves the registry by `eventDef.guard.name` (the **ref name** in the definition) and reports that ref name in `result.rejectedBy`. Tests asserting on `rejectedBy` should match the ref name, not the implementation's `name`.
 
 ### Registration
 
@@ -746,6 +787,206 @@ it("command-only events fire observer with fromState === toState", async () => {
 
 ---
 
+## Testing Guards (v1.1.0)
+
+A guard is a read-only predicate that runs **before** any commands. If it returns `false`, the event short-circuits with `outcome: "guard-rejected"`, no commands run, no state change. The patterns below cover the contract: pass-through, rejection short-circuit, history row, the `errorState` boundary, purity, and ref-name-vs-implementation-name divergence — plus timeout interaction and bootstrap validation.
+
+### 1. Pass-through: guard returns true, commands run, state changes
+
+```ts
+it("passes through when guard returns true", async () => {
+  guardRegistry.register("isVerified", passingGuard("isVerified"));
+  commandRegistry.register("createOrder", successCommand({ code: "CREATED" }));
+
+  const result = await runtime.triggerEvent({
+    workflowInstanceUuid: instance.uuid,
+    eventName: "Submit", // event has guard: { name: "isVerified" }
+  });
+
+  expect(result.outcome).toBe("success");
+  expect(result.toState).toBe("submitted");
+  expect(result.rejectedBy).toBeUndefined();
+  expect(result.commandResults).toHaveLength(1);
+});
+```
+
+### 2. Rejection short-circuit: no commands, no state change, rejectedBy set
+
+```ts
+it("short-circuits when guard returns false", async () => {
+  guardRegistry.register("isVerified", rejectingGuard("isVerified"));
+  // Mark createOrder so we can assert it never ran
+  let executed = false;
+  commandRegistry.register("createOrder", {
+    execute: async () => {
+      executed = true;
+      return { ok: true };
+    },
+  });
+
+  const result = await runtime.triggerEvent({
+    workflowInstanceUuid: instance.uuid,
+    eventName: "Submit",
+  });
+
+  expect(result.outcome).toBe("guard-rejected");
+  expect(result.fromState).toBe("draft");
+  expect(result.toState).toBe("draft"); // unchanged
+  expect(result.rejectedBy).toBe("isVerified"); // declared eventDef.guard.name
+  expect(result.commandResults).toEqual([]);
+  expect(executed).toBe(false);
+});
+```
+
+### 3. History row records the rejection
+
+```ts
+it("appends a history row with outcome guard-rejected", async () => {
+  guardRegistry.register("isVerified", rejectingGuard());
+
+  await runtime.triggerEvent({
+    workflowInstanceUuid: instance.uuid,
+    eventName: "Submit",
+  });
+
+  const history = await historyStore.findByInstanceUuid(instance.uuid);
+  // findByInstanceUuid is contracted to return newest-first (created_at DESC),
+  // so the most recent row is at index 0.
+  const latest = history[0];
+  expect(latest).toMatchObject({
+    eventName: "Submit",
+    fromState: "draft",
+    toState: "draft",
+    outcome: "guard-rejected",
+    rejectedBy: "isVerified", // ref name from the definition
+    commandResultsJson: [], // WorkflowHistoryRecord field name is commandResultsJson
+  });
+});
+```
+
+### 4. errorState does NOT catch guard rejections
+
+This is the boundary that distinguishes a guard from a routing `errorState`. Even when the event has both, a guard rejection bypasses `errorState`:
+
+```ts
+it("guard rejection is not routed to errorState", async () => {
+  // Event has guard: { name: "isVerified" }, errorState: "rejected"
+  guardRegistry.register("isVerified", rejectingGuard());
+
+  const result = await runtime.triggerEvent({
+    workflowInstanceUuid: instance.uuid,
+    eventName: "Submit",
+  });
+
+  expect(result.outcome).toBe("guard-rejected");
+  expect(result.toState).not.toBe("rejected"); // stays in current state
+});
+```
+
+### 5. Guard purity: ctx.context is deep-frozen
+
+The runtime hands the guard a deep-cloned, deep-frozen view of `ctx.context`. Mutations throw under strict mode rather than silently leaking. Pin this so a future refactor can't break the contract:
+
+```ts
+it("guard cannot mutate ctx.context", async () => {
+  let mutationError: unknown;
+  guardRegistry.register("frozenCheck", {
+    name: "frozenCheck",
+    evaluate: (_subject, ctx) => {
+      try {
+        (ctx.context as Record<string, unknown>).injected = "leak";
+      } catch (err) {
+        mutationError = err;
+      }
+      return true; // pass through so we can inspect mutationError
+    },
+  });
+
+  await runtime.triggerEvent({
+    workflowInstanceUuid: instance.uuid,
+    eventName: "CheckPurity",
+  });
+
+  expect(mutationError).toBeInstanceOf(TypeError); // strict-mode write to frozen object
+  const updated = await instanceStore.findByUuid(instance.uuid);
+  expect(updated?.context.injected).toBeUndefined();
+});
+```
+
+### 6. Guard ref-name vs implementation-name divergence
+
+Custom registries can alias — the registered guard's `.name` and the `eventDef.guard.name` ref can diverge. The runtime always reports the **ref name**:
+
+```ts
+it("rejectedBy reports the ref name, not the implementation name", async () => {
+  // Definition: events.Submit.guard = { name: "isCustomerVerified" }
+  guardRegistry.register("isCustomerVerified", {
+    name: "internal-guard-impl-v2", // unrelated
+    evaluate: () => false,
+  });
+
+  const result = await runtime.triggerEvent({
+    workflowInstanceUuid: instance.uuid,
+    eventName: "Submit",
+  });
+
+  expect(result.rejectedBy).toBe("isCustomerVerified"); // ref name wins
+});
+```
+
+### Timeout-Driven Guard Rejection
+
+When a timeout-triggered event has a guard that rejects, the runtime additionally clears `expiresAt` so the next sweep won't re-pick the same instance, and counts the rejection toward `result.rejected` (not `processed`):
+
+```ts
+it("timeout sweep counts rejected separately from processed", async () => {
+  guardRegistry.register("readyToAutoProgress", rejectingGuard());
+
+  // ... create instance, advance clock past timeout deadline ...
+
+  const result = await runtime.processExpiredWorkflows();
+  expect(result.processed).toBe(0);
+  expect(result.rejected).toBe(1); // v1.1.0
+  expect(result.failed).toEqual([]);
+
+  const updated = await instanceStore.findByUuid(instance.uuid);
+  expect(updated?.expiresAt).toBeNull(); // cleared so next sweep skips this row
+  expect(updated?.currentState).toBe(/* unchanged */);
+});
+```
+
+### Bootstrap Validation: knownGuardNames
+
+When using the array-based `guards` option (or registering into `InMemoryGuardRegistry` and passing the resulting names), supply `knownGuardNames` to the validator so unresolved `eventDef.guard.name` refs fail at registration. With a custom registry, validation skips that check (the registry can't be enumerated) and unresolved refs surface at first use as `WorkflowError`:
+
+```ts
+import { WorkflowDefinitionError, WorkflowError } from "@duraflows/core";
+
+it("validator rejects unknown guard refs when knownGuardNames is provided", () => {
+  const registry = new InMemoryDefinitionRegistry({
+    validator: new WorkflowValidator({
+      knownGuardNames: new Set(["isVerified"]),
+    }),
+    compiler: new WorkflowCompiler(),
+  });
+
+  expect(() => registry.register(workflowReferencingMissingGuard)).toThrow(WorkflowDefinitionError);
+});
+
+it("custom registry: unresolved guard surfaces at first use", async () => {
+  // No knownGuardNames passed — registration succeeds
+  // Empty guard registry (no "isVerified" registered)
+  await expect(
+    runtime.triggerEvent({
+      workflowInstanceUuid: instance.uuid,
+      eventName: "Submit",
+    }),
+  ).rejects.toThrow(WorkflowError);
+});
+```
+
+---
+
 ## Adapter Conformance (v1.0.0)
 
 For custom `WorkflowInstanceStore` implementations (Prisma, Drizzle, TypeORM, Kysely, etc.), use the shared conformance suite from `@duraflows/core/testing`:
@@ -869,4 +1110,17 @@ expect(history[0].commandResults[0].code).toBe("CHARGED");
 
 // Assert trigger metadata
 expect(history[0].triggerMetadata?.actor).toBe("user-123");
+
+// v1.1.0 — guard-rejected row.
+// findByInstanceUuid returns rows newest-first (created_at DESC), so the
+// most recent row is at history[0]; locate the guard-rejected one explicitly
+// instead of guessing an index.
+const rejected = history.find((r) => r.outcome === "guard-rejected");
+expect(rejected).toMatchObject({
+  outcome: "guard-rejected",
+  rejectedBy: "isVerified", // ref name; null becomes undefined when read back from PG
+  fromState: "draft",
+  toState: "draft",
+  commandResultsJson: [], // WorkflowHistoryRecord field name (the runtime result uses commandResults)
+});
 ```
