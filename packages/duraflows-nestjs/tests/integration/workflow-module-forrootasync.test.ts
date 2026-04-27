@@ -261,6 +261,40 @@ describe("WorkflowModule.forRootAsync()", () => {
     });
   });
 
+  it("throws when forRootAsync useFactory returns both guards and guardRegistry", async () => {
+    const { InMemoryGuardRegistry } = await import("@duraflows/core");
+    const customRegistry = new InMemoryGuardRegistry();
+    customRegistry.register("isVerified", { name: "isVerified", evaluate: () => true });
+
+    const guardedDefinition: WorkflowDefinition = {
+      name: "guarded-async-conflict-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: { guard: { name: "isVerified" }, targetState: "submitted" },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    await expect(
+      Test.createTestingModule({
+        imports: [
+          WorkflowModule.forRootAsync({
+            useFactory: () => ({
+              workflows: [guardedDefinition],
+              persistence: stubPersistence,
+              guards: [{ name: "isVerified", evaluate: () => false }],
+              guardRegistry: customRegistry,
+            }),
+          }),
+        ],
+      }).compile(),
+    ).rejects.toThrow(/cannot supply both `guards` and `guardRegistry`/);
+  });
+
   it("accepts guards via the async factory config", async () => {
     const guards: WorkflowGuard[] = [{ name: "isVerified", evaluate: () => true }];
 
