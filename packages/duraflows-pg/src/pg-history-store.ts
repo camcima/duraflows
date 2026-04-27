@@ -54,7 +54,7 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
       toState: row.to_state as string,
       outcome: row.outcome as "success" | "failure" | "guard-rejected",
       rejectedBy: (row.rejected_by as string | null) ?? undefined,
-      errorMessage: row.error_message as string | undefined,
+      errorMessage: (row.error_message as string | null) ?? undefined,
       commandResultsJson: row.command_results_json as WorkflowHistoryRecord["commandResultsJson"],
       triggerMetadata: row.trigger_metadata_json as Record<string, unknown> | undefined,
     }));

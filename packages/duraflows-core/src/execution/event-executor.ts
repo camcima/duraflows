@@ -58,7 +58,7 @@ export class EventExecutor {
           fromState,
           toState: fromState,
           commandResults: [],
-          rejectedBy: guard.name,
+          rejectedBy: eventDef.guard.name,
         };
       }
     }

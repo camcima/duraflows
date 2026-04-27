@@ -186,5 +186,19 @@ describe("PgWorkflowHistoryStore", () => {
 
       expect(records[0].rejectedBy).toBeUndefined();
     });
+
+    it("maps error_message as undefined (not null) when the column is null", async () => {
+      // Defends WorkflowHistoryRecord.errorMessage type (string | undefined) against
+      // a Postgres NULL leaking through as JS `null`.
+      const pool = createMockPool({
+        rows: [{ ...sampleRow, error_message: null }],
+      });
+      const store = new PgWorkflowHistoryStore(pool);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+
+      expect(records[0].errorMessage).toBeUndefined();
+      expect(records[0].errorMessage).not.toBeNull();
+    });
   });
 });

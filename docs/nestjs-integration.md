@@ -293,7 +293,9 @@ WorkflowModule.forRoot({
 });
 ```
 
-Or supply a prebuilt registry via `guardRegistry`. Guard names referenced from definitions are validated against this set at module bootstrap; an unresolved ref fails registration with `WorkflowDefinitionError`.
+Or supply a prebuilt registry via `guardRegistry`.
+
+> **Note on bootstrap validation.** When you use the `guards` array, guard names referenced from definitions are validated at module bootstrap and an unresolved ref fails registration with `WorkflowDefinitionError`. When you supply your own `guardRegistry` instead, this bootstrap check is skipped — the runtime cannot enumerate names from a custom registry — and unresolved refs surface only when the event fires (as a `WorkflowError`). If you need bootstrap-time validation with a custom registry, use the `guards` array form, or resolve refs yourself before module setup.
 
 ## WorkflowCommandRegistration
 

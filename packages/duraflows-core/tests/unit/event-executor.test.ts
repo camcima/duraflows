@@ -379,6 +379,38 @@ describe("EventExecutor", () => {
     expect(result.rejectedBy).toBe("isVerified");
   });
 
+  it("reports rejectedBy as the declared event-ref name, not the registered guard's own name property", async () => {
+    // Defends against custom registries that store a guard under an alias key.
+    // History/results should always cite the name the workflow definition uses.
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              guard: { name: "submitterIsVerified" },
+              targetState: "submitted",
+            },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    // Registry resolves "submitterIsVerified" to a guard whose internal `name` is different.
+    const guardRegistry = makeGuardRegistry({
+      submitterIsVerified: { name: "internal-impl-id", evaluate: () => false },
+    });
+    const executor = new EventExecutor(new CommandExecutor(makeRegistry({})), guardRegistry);
+
+    const result = await executor.execute(compiled, "draft", "submit", "instance-1", {}, makeContext());
+
+    expect(result.outcome).toBe("guard-rejected");
+    expect(result.rejectedBy).toBe("submitterIsVerified");
+  });
+
   it("propagates errors thrown by the guard", async () => {
     const definition: WorkflowDefinition = {
       name: "guarded-wf",
