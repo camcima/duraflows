@@ -209,20 +209,22 @@ async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<Pro
 ```ts
 interface ProcessExpiredWorkflowsResult {
   processed: number;
+  rejected: number;
   failed: Array<{ uuid: string; error: string }>;
 }
 ```
 
-| Property    | Type                                     | Description                                                |
-| ----------- | ---------------------------------------- | ---------------------------------------------------------- |
-| `processed` | `number`                                 | Number of successfully processed instances                 |
-| `failed`    | `Array<{ uuid: string; error: string }>` | Instances that failed, with their UUIDs and error messages |
+| Property    | Type                                     | Description                                                                              |
+| ----------- | ---------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `processed` | `number`                                 | Number of instances whose timeout event transitioned successfully                        |
+| `rejected`  | `number`                                 | Number of instances whose timeout event was short-circuited by a guard returning `false` |
+| `failed`    | `Array<{ uuid: string; error: string }>` | Instances that failed, with their UUIDs and error messages                               |
 
 **Example:**
 
 ```ts
 const result = await runtime.processExpiredWorkflows({ limit: 50 });
-console.log(`Processed ${result.processed} expired workflows`);
+console.log(`Processed ${result.processed}, guard-rejected ${result.rejected}`);
 if (result.failed.length > 0) {
   console.warn(`Failed: ${result.failed.map((f) => f.uuid).join(", ")}`);
 }
