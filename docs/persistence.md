@@ -116,6 +116,10 @@ const { up, down } = generateMigrationSql({ uuidStrategy: "uuidv7" });
 
 A ready-made dbmate migration using `gen_random_uuid()` is also shipped at `sql/dbmate/001_workflow_core.sql`.
 
+### Guard rejections
+
+`workflow_history.outcome` admits a third value `'guard-rejected'`, and a nullable `rejected_by text` column carries the name of the guard that blocked the event. Migration `003_event_guards.sql` (dbmate) extends the CHECK constraint and adds the column. Fresh installs via `generateMigrationSql()` already include both.
+
 ### pgWorkflowProviders()
 
 The simplest way to use the pg adapter:

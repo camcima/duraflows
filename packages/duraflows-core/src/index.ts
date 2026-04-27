@@ -5,12 +5,14 @@ export type {
   WorkflowEventDefinition,
   WorkflowOnEnterDefinition,
   WorkflowCommandRef,
+  WorkflowGuardRef,
   WorkflowTimeoutDefinition,
 } from "./types/definition.js";
 
 // Types — Runtime
 export type {
   WorkflowCommand,
+  WorkflowGuard,
   CommandResult,
   WorkflowExecutionContext,
   WorkflowInstance,
@@ -47,6 +49,8 @@ export type { WorkflowDefinitionRegistry, InMemoryDefinitionRegistryOptions } fr
 export { InMemoryDefinitionRegistry } from "./registry/definition-registry.js";
 export type { WorkflowCommandRegistry } from "./registry/command-registry.js";
 export { InMemoryCommandRegistry } from "./registry/command-registry.js";
+export type { WorkflowGuardRegistry } from "./registry/guard-registry.js";
+export { InMemoryGuardRegistry } from "./registry/guard-registry.js";
 
 // Validation
 export { WorkflowValidator } from "./validation/workflow-validator.js";

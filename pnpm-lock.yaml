@@ -65,8 +65,8 @@ importers:
   packages/duraflows-kysely:
     dependencies:
       '@duraflows/core':
-        specifier: ^1.0.0
-        version: 1.0.0
+        specifier: workspace:^
+        version: link:../duraflows-core
       kysely:
         specifier: ^0.28.16
         version: 0.28.16
@@ -77,8 +77,8 @@ importers:
   packages/duraflows-nestjs:
     dependencies:
       '@duraflows/core':
-        specifier: ^1.0.0
-        version: 1.0.0
+        specifier: workspace:^
+        version: link:../duraflows-core
       '@nestjs/common':
         specifier: ^11.1.19
         version: 11.1.19(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -105,8 +105,8 @@ importers:
   packages/duraflows-pg:
     dependencies:
       '@duraflows/core':
-        specifier: ^1.0.0
-        version: 1.0.0
+        specifier: workspace:^
+        version: link:../duraflows-core
       pg:
         specifier: ^8.13.0
         version: 8.20.0
@@ -228,9 +228,6 @@ packages:
         optional: true
       conventional-commits-parser:
         optional: true
-
-  '@duraflows/core@1.0.0':
-    resolution: {integrity: sha512-FPtcEj+nWdNjVm3IuXNc8hEClPB98p6w+1eLLACH7/Px5HiFLleBY+ltFWknX8DbVH2lwX9ev8b9o32PvbYu8w==}
 
   '@emnapi/core@1.9.2':
     resolution: {integrity: sha512-UC+ZhH3XtczQYfOlu3lNEkdW/p4dsJ1r/bP7H8+rhao3TTTMO1ATq/4DdIi23XuGoFY+Cz0JmCbdVl0hz9jZcA==}
@@ -2471,10 +2468,6 @@ snapshots:
     optionalDependencies:
       conventional-commits-filter: 5.0.0
       conventional-commits-parser: 6.4.0
-
-  '@duraflows/core@1.0.0':
-    dependencies:
-      '@camcima/finita': 2.2.0
 
   '@emnapi/core@1.9.2':
     dependencies:

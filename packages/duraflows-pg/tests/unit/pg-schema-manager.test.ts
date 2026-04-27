@@ -52,4 +52,14 @@ describe("generateMigrationSql", () => {
     expect(down).toContain("DROP TABLE IF EXISTS workflow_history");
     expect(down).toContain("DROP TABLE IF EXISTS workflow_instances");
   });
+
+  it("includes guard-rejected in the outcome CHECK", () => {
+    const { up } = generateMigrationSql();
+    expect(up).toContain("CHECK (outcome IN ('success', 'failure', 'guard-rejected'))");
+  });
+
+  it("includes a rejected_by column on workflow_history", () => {
+    const { up } = generateMigrationSql();
+    expect(up).toMatch(/rejected_by\s+text\s*,?/i);
+  });
 });

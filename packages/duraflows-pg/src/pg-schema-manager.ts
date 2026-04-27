@@ -45,8 +45,9 @@ CREATE TABLE workflow_history (
   from_state              text,
   event_name              text NOT NULL,
   to_state                text NOT NULL,
-  outcome                 text NOT NULL CHECK (outcome IN ('success', 'failure')),
+  outcome                 text NOT NULL CHECK (outcome IN ('success', 'failure', 'guard-rejected')),
   error_message           text,
+  rejected_by             text,
   command_results_json    jsonb NOT NULL DEFAULT '[]'::jsonb,
   trigger_metadata_json   jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at              timestamptz NOT NULL DEFAULT now()

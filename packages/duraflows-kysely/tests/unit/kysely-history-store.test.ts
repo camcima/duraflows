@@ -103,7 +103,27 @@ describe("KyselyWorkflowHistoryStore", () => {
       const valuesCall = calls.find((c) => c.method === "values");
       const row = valuesCall!.args[0] as Record<string, unknown>;
       expect(row.error_message).toBeNull();
+      expect(row.rejected_by).toBeNull();
       expect(row.trigger_metadata_json).toBe("{}");
+    });
+
+    it("inserts rejected_by for guard-rejected outcome", async () => {
+      const { db, calls, executeTakeFirstOrThrowMock } = createMockDb();
+      executeTakeFirstOrThrowMock.mockResolvedValue({ uuid: "rej-uuid" });
+      const store = new KyselyWorkflowHistoryStore(db);
+
+      const uuid = await store.append({
+        ...sampleEntry,
+        outcome: "guard-rejected",
+        rejectedBy: "isVerified",
+        commandResultsJson: [],
+      });
+
+      expect(uuid).toBe("rej-uuid");
+      const valuesCall = calls.find((c) => c.method === "values");
+      const row = valuesCall!.args[0] as Record<string, unknown>;
+      expect(row.outcome).toBe("guard-rejected");
+      expect(row.rejected_by).toBe("isVerified");
     });
 
     it("uses transaction when available", async () => {
@@ -156,6 +176,26 @@ describe("KyselyWorkflowHistoryStore", () => {
 
       const records = await store.findByInstanceUuid("unknown");
       expect(records).toEqual([]);
+    });
+
+    it("maps rejected_by from a guard-rejected row", async () => {
+      const { db } = createMockDb([
+        { ...sampleRow, outcome: "guard-rejected", rejected_by: "isVerified", command_results_json: [] },
+      ]);
+      const store = new KyselyWorkflowHistoryStore(db);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+      expect(records).toHaveLength(1);
+      expect(records[0].outcome).toBe("guard-rejected");
+      expect(records[0].rejectedBy).toBe("isVerified");
+    });
+
+    it("maps rejected_by as undefined when row.rejected_by is null", async () => {
+      const { db } = createMockDb([{ ...sampleRow, rejected_by: null }]);
+      const store = new KyselyWorkflowHistoryStore(db);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+      expect(records[0].rejectedBy).toBeUndefined();
     });
   });
 });

@@ -295,7 +295,7 @@ The resolved state has a 7-day auto-close timeout. Run the timeout processor per
 ```ts
 // Process up to 100 expired instances
 const result = await runtime.processExpiredWorkflows({ limit: 100 });
-console.log(`Processed ${result.processed} expired workflows`);
+console.log(`Processed ${result.processed}, guard-rejected ${result.rejected}`);
 if (result.failed.length > 0) {
   console.warn(`Failed: ${result.failed.map((f) => f.uuid).join(", ")}`);
 }

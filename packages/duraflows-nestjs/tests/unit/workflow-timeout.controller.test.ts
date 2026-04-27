@@ -4,7 +4,7 @@ import { WorkflowTimeoutController } from "../../src/controllers/workflow-timeou
 
 function createMocks() {
   const timeoutService = {
-    processExpiredWorkflows: vi.fn().mockResolvedValue({ processed: 3, failed: [] }),
+    processExpiredWorkflows: vi.fn().mockResolvedValue({ processed: 3, rejected: 0, failed: [] }),
   };
 
   const controller = new WorkflowTimeoutController(timeoutService as any);

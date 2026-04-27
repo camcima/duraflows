@@ -115,14 +115,16 @@ export class AppModule {}
 
 **WorkflowModuleOptions:**
 
-| Property            | Type                            | Required | Description                                                                             |
-| ------------------- | ------------------------------- | -------- | --------------------------------------------------------------------------------------- |
-| `workflows`         | `WorkflowDefinition[]`          | Yes      | Workflow definitions to register                                                        |
-| `commands`          | `WorkflowCommandRegistration[]` | No       | Explicit command handler registrations. Optional if using `@WorkflowCommand` decorator. |
-| `observers`         | `WorkflowObserver[]`            | No       | Lifecycle observers registered with the runtime. See [Observers](#observers).           |
-| `persistence`       | `WorkflowPersistenceProvider`   | Yes      | Persistence implementations (instance store, history store, transaction runner)         |
-| `clock`             | `WorkflowClock`                 | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                   |
-| `enableControllers` | `boolean`                       | No       | If `true`, registers REST controllers. Defaults to `false`                              |
+| Property            | Type                            | Required | Description                                                                                                    |
+| ------------------- | ------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------- |
+| `workflows`         | `WorkflowDefinition[]`          | Yes      | Workflow definitions to register                                                                               |
+| `commands`          | `WorkflowCommandRegistration[]` | No       | Explicit command handler registrations. Optional if using `@WorkflowCommand` decorator.                        |
+| `guards`            | `WorkflowGuard[]`               | No       | Guard implementations. Registered into an `InMemoryGuardRegistry` at module bootstrap. See [Guards](#guards).  |
+| `guardRegistry`     | `WorkflowGuardRegistry`         | No       | Prebuilt guard registry. Mutually exclusive with `guards`. Use when you need a custom registry implementation. |
+| `observers`         | `WorkflowObserver[]`            | No       | Lifecycle observers registered with the runtime. See [Observers](#observers).                                  |
+| `persistence`       | `WorkflowPersistenceProvider`   | Yes      | Persistence implementations (instance store, history store, transaction runner)                                |
+| `clock`             | `WorkflowClock`                 | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                                          |
+| `enableControllers` | `boolean`                       | No       | If `true`, registers REST controllers. Defaults to `false`                                                     |
 
 ### forRootAsync()
 
@@ -272,6 +274,29 @@ WorkflowModule.forRootAsync({
 });
 ```
 
+## Guards
+
+Pass guard implementations via the `guards` option:
+
+```ts
+WorkflowModule.forRoot({
+  workflows: [
+    /* ... */
+  ],
+  guards: [
+    {
+      name: "submitterIsVerified",
+      evaluate: (_subject, ctx) => ctx.context.submitterVerified === true,
+    },
+  ],
+  persistence,
+});
+```
+
+Or supply a prebuilt registry via `guardRegistry`.
+
+> **Note on bootstrap validation.** When you use the `guards` array, guard names referenced from definitions are validated at module bootstrap and an unresolved ref fails registration with `WorkflowDefinitionError`. When you supply your own `guardRegistry` instead, this bootstrap check is skipped — the runtime cannot enumerate names from a custom registry — and unresolved refs surface only when the event fires (as a `WorkflowError`). If you need bootstrap-time validation with a custom registry, use the `guards` array form, or resolve refs yourself before module setup.
+
 ## WorkflowCommandRegistration
 
 Maps a command name to a NestJS-managed class. Used for explicit registration via the `commands` array. For most cases, prefer the [`@WorkflowCommand` decorator](#workflowcommand-decorator) instead.
@@ -391,9 +416,9 @@ import { WorkflowTimeoutService } from "@duraflows/nestjs";
 
 **Methods:**
 
-| Method                            | Parameters          | Returns                                  | Description                                                |
-| --------------------------------- | ------------------- | ---------------------------------------- | ---------------------------------------------------------- |
-| `processExpiredWorkflows(limit?)` | `number` (optional) | `Promise<ProcessExpiredWorkflowsResult>` | Process expired instances. Returns `{ processed, failed }` |
+| Method                            | Parameters          | Returns                                  | Description                                                          |
+| --------------------------------- | ------------------- | ---------------------------------------- | -------------------------------------------------------------------- |
+| `processExpiredWorkflows(limit?)` | `number` (optional) | `Promise<ProcessExpiredWorkflowsResult>` | Process expired instances. Returns `{ processed, rejected, failed }` |
 
 **Example with @nestjs/schedule:**
 

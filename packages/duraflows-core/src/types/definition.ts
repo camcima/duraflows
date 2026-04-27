@@ -19,6 +19,7 @@ export interface WorkflowOnEnterDefinition {
 }
 
 export interface WorkflowEventDefinition {
+  guard?: WorkflowGuardRef;
   targetState?: string;
   errorState?: string;
   commands?: WorkflowCommandRef[];
@@ -27,6 +28,11 @@ export interface WorkflowEventDefinition {
 }
 
 export interface WorkflowCommandRef {
+  name: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface WorkflowGuardRef {
   name: string;
   metadata?: Record<string, unknown>;
 }

@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
-import type { WorkflowDefinition, CommandResult, WorkflowExecutionContext } from "../../src/index.js";
+import type { WorkflowDefinition, CommandResult, WorkflowExecutionContext, WorkflowGuard } from "../../src/index.js";
 import { WorkflowError, WorkflowDefinitionError } from "../../src/errors/index.js";
 import { InMemoryCommandRegistry } from "../../src/registry/command-registry.js";
 import { InMemoryDefinitionRegistry } from "../../src/registry/definition-registry.js";
+import { InMemoryGuardRegistry } from "../../src/registry/guard-registry.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -11,6 +12,13 @@ import { InMemoryDefinitionRegistry } from "../../src/registry/definition-regist
 const stubCommand = {
   async execute(_subject: unknown, _ctx: WorkflowExecutionContext): Promise<CommandResult> {
     return { ok: true };
+  },
+};
+
+const stubGuard: WorkflowGuard = {
+  name: "stub",
+  evaluate(_subject: unknown, _ctx: WorkflowExecutionContext): boolean {
+    return true;
   },
 };
 
@@ -59,6 +67,44 @@ describe("InMemoryCommandRegistry", () => {
     const registry = new InMemoryCommandRegistry();
     expect(() => registry.get("missing")).toThrow(WorkflowError);
     expect(() => registry.get("missing")).toThrow('Command "missing" not found in registry');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// InMemoryGuardRegistry
+// ---------------------------------------------------------------------------
+
+describe("InMemoryGuardRegistry", () => {
+  it("register and get a guard", () => {
+    const registry = new InMemoryGuardRegistry();
+    registry.register("stub", stubGuard);
+    expect(registry.get("stub")).toBe(stubGuard);
+  });
+
+  it("has() returns true for registered guard", () => {
+    const registry = new InMemoryGuardRegistry();
+    registry.register("stub", stubGuard);
+    expect(registry.has("stub")).toBe(true);
+  });
+
+  it("has() returns false for unregistered guard", () => {
+    const registry = new InMemoryGuardRegistry();
+    expect(registry.has("nope")).toBe(false);
+  });
+
+  it("throws WorkflowError on duplicate registration", () => {
+    const registry = new InMemoryGuardRegistry();
+    registry.register("stub", stubGuard);
+    const act = () => registry.register("stub", stubGuard);
+    expect(act).toThrow(WorkflowError);
+    expect(act).toThrow('Guard "stub" is already registered');
+  });
+
+  it("throws WorkflowError when getting unknown guard", () => {
+    const registry = new InMemoryGuardRegistry();
+    const act = () => registry.get("missing");
+    expect(act).toThrow(WorkflowError);
+    expect(act).toThrow('Guard "missing" not found in registry');
   });
 });
 

@@ -55,7 +55,7 @@ describe("PgWorkflowHistoryStore", () => {
       expect(params[0]).toBe("inst-uuid");
       expect(params[4]).toBe("success");
       // commandResultsJson should be JSON-stringified
-      expect(params[6]).toBe(JSON.stringify([{ ok: true, code: "DONE" }]));
+      expect(params[7]).toBe(JSON.stringify([{ ok: true, code: "DONE" }]));
     });
 
     it("passes null for optional fields when undefined", async () => {
@@ -71,7 +71,7 @@ describe("PgWorkflowHistoryStore", () => {
       await store.append(entry);
       const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1];
       expect(params[5]).toBeNull(); // errorMessage
-      expect(params[7]).toBe("{}"); // triggerMetadata defaults to empty object
+      expect(params[8]).toBe("{}"); // triggerMetadata defaults to empty object
     });
 
     it("uses transaction client when available", async () => {
@@ -84,6 +84,37 @@ describe("PgWorkflowHistoryStore", () => {
       expect(uuid).toBe("tx-uuid");
       expect(txClient.query).toHaveBeenCalledOnce();
       expect(pool.query).not.toHaveBeenCalled();
+    });
+
+    it("inserts rejected_by for guard-rejected outcome", async () => {
+      const pool = createMockPool({ rows: [{ uuid: "rejected-uuid" }] });
+      const store = new PgWorkflowHistoryStore(pool);
+
+      const uuid = await store.append({
+        ...sampleEntry,
+        outcome: "guard-rejected",
+        rejectedBy: "isVerified",
+        commandResultsJson: [],
+      });
+
+      expect(uuid).toBe("rejected-uuid");
+      expect(pool.query).toHaveBeenCalledOnce();
+      const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain("rejected_by");
+      expect(params[4]).toBe("guard-rejected");
+      expect(params[6]).toBe("isVerified");
+      expect(params[7]).toBe("[]"); // commandResultsJson serialized
+    });
+
+    it("passes null for rejected_by on success rows", async () => {
+      const pool = createMockPool({ rows: [{ uuid: "ok-uuid" }] });
+      const store = new PgWorkflowHistoryStore(pool);
+
+      await store.append({ ...sampleEntry, outcome: "success" });
+
+      const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(params[4]).toBe("success");
+      expect(params[6]).toBeNull();
     });
   });
 
@@ -122,6 +153,52 @@ describe("PgWorkflowHistoryStore", () => {
 
       const records = await store.findByInstanceUuid("unknown");
       expect(records).toEqual([]);
+    });
+
+    it("maps rejected_by from a guard-rejected row", async () => {
+      const pool = createMockPool({
+        rows: [
+          {
+            ...sampleRow,
+            outcome: "guard-rejected",
+            rejected_by: "isVerified",
+            command_results_json: [],
+          },
+        ],
+      });
+      const store = new PgWorkflowHistoryStore(pool);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+
+      expect(records).toHaveLength(1);
+      expect(records[0].outcome).toBe("guard-rejected");
+      expect(records[0].rejectedBy).toBe("isVerified");
+      expect(records[0].commandResultsJson).toEqual([]);
+    });
+
+    it("maps rejected_by as undefined when row.rejected_by is null", async () => {
+      const pool = createMockPool({
+        rows: [{ ...sampleRow, rejected_by: null }],
+      });
+      const store = new PgWorkflowHistoryStore(pool);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+
+      expect(records[0].rejectedBy).toBeUndefined();
+    });
+
+    it("maps error_message as undefined (not null) when the column is null", async () => {
+      // Defends WorkflowHistoryRecord.errorMessage type (string | undefined) against
+      // a Postgres NULL leaking through as JS `null`.
+      const pool = createMockPool({
+        rows: [{ ...sampleRow, error_message: null }],
+      });
+      const store = new PgWorkflowHistoryStore(pool);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+
+      expect(records[0].errorMessage).toBeUndefined();
+      expect(records[0].errorMessage).not.toBeNull();
     });
   });
 });

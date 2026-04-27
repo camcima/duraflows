@@ -14,9 +14,9 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
     const result = await client.query(
       `INSERT INTO workflow_history (
         workflow_instance_uuid, from_state, event_name, to_state,
-        outcome, error_message, command_results_json,
+        outcome, error_message, rejected_by, command_results_json,
         trigger_metadata_json
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING uuid`,
       [
         entry.workflowInstanceUuid,
@@ -25,6 +25,7 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
         entry.toState,
         entry.outcome,
         entry.errorMessage ?? null,
+        entry.rejectedBy ?? null,
         JSON.stringify(entry.commandResultsJson),
         JSON.stringify(entry.triggerMetadata ?? {}),
       ],
@@ -51,8 +52,9 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
       fromState: row.from_state as string | null,
       eventName: row.event_name as string,
       toState: row.to_state as string,
-      outcome: row.outcome as "success" | "failure",
-      errorMessage: row.error_message as string | undefined,
+      outcome: row.outcome as "success" | "failure" | "guard-rejected",
+      rejectedBy: (row.rejected_by as string | null) ?? undefined,
+      errorMessage: (row.error_message as string | null) ?? undefined,
       commandResultsJson: row.command_results_json as WorkflowHistoryRecord["commandResultsJson"],
       triggerMetadata: row.trigger_metadata_json as Record<string, unknown> | undefined,
     }));

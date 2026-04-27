@@ -3,17 +3,23 @@ import type { WorkflowEventDefinition } from "../types/definition.js";
 import type { CommandResult, WorkflowExecutionContext } from "../types/runtime.js";
 import type { CompiledWorkflow } from "../compilation/workflow-compiler.js";
 import type { CommandExecutor } from "./command-executor.js";
-import { InvalidEventError, CommandFailureError } from "../errors/index.js";
+import type { WorkflowGuardRegistry } from "../registry/guard-registry.js";
+import { InvalidEventError, CommandFailureError, WorkflowError } from "../errors/index.js";
+import { deepFreeze } from "../util/deep-freeze.js";
 
 export interface EventExecutionResult {
-  outcome: "success" | "failure";
+  outcome: "success" | "failure" | "guard-rejected";
   fromState: string;
   toState: string;
   commandResults: CommandResult[];
+  rejectedBy?: string;
 }
 
 export class EventExecutor {
-  constructor(private readonly commandExecutor: CommandExecutor) {}
+  constructor(
+    private readonly commandExecutor: CommandExecutor,
+    private readonly guardRegistry?: WorkflowGuardRegistry,
+  ) {}
 
   async execute(
     compiledWorkflow: CompiledWorkflow,
@@ -33,6 +39,34 @@ export class EventExecutor {
     const eventDef: WorkflowEventDefinition = stateDef.events[eventName];
     const fromState = currentState;
 
+    // Evaluate guard before any side effects.
+    if (eventDef.guard) {
+      if (!this.guardRegistry) {
+        throw new WorkflowError(
+          `Event "${eventName}" on state "${currentState}" declares guard "${eventDef.guard.name}" but no guard registry is configured`,
+        );
+      }
+      const guard = this.guardRegistry.get(eventDef.guard.name);
+      // Guards are contractually pure: clone+freeze `context` so an attempted
+      // mutation throws (strict mode) instead of silently leaking into the
+      // persisted instance.context downstream.
+      const guardContext: WorkflowExecutionContext = {
+        ...context,
+        context: deepFreeze(structuredClone(context.context)) as Record<string, unknown>,
+        commandMetadata: deepFreeze(structuredClone(eventDef.guard.metadata ?? {})),
+      };
+      const passed = await guard.evaluate(subject, guardContext);
+      if (!passed) {
+        return {
+          outcome: "guard-rejected",
+          fromState,
+          toState: fromState,
+          commandResults: [],
+          rejectedBy: eventDef.guard.name,
+        };
+      }
+    }
+
     // Execute commands (if any)
     const commands = eventDef.commands ?? [];
     const commandExecResult = await this.commandExecutor.execute(commands, subject, context);
@@ -51,10 +85,8 @@ export class EventExecutor {
     let toState: string;
 
     if (!eventDef.targetState && !eventDef.errorState) {
-      // Command-only event: no state change regardless of outcome.
       toState = fromState;
     } else {
-      // Build finita context and trigger event
       const finitaContext = new Map<string, unknown>();
       finitaContext.set("workflow:eventOutcome", outcome);
 

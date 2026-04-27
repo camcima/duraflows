@@ -10,8 +10,16 @@ import type {
   WorkflowDefinitionRegistry,
   WorkflowObserver,
   ObserverErrorHandler,
+  WorkflowGuard,
+  WorkflowGuardRegistry,
 } from "@duraflows/core";
-import { InMemoryDefinitionRegistry, WorkflowRuntime, WorkflowValidator, WorkflowCompiler } from "@duraflows/core";
+import {
+  InMemoryDefinitionRegistry,
+  WorkflowRuntime,
+  WorkflowValidator,
+  WorkflowCompiler,
+  InMemoryGuardRegistry,
+} from "@duraflows/core";
 import { NestCommandRegistry, type WorkflowCommandRegistration } from "./providers/nest-command-registry.js";
 import { discoverDecoratedCommands, mergeCommandRegistrations } from "./providers/command-discovery.js";
 import {
@@ -22,6 +30,7 @@ import {
   WORKFLOW_DEFINITION_REGISTRY,
   WORKFLOW_TRANSACTION_RUNNER,
   WORKFLOW_CLOCK,
+  WORKFLOW_GUARD_REGISTRY,
 } from "./providers/injection-tokens.js";
 import { WorkflowService } from "./services/workflow.service.js";
 import { WorkflowTimeoutService } from "./services/workflow-timeout.service.js";
@@ -33,6 +42,8 @@ import { WorkflowInstanceController } from "./controllers/workflow-instance.cont
 export interface WorkflowModuleOptions {
   workflows: WorkflowDefinition[];
   commands?: WorkflowCommandRegistration[];
+  guards?: WorkflowGuard[];
+  guardRegistry?: WorkflowGuardRegistry;
   observers?: WorkflowObserver[];
   onObserverError?: ObserverErrorHandler;
   persistence: WorkflowPersistenceProvider;
@@ -44,6 +55,8 @@ export interface WorkflowModuleFactoryConfig {
   workflows: WorkflowDefinition[];
   persistence: WorkflowPersistenceProvider;
   clock?: WorkflowClock;
+  guards?: WorkflowGuard[];
+  guardRegistry?: WorkflowGuardRegistry;
   observers?: WorkflowObserver[];
   onObserverError?: ObserverErrorHandler;
 }
@@ -64,6 +77,7 @@ const EXPORTED_TOKENS = [
   WORKFLOW_HISTORY_STORE,
   WORKFLOW_DEFINITION_REGISTRY,
   WORKFLOW_COMMAND_REGISTRY,
+  WORKFLOW_GUARD_REGISTRY,
   WORKFLOW_TRANSACTION_RUNNER,
   WORKFLOW_CLOCK,
 ];
@@ -71,6 +85,12 @@ const EXPORTED_TOKENS = [
 @Module({})
 export class WorkflowModule {
   static forRoot(options: WorkflowModuleOptions): DynamicModule {
+    if (options.guardRegistry && options.guards && options.guards.length > 0) {
+      throw new Error(
+        "WorkflowModule: cannot supply both `guards` and `guardRegistry` — they are mutually exclusive. Pass guards or a custom registry, not both.",
+      );
+    }
+
     const controllers = options.enableControllers
       ? [WorkflowInstanceController, WorkflowEventController, WorkflowQueryController, WorkflowTimeoutController]
       : [];
@@ -91,13 +111,34 @@ export class WorkflowModule {
         inject: [ModuleRef, DiscoveryService],
       },
       {
+        provide: WORKFLOW_GUARD_REGISTRY,
+        useFactory: () => {
+          if (options.guardRegistry && options.guards && options.guards.length > 0) {
+            throw new Error(
+              "WorkflowModule: cannot supply both `guards` and `guardRegistry` — they are mutually exclusive. Pass guards or a custom registry, not both.",
+            );
+          }
+          if (options.guardRegistry) return options.guardRegistry;
+          const registry = new InMemoryGuardRegistry();
+          for (const guard of options.guards ?? []) {
+            registry.register(guard.name, guard);
+          }
+          return registry;
+        },
+      },
+      {
         provide: WORKFLOW_DEFINITION_REGISTRY,
         useFactory: (commandRegistry: NestCommandRegistry) => {
           const knownCommandNames = commandRegistry.getRegisteredNames();
+          // Validate guard refs only when we own the registry (built-in path).
+          // With a custom guardRegistry we can't enumerate names, so skip;
+          // unresolved refs surface at runtime as WorkflowError.
+          const knownGuardNames =
+            options.guardRegistry !== undefined ? undefined : new Set((options.guards ?? []).map((g) => g.name));
           const registry = new InMemoryDefinitionRegistry({
             validator: new WorkflowValidator(),
             compiler: new WorkflowCompiler(),
-            validationOptions: { knownCommandNames },
+            validationOptions: { knownCommandNames, knownGuardNames },
           });
           for (const workflow of options.workflows) {
             registry.register(workflow);
@@ -127,6 +168,7 @@ export class WorkflowModule {
         useFactory: (
           definitionRegistry: WorkflowDefinitionRegistry,
           commandRegistry: NestCommandRegistry,
+          guardRegistry: WorkflowGuardRegistry,
           instanceStore: WorkflowInstanceStore,
           historyStore: WorkflowHistoryStore,
           transactionRunner: WorkflowTransactionRunner,
@@ -135,6 +177,7 @@ export class WorkflowModule {
           new WorkflowRuntime({
             definitionRegistry,
             commandRegistry,
+            guardRegistry,
             instanceStore,
             historyStore,
             transactionRunner,
@@ -145,6 +188,7 @@ export class WorkflowModule {
         inject: [
           WORKFLOW_DEFINITION_REGISTRY,
           WORKFLOW_COMMAND_REGISTRY,
+          WORKFLOW_GUARD_REGISTRY,
           WORKFLOW_INSTANCE_STORE,
           WORKFLOW_HISTORY_STORE,
           WORKFLOW_TRANSACTION_RUNNER,
@@ -191,13 +235,35 @@ export class WorkflowModule {
         inject: [ModuleRef, DiscoveryService],
       },
       {
+        provide: WORKFLOW_GUARD_REGISTRY,
+        useFactory: (config: WorkflowModuleFactoryConfig) => {
+          if (config.guardRegistry && config.guards && config.guards.length > 0) {
+            throw new Error(
+              "WorkflowModule: cannot supply both `guards` and `guardRegistry` — they are mutually exclusive. Pass guards or a custom registry, not both.",
+            );
+          }
+          if (config.guardRegistry) return config.guardRegistry;
+          const registry = new InMemoryGuardRegistry();
+          for (const guard of config.guards ?? []) {
+            registry.register(guard.name, guard);
+          }
+          return registry;
+        },
+        inject: ["WORKFLOW_MODULE_OPTIONS"],
+      },
+      {
         provide: WORKFLOW_DEFINITION_REGISTRY,
         useFactory: (config: WorkflowModuleFactoryConfig, commandRegistry: NestCommandRegistry) => {
           const knownCommandNames = commandRegistry.getRegisteredNames();
+          // Validate guard refs only when we own the registry (built-in path).
+          // With a custom guardRegistry we can't enumerate names, so skip;
+          // unresolved refs surface at runtime as WorkflowError.
+          const knownGuardNames =
+            config.guardRegistry !== undefined ? undefined : new Set((config.guards ?? []).map((g) => g.name));
           const registry = new InMemoryDefinitionRegistry({
             validator: new WorkflowValidator(),
             compiler: new WorkflowCompiler(),
-            validationOptions: { knownCommandNames },
+            validationOptions: { knownCommandNames, knownGuardNames },
           });
           for (const workflow of config.workflows) {
             registry.register(workflow);
@@ -232,6 +298,7 @@ export class WorkflowModule {
           config: WorkflowModuleFactoryConfig,
           definitionRegistry: WorkflowDefinitionRegistry,
           commandRegistry: NestCommandRegistry,
+          guardRegistry: WorkflowGuardRegistry,
           instanceStore: WorkflowInstanceStore,
           historyStore: WorkflowHistoryStore,
           transactionRunner: WorkflowTransactionRunner,
@@ -240,6 +307,7 @@ export class WorkflowModule {
           new WorkflowRuntime({
             definitionRegistry,
             commandRegistry,
+            guardRegistry,
             instanceStore,
             historyStore,
             transactionRunner,
@@ -251,6 +319,7 @@ export class WorkflowModule {
           "WORKFLOW_MODULE_OPTIONS",
           WORKFLOW_DEFINITION_REGISTRY,
           WORKFLOW_COMMAND_REGISTRY,
+          WORKFLOW_GUARD_REGISTRY,
           WORKFLOW_INSTANCE_STORE,
           WORKFLOW_HISTORY_STORE,
           WORKFLOW_TRANSACTION_RUNNER,
