@@ -36,6 +36,7 @@ import { EventExecutor } from "../execution/event-executor.js";
 import { OnEnterExecutor } from "../execution/on-enter-executor.js";
 import { TimeoutResolver } from "../execution/timeout-resolver.js";
 import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
+import type { WorkflowGuardRegistry } from "../registry/guard-registry.js";
 import { WorkflowError } from "../errors/index.js";
 import { WorkflowHandle } from "./workflow-handle.js";
 import type { WorkflowObserver, StateEnterEvent, ObserverErrorHandler } from "../types/observer.js";
@@ -46,6 +47,7 @@ const DEFAULT_MAX_ON_ENTER_DEPTH = 10;
 export interface WorkflowRuntimeOptions {
   definitionRegistry: WorkflowDefinitionRegistry;
   commandRegistry: WorkflowCommandRegistry;
+  guardRegistry?: WorkflowGuardRegistry;
   instanceStore: WorkflowInstanceStore;
   historyStore: WorkflowHistoryStore;
   transactionRunner: WorkflowTransactionRunner;
@@ -76,7 +78,7 @@ export class WorkflowRuntime {
     this.clock = options.clock;
     this.compiler = new WorkflowCompiler();
     const commandExecutor = new CommandExecutor(options.commandRegistry);
-    this.eventExecutor = new EventExecutor(commandExecutor);
+    this.eventExecutor = new EventExecutor(commandExecutor, options.guardRegistry);
     this.onEnterExecutor = new OnEnterExecutor(commandExecutor);
     this.timeoutResolver = new TimeoutResolver();
     this.maxOnEnterDepth = options.maxOnEnterDepth ?? DEFAULT_MAX_ON_ENTER_DEPTH;
@@ -215,6 +217,29 @@ export class WorkflowRuntime {
       );
 
       const now = this.clock.now();
+
+      if (eventResult.outcome === "guard-rejected") {
+        const lastHistoryUuid = await this.historyStore.append({
+          workflowInstanceUuid: instance.uuid,
+          fromState: eventResult.fromState,
+          eventName: input.eventName,
+          toState: eventResult.toState,
+          outcome: "guard-rejected",
+          rejectedBy: eventResult.rejectedBy,
+          commandResultsJson: [],
+          triggerMetadata: input.triggerMetadata,
+        });
+
+        return {
+          outcome: "guard-rejected",
+          fromState: eventResult.fromState,
+          toState: eventResult.toState,
+          commandResults: [],
+          rejectedBy: eventResult.rejectedBy,
+          historyUuid: lastHistoryUuid,
+        };
+      }
+
       instance.currentState = eventResult.toState;
       instance.version++;
       instance.lastTransitionAt = now;
