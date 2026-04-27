@@ -231,10 +231,10 @@ export class WorkflowRuntime {
         });
 
         return {
-          outcome: "guard-rejected",
+          outcome: "guard-rejected" as const,
           fromState: eventResult.fromState,
           toState: eventResult.toState,
-          commandResults: [],
+          commandResults: [] as CommandResult[],
           rejectedBy: eventResult.rejectedBy,
           historyUuid: lastHistoryUuid,
         };

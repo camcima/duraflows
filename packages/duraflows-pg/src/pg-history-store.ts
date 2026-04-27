@@ -14,9 +14,9 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
     const result = await client.query(
       `INSERT INTO workflow_history (
         workflow_instance_uuid, from_state, event_name, to_state,
-        outcome, error_message, command_results_json,
+        outcome, error_message, rejected_by, command_results_json,
         trigger_metadata_json
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING uuid`,
       [
         entry.workflowInstanceUuid,
@@ -25,6 +25,7 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
         entry.toState,
         entry.outcome,
         entry.errorMessage ?? null,
+        entry.rejectedBy ?? null,
         JSON.stringify(entry.commandResultsJson),
         JSON.stringify(entry.triggerMetadata ?? {}),
       ],
