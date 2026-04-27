@@ -500,4 +500,88 @@ describe("WorkflowValidator", () => {
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
+
+  it("flags an event whose guard ref is not in knownGuardNames", () => {
+    const validator = new WorkflowValidator();
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              guard: { name: "missingGuard" },
+              targetState: "submitted",
+            },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const result = validator.validate(definition, {
+      knownCommandNames: new Set(),
+      knownGuardNames: new Set(),
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual([
+      {
+        path: "states.draft.events.submit.guard",
+        message: 'Guard "missingGuard" is not registered',
+      },
+    ]);
+  });
+
+  it("accepts a guard ref that resolves in knownGuardNames", () => {
+    const validator = new WorkflowValidator();
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              guard: { name: "isVerified" },
+              targetState: "submitted",
+            },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const result = validator.validate(definition, {
+      knownCommandNames: new Set(),
+      knownGuardNames: new Set(["isVerified"]),
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("does not validate guard refs when knownGuardNames is not provided", () => {
+    // Mirrors how command-ref validation works: only enforced when the option is supplied.
+    const validator = new WorkflowValidator();
+    const definition: WorkflowDefinition = {
+      name: "guarded-wf",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              guard: { name: "anyGuard" },
+              targetState: "submitted",
+            },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    const result = validator.validate(definition, {});
+
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
 });

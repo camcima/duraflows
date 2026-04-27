@@ -12,6 +12,7 @@ export interface ValidationResult {
 
 export interface WorkflowValidationOptions {
   knownCommandNames?: Set<string>;
+  knownGuardNames?: Set<string>;
 }
 
 export class WorkflowValidator {
@@ -109,6 +110,15 @@ export class WorkflowValidator {
                 message: `Command "${cmdRef.name}" is not registered`,
               });
             }
+          }
+        }
+
+        if (event.guard && options?.knownGuardNames) {
+          if (!options.knownGuardNames.has(event.guard.name)) {
+            errors.push({
+              path: `${eventPath}.guard`,
+              message: `Guard "${event.guard.name}" is not registered`,
+            });
           }
         }
 
