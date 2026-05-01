@@ -7,13 +7,16 @@ description: "Provides domain expertise for developing durable workflows with @d
 
 ## Architecture
 
-duraflows is a **durable workflow runtime** for TypeScript built on [@camcima/finita](https://github.com/camcima/finita) (FSM engine). Three packages:
+duraflows is a **durable workflow runtime** for TypeScript built on [@camcima/finita](https://github.com/camcima/finita) (FSM engine). Four packages:
 
-| Package             | Purpose                                                    |
-| ------------------- | ---------------------------------------------------------- |
-| `@duraflows/core`   | Framework-agnostic runtime, types, persistence interfaces  |
-| `@duraflows/pg`     | PostgreSQL adapter (SKIP LOCKED, JSONB, row-level locking) |
-| `@duraflows/nestjs` | NestJS module with DI, services, optional REST controllers |
+| Package             | Purpose                                                                                   |
+| ------------------- | ----------------------------------------------------------------------------------------- |
+| `@duraflows/core`   | Framework-agnostic runtime, types, persistence interfaces                                 |
+| `@duraflows/pg`     | PostgreSQL adapter using `pg` (SKIP LOCKED, JSONB, row-level locking)                     |
+| `@duraflows/kysely` | PostgreSQL adapter using Kysely (idiomatic query builder, AsyncLocalStorage transactions) |
+| `@duraflows/nestjs` | NestJS module with DI, services, optional REST controllers                                |
+
+**Compatibility:** duraflows v2.0.0+ requires Node.js `>=20` (carried through from `@camcima/finita` v3). v1.x supports Node 18+. The public WorkflowDefinition surface is unchanged across the v1 → v2 boundary; the v2 bump is an internal Finita upgrade plus the Node floor.
 
 **Important**: duraflows is NOT like Temporal. Commands are intentionally side-effecting -- they call APIs, write to databases, send messages. There is no replay or checkpointing. Durability comes from:
 
@@ -89,6 +92,8 @@ Events trigger state transitions. Each event can have:
 | Any mandatory command throws                                         | Exception propagates, transaction rolls back                                                      |
 
 **v1.1.0:** `errorState` catches **command** failures only — it does not catch guard rejections. Guard rejection means "this event is not allowed right now," which is a meaningful business signal (let the caller retry later or pick a different event) — not a fault to recover from.
+
+**v2.0.0:** when an event's `targetState` and `errorState` point at the **same** state (e.g., a polling shape `poll: { targetState: "active", errorState: "active", commands: [...] }`), the runtime merges the two branches into a single transition. Both outcomes still resolve correctly and the result still distinguishes `outcome: "success"` vs `"failure"` — so history still records what actually happened. This is the right shape for "stay in this state regardless of outcome, but record the result" patterns.
 
 ### Guards (v1.1.0)
 
