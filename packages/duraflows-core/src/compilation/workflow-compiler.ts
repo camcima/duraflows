@@ -42,23 +42,46 @@ export class WorkflowCompiler {
         if (!stateDef.events) continue;
 
         for (const [eventName, eventDef] of Object.entries(stateDef.events)) {
-          if (eventDef.targetState) {
+          const target = eventDef.targetState;
+          const error = eventDef.errorState;
+
+          // When both branches lead to the same state, ProcessBuilder rejects
+          // two transitions with identical (from, event, to) and conflicting
+          // conditions. Register a single transition with a permissive
+          // condition that matches either outcome — the executor still
+          // distinguishes success vs failure for history and error semantics.
+          if (target && error && target === error) {
+            const anyOutcomeCondition = new CallbackCondition(
+              `workflow:any:${stateName}:${eventName}`,
+              (_subject: unknown, context: Map<string, unknown>) => {
+                const outcome = context.get("workflow:eventOutcome");
+                return outcome === "success" || outcome === "failure";
+              },
+            );
+            builder.addTransition(stateName, target, {
+              event: eventName,
+              condition: anyOutcomeCondition,
+            });
+            continue;
+          }
+
+          if (target) {
             const successCondition = new CallbackCondition(
               `workflow:success:${stateName}:${eventName}`,
               (_subject: unknown, context: Map<string, unknown>) => context.get("workflow:eventOutcome") === "success",
             );
-            builder.addTransition(stateName, eventDef.targetState, {
+            builder.addTransition(stateName, target, {
               event: eventName,
               condition: successCondition,
             });
           }
 
-          if (eventDef.errorState) {
+          if (error) {
             const failureCondition = new CallbackCondition(
               `workflow:failure:${stateName}:${eventName}`,
               (_subject: unknown, context: Map<string, unknown>) => context.get("workflow:eventOutcome") === "failure",
             );
-            builder.addTransition(stateName, eventDef.errorState, {
+            builder.addTransition(stateName, error, {
               event: eventName,
               condition: failureCondition,
             });
