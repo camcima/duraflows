@@ -4,7 +4,7 @@ Thanks for your interest in contributing! This guide covers everything you need 
 
 ## Prerequisites
 
-- Node.js 20 or 22
+- Node.js 20+
 - pnpm 10+
 - PostgreSQL 13+ (for running persistence adapter tests)
 
