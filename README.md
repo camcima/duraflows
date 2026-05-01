@@ -11,7 +11,7 @@
 [![npm version](https://img.shields.io/npm/v/@duraflows/core)](https://www.npmjs.com/package/@duraflows/core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7%2B-blue.svg)](https://www.typescriptlang.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-18%20%7C%2020%20%7C%2022-green.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org/)
 [![CodeQL](https://github.com/camcima/duraflows/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/camcima/duraflows/actions/workflows/codeql.yml)
 
 </div>

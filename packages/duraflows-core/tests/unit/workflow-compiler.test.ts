@@ -177,7 +177,7 @@ describe("WorkflowCompiler", () => {
     };
 
     expect(() => compiler.compile(definition)).toThrow(WorkflowDefinitionError);
-    expect(() => compiler.compile(definition)).toThrow(/Target state "nonexistent"/);
+    expect(() => compiler.compile(definition)).toThrow(/unknownTarget.*nonexistent/);
   });
 
   it("throws WorkflowDefinitionError for non-existent error state", () => {
@@ -194,7 +194,7 @@ describe("WorkflowCompiler", () => {
     };
 
     expect(() => compiler.compile(definition)).toThrow(WorkflowDefinitionError);
-    expect(() => compiler.compile(definition)).toThrow(/Error state "nonexistent"/);
+    expect(() => compiler.compile(definition)).toThrow(/unknownTarget.*nonexistent/);
   });
 
   it("registers states only reachable via onEnter in the finita process", () => {
@@ -261,6 +261,56 @@ describe("WorkflowCompiler", () => {
     };
 
     expect(() => compiler.compile(definition)).toThrow(WorkflowDefinitionError);
-    expect(() => compiler.compile(definition)).toThrow(/Initial state "nonexistent" does not exist/);
+    expect(() => compiler.compile(definition)).toThrow(/missingInitialState/);
+  });
+
+  it("translates FinitaError from ProcessBuilder as WorkflowDefinitionError", () => {
+    // Event name with leading whitespace trips v3's invalidEventName validation
+    // inside ProcessBuilder. The compiler must wrap that as WorkflowDefinitionError
+    // so the public error contract stays stable.
+    const definition: WorkflowDefinition = {
+      name: "whitespace-event",
+      initialState: "pending",
+      states: {
+        pending: {
+          events: {
+            " submit": { targetState: "submitted" },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    expect(() => compiler.compile(definition)).toThrow(WorkflowDefinitionError);
+    expect(() => compiler.compile(definition)).toThrow(/submit/);
+  });
+
+  it("merges target/error transitions when both lead to the same state", () => {
+    // Same state for both branches is a valid pattern (e.g., "go to 'done'
+    // regardless of outcome, but record success vs failure in history").
+    // ProcessBuilder rejects duplicate (from, event, to) with conflicting
+    // conditions, so the compiler must collapse the two branches into one
+    // transition with a permissive condition.
+    const definition: WorkflowDefinition = {
+      name: "merged-target",
+      initialState: "pending",
+      states: {
+        pending: {
+          events: {
+            finalise: { targetState: "done", errorState: "done" },
+          },
+        },
+        done: {},
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    expect(compiled.process.hasState("done")).toBe(true);
+
+    // Confirm exactly one transition was registered for the event (not two).
+    const pending = compiled.process.getState("pending");
+    const transitions = Array.from(pending.getTransitions()).filter((t) => t.getEventName() === "finalise");
+    expect(transitions).toHaveLength(1);
+    expect(transitions[0].getTargetState().getName()).toBe("done");
   });
 });

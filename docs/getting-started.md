@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 20+
 - TypeScript 5.x
 - PostgreSQL 13+ (if using `@duraflows/pg`)
 

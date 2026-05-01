@@ -1,4 +1,4 @@
-import { Statemachine } from "@camcima/finita";
+import { FinitaError, Statemachine } from "@camcima/finita";
 import type { WorkflowEventDefinition } from "../types/definition.js";
 import type { CommandResult, WorkflowExecutionContext } from "../types/runtime.js";
 import type { CompiledWorkflow } from "../compilation/workflow-compiler.js";
@@ -90,9 +90,21 @@ export class EventExecutor {
       const finitaContext = new Map<string, unknown>();
       finitaContext.set("workflow:eventOutcome", outcome);
 
-      const statemachine = new Statemachine(subject, compiledWorkflow.process, currentState);
+      const statemachine = new Statemachine(subject, compiledWorkflow.process, {
+        initialStateName: currentState,
+      });
 
-      await statemachine.triggerEvent(eventName, finitaContext);
+      try {
+        await statemachine.triggerEvent(eventName, finitaContext);
+      } catch (err: unknown) {
+        if (err instanceof FinitaError) {
+          throw new WorkflowError(
+            `Statemachine error during event "${eventName}" on state "${currentState}": ${err.message}`,
+            err,
+          );
+        }
+        throw err;
+      }
 
       toState = statemachine.getCurrentState().getName();
     }

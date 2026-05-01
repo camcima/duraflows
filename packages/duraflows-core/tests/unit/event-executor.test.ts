@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { Statemachine, WrongEventForStateError } from "@camcima/finita";
 import { EventExecutor } from "../../src/execution/event-executor.js";
 import { CommandExecutor } from "../../src/execution/command-executor.js";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
@@ -703,5 +704,51 @@ describe("EventExecutor", () => {
     await expect(executor.execute(compiled, "draft", "submit", "instance-1", {}, makeContext())).rejects.toThrow(
       /guard "isVerified" but no guard registry/,
     );
+  });
+
+  describe("FinitaError handling", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("wraps a FinitaError thrown by Statemachine.triggerEvent as WorkflowError with cause", async () => {
+      // Arrange: a definition with one event that has a targetState (so the
+      // executor takes the Statemachine path, not the command-only short-circuit).
+      const compiler = new WorkflowCompiler();
+      const compiledWorkflow = compiler.compile({
+        name: "wrap-test",
+        initialState: "pending",
+        states: {
+          pending: {
+            events: {
+              go: { targetState: "done" },
+            },
+          },
+          done: {},
+        },
+      });
+
+      const original = new WrongEventForStateError("pending", "go");
+      vi.spyOn(Statemachine.prototype, "triggerEvent").mockRejectedValue(original);
+
+      const executor = new EventExecutor(new CommandExecutor(makeRegistry({})));
+
+      // Act + Assert
+      try {
+        await executor.execute(
+          compiledWorkflow,
+          "pending",
+          "go",
+          "00000000-0000-0000-0000-000000000001",
+          { id: 1 },
+          makeContext(),
+        );
+        throw new Error("expected execute() to throw");
+      } catch (err: unknown) {
+        expect(err).toBeInstanceOf(WorkflowError);
+        expect((err as WorkflowError).message).toMatch(/Statemachine error during event "go" on state "pending"/);
+        expect((err as { cause: unknown }).cause).toBe(original);
+      }
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { State, Transition, Process, CallbackCondition } from "@camcima/finita";
+import { CallbackCondition, FinitaError, ProcessBuilder } from "@camcima/finita";
 import type { ProcessInterface } from "@camcima/finita";
 import type { WorkflowDefinition } from "../types/definition.js";
 import { WorkflowDefinitionError } from "../errors/index.js";
@@ -24,95 +24,78 @@ export class WorkflowCompiler {
   }
 
   private buildProcess(definition: WorkflowDefinition): CompiledWorkflow {
-    const stateNames = Object.keys(definition.states);
-    const states = new Map<string, State>();
+    try {
+      const builder = new ProcessBuilder(definition.name);
 
-    // Create finita State for each workflow state
-    for (const name of stateNames) {
-      states.set(name, new State(name));
-    }
+      // Register every state in the definition. ProcessBuilder requires explicit
+      // declaration; states reachable only via runtime onEnter chains (which
+      // duraflows handles outside the FSM) would otherwise be missing.
+      for (const stateName of Object.keys(definition.states)) {
+        builder.addState(stateName, { initial: stateName === definition.initialState });
+      }
 
-    // Create transitions for each event
-    for (const stateName of stateNames) {
-      const stateDef = definition.states[stateName];
-      if (!stateDef.events) continue;
+      // Declare event-driven transitions. Each event with a targetState gets a
+      // success-guarded transition; each with an errorState gets a failure-guarded
+      // one. The condition reads the per-call outcome that EventExecutor stuffs
+      // into the finita context map under "workflow:eventOutcome".
+      for (const [stateName, stateDef] of Object.entries(definition.states)) {
+        if (!stateDef.events) continue;
 
-      const sourceState = states.get(stateName)!;
+        for (const [eventName, eventDef] of Object.entries(stateDef.events)) {
+          const target = eventDef.targetState;
+          const error = eventDef.errorState;
 
-      for (const [eventName, eventDef] of Object.entries(stateDef.events)) {
-        if (eventDef.targetState) {
-          const targetState = states.get(eventDef.targetState);
-          if (!targetState) {
-            throw new WorkflowDefinitionError(
-              definition.name,
-              `Target state "${eventDef.targetState}" referenced by event "${eventName}" on state "${stateName}" does not exist`,
+          // When both branches lead to the same state, ProcessBuilder rejects
+          // two transitions with identical (from, event, to) and conflicting
+          // conditions. Register a single transition with a permissive
+          // condition that matches either outcome — the executor still
+          // distinguishes success vs failure for history and error semantics.
+          if (target && error && target === error) {
+            const anyOutcomeCondition = new CallbackCondition(
+              `workflow:any:${stateName}:${eventName}`,
+              (_subject: unknown, context: Map<string, unknown>) => {
+                const outcome = context.get("workflow:eventOutcome");
+                return outcome === "success" || outcome === "failure";
+              },
             );
+            builder.addTransition(stateName, target, {
+              event: eventName,
+              condition: anyOutcomeCondition,
+            });
+            continue;
           }
 
-          const successCondition = new CallbackCondition(
-            `workflow:success:${stateName}:${eventName}`,
-            (_subject: unknown, context: Map<string, unknown>) => context.get("workflow:eventOutcome") === "success",
-          );
-
-          const successTransition = new Transition(targetState, eventName, successCondition);
-          sourceState.addTransition(successTransition);
-        }
-
-        if (eventDef.errorState) {
-          const errorState = states.get(eventDef.errorState);
-          if (!errorState) {
-            throw new WorkflowDefinitionError(
-              definition.name,
-              `Error state "${eventDef.errorState}" referenced by event "${eventName}" on state "${stateName}" does not exist`,
+          if (target) {
+            const successCondition = new CallbackCondition(
+              `workflow:success:${stateName}:${eventName}`,
+              (_subject: unknown, context: Map<string, unknown>) => context.get("workflow:eventOutcome") === "success",
             );
+            builder.addTransition(stateName, target, {
+              event: eventName,
+              condition: successCondition,
+            });
           }
 
-          const failureCondition = new CallbackCondition(
-            `workflow:failure:${stateName}:${eventName}`,
-            (_subject: unknown, context: Map<string, unknown>) => context.get("workflow:eventOutcome") === "failure",
-          );
-
-          const failureTransition = new Transition(errorState, eventName, failureCondition);
-          sourceState.addTransition(failureTransition);
-        }
-      }
-    }
-
-    // Register onEnter target/error states in the finita graph via never-matching
-    // transitions so that states reachable only through onEnter hops are known
-    // to the Process (finita only auto-registers states reachable via transitions
-    // from the initial state).
-    for (const stateName of stateNames) {
-      const stateDef = definition.states[stateName];
-      const onEnter = stateDef.onEnter;
-      if (!onEnter) continue;
-
-      const sourceState = states.get(stateName)!;
-
-      if (onEnter.targetState) {
-        const targetState = states.get(onEnter.targetState);
-        if (targetState) {
-          const neverCondition = new CallbackCondition(`workflow:onEnter:${stateName}`, () => false);
-          sourceState.addTransition(new Transition(targetState, null, neverCondition));
+          if (error) {
+            const failureCondition = new CallbackCondition(
+              `workflow:failure:${stateName}:${eventName}`,
+              (_subject: unknown, context: Map<string, unknown>) => context.get("workflow:eventOutcome") === "failure",
+            );
+            builder.addTransition(stateName, error, {
+              event: eventName,
+              condition: failureCondition,
+            });
+          }
         }
       }
 
-      if (onEnter.errorState) {
-        const errorState = states.get(onEnter.errorState);
-        if (errorState) {
-          const neverCondition = new CallbackCondition(`workflow:onEnter:error:${stateName}`, () => false);
-          sourceState.addTransition(new Transition(errorState, null, neverCondition));
-        }
+      const process = builder.build();
+      return { definition, process };
+    } catch (err: unknown) {
+      if (err instanceof FinitaError) {
+        throw new WorkflowDefinitionError(definition.name, err.message);
       }
+      throw err;
     }
-
-    const initialState = states.get(definition.initialState);
-    if (!initialState) {
-      throw new WorkflowDefinitionError(definition.name, `Initial state "${definition.initialState}" does not exist`);
-    }
-
-    const process = new Process(definition.name, initialState);
-
-    return { definition, process };
   }
 }

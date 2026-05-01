@@ -485,4 +485,94 @@ describe("WorkflowRuntime.getAvailableEvents", () => {
     expect(result.outcome).toBe("success");
     expect(result.toState).toBe("processing");
   });
+
+  it("self-transition (targetState equals current state) lands back in the same state on success", async () => {
+    // Common retry pattern: an event on state X with targetState: X re-runs
+    // commands and stays in X on success.
+    const definition: WorkflowDefinition = {
+      name: "self-transition",
+      initialState: "in_progress",
+      states: {
+        in_progress: {
+          events: {
+            retry: {
+              targetState: "in_progress",
+              errorState: "failed",
+              commands: [{ name: "doWork" }],
+            },
+          },
+        },
+        failed: {},
+      },
+    };
+    definitionRegistry.register(definition);
+
+    let attempts = 0;
+    commandRegistry.register("doWork", {
+      execute: async () => {
+        attempts++;
+        return { ok: true };
+      },
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "self-transition" });
+
+    const first = await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "retry" });
+    expect(first.outcome).toBe("success");
+    expect(first.fromState).toBe("in_progress");
+    expect(first.toState).toBe("in_progress");
+
+    const second = await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "retry" });
+    expect(second.outcome).toBe("success");
+    expect(second.toState).toBe("in_progress");
+
+    // Two successful self-transitions, command ran on both.
+    expect(attempts).toBe(2);
+    const stored = await instanceStore.findByUuid(instance.uuid);
+    expect(stored!.currentState).toBe("in_progress");
+  });
+
+  it("merged self-loop (targetState === errorState === current state) lands in place on either outcome", async () => {
+    // The fix-the-merge case: targetState and errorState both point at the
+    // current state. ProcessBuilder would reject two conflicting-condition
+    // transitions for the same (from, event, to) triple, so the compiler
+    // collapses them into a single permissive transition. Both success and
+    // failure outcomes must still resolve correctly and surface in the result.
+    const definition: WorkflowDefinition = {
+      name: "merged-self-loop",
+      initialState: "active",
+      states: {
+        active: {
+          events: {
+            poll: {
+              targetState: "active",
+              errorState: "active",
+              commands: [{ name: "checkStatus" }],
+            },
+          },
+        },
+      },
+    };
+    definitionRegistry.register(definition);
+
+    let nextOutcome: "ok" | "fail" = "ok";
+    commandRegistry.register("checkStatus", {
+      execute: async () => (nextOutcome === "ok" ? { ok: true } : { ok: false, code: "PENDING" }),
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "merged-self-loop" });
+
+    nextOutcome = "ok";
+    const ok = await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "poll" });
+    expect(ok.outcome).toBe("success");
+    expect(ok.toState).toBe("active");
+
+    nextOutcome = "fail";
+    const fail = await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "poll" });
+    expect(fail.outcome).toBe("failure");
+    expect(fail.toState).toBe("active");
+
+    const stored = await instanceStore.findByUuid(instance.uuid);
+    expect(stored!.currentState).toBe("active");
+  });
 });

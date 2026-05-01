@@ -4,8 +4,8 @@ Thanks for your interest in contributing! This guide covers everything you need 
 
 ## Prerequisites
 
-- Node.js 18, 20, or 22
-- pnpm 10+
+- Node.js 20+
+- pnpm 9.15+ (the repo pins `pnpm@9.15.0` via the `packageManager` field; Corepack will fetch it automatically)
 - PostgreSQL 13+ (for running persistence adapter tests)
 
 ## Getting Started
