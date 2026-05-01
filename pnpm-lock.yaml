@@ -59,8 +59,8 @@ importers:
   packages/duraflows-core:
     dependencies:
       '@camcima/finita':
-        specifier: ^2.0.0
-        version: 2.2.0
+        specifier: ^3.0.0
+        version: 3.0.0
 
   packages/duraflows-kysely:
     dependencies:
@@ -145,8 +145,9 @@ packages:
   '@borewit/text-codec@0.2.2':
     resolution: {integrity: sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ==}
 
-  '@camcima/finita@2.2.0':
-    resolution: {integrity: sha512-rBN61P5M2Nl5FcwTgyFGvfCkAw8kW2tF8Tl+hf7KP6CS/s3NJ0P+wPsDeMkjilMTXuquyyKoQQiaTLS0JXAONA==}
+  '@camcima/finita@3.0.0':
+    resolution: {integrity: sha512-QdCC9zmvUg7e5iMFFvb5UeD0hyNicUEMhi21MmHZwS6Eqtv0TV8mWKaNxaQgtZvjOLsLHGbxM85fR3OQjvZOrg==}
+    engines: {node: '>=20.0.0'}
 
   '@commitlint/cli@20.5.0':
     resolution: {integrity: sha512-yNkyN/tuKTJS3wdVfsZ2tXDM4G4Gi7z+jW54Cki8N8tZqwKBltbIvUUrSbT4hz1bhW/h0CdR+5sCSpXD+wMKaQ==}
@@ -2344,7 +2345,7 @@ snapshots:
 
   '@borewit/text-codec@0.2.2': {}
 
-  '@camcima/finita@2.2.0': {}
+  '@camcima/finita@3.0.0': {}
 
   '@commitlint/cli@20.5.0(@types/node@25.6.0)(conventional-commits-filter@5.0.0)(conventional-commits-parser@6.4.0)(typescript@5.9.3)':
     dependencies:
