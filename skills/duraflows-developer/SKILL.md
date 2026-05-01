@@ -1,6 +1,6 @@
 ---
 name: duraflows-developer
-description: "Provides domain expertise for developing durable workflows with @duraflows/core, @duraflows/pg, and @duraflows/nestjs. Use when writing, reviewing, or debugging code that imports duraflows packages, defines WorkflowDefinition objects, implements WorkflowCommand handlers, configures WorkflowModule, or works with workflow states, events, commands, timeouts, or onEnter chains."
+description: "Provides domain expertise for developing durable workflows with @duraflows/core, @duraflows/pg, @duraflows/kysely, and @duraflows/nestjs. Use when writing, reviewing, or debugging code that imports duraflows packages, defines WorkflowDefinition objects, implements WorkflowCommand handlers, configures WorkflowModule, or works with workflow states, events, commands, timeouts, or onEnter chains."
 ---
 
 # duraflows Developer Guide
@@ -16,7 +16,7 @@ duraflows is a **durable workflow runtime** for TypeScript built on [@camcima/fi
 | `@duraflows/kysely` | PostgreSQL adapter using Kysely (idiomatic query builder, AsyncLocalStorage transactions) |
 | `@duraflows/nestjs` | NestJS module with DI, services, optional REST controllers                                |
 
-**Compatibility:** duraflows v2.0.0+ requires Node.js `>=20` (carried through from `@camcima/finita` v3). v1.x supports Node 18+. The public WorkflowDefinition surface is unchanged across the v1 → v2 boundary; the v2 bump is an internal Finita upgrade plus the Node floor.
+**Compatibility:** duraflows v2.0.0+ declares `engines.node >= 20` (carried through from `@camcima/finita` v3). The pre-v2 line predates the Node 20 floor and shipped without an `engines` field — check the published package's `engines.node` for exact runtime requirements. The public WorkflowDefinition surface is unchanged across the v1 → v2 boundary; the v2 bump is an internal Finita upgrade plus the Node floor.
 
 **Important**: duraflows is NOT like Temporal. Commands are intentionally side-effecting -- they call APIs, write to databases, send messages. There is no replay or checkpointing. Durability comes from:
 
@@ -93,7 +93,7 @@ Events trigger state transitions. Each event can have:
 
 **v1.1.0:** `errorState` catches **command** failures only — it does not catch guard rejections. Guard rejection means "this event is not allowed right now," which is a meaningful business signal (let the caller retry later or pick a different event) — not a fault to recover from.
 
-**v2.0.0:** when an event's `targetState` and `errorState` point at the **same** state (e.g., a polling shape `poll: { targetState: "active", errorState: "active", commands: [...] }`), the runtime merges the two branches into a single transition. Both outcomes still resolve correctly and the result still distinguishes `outcome: "success"` vs `"failure"` — so history still records what actually happened. This is the right shape for "stay in this state regardless of outcome, but record the result" patterns.
+**v2.0.0:** when an event's `targetState` and `errorState` point at the **same** state (e.g., a polling shape `poll: { targetState: "active", errorState: "active", commands: [...] }`), the compiler collapses the two branches into a single transition at compile time (Finita v3's `ProcessBuilder` rejects two transitions with identical `(from, event, to)` and conflicting conditions). Both outcomes still resolve correctly and the result still distinguishes `outcome: "success"` vs `"failure"` — so history still records what actually happened. This is the right shape for "stay in this state regardless of outcome, but record the result" patterns.
 
 ### Guards (v1.1.0)
 

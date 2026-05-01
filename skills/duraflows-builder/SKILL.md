@@ -55,7 +55,7 @@ Each user action, external trigger, or automated transition becomes an event:
 | `commands` only (no `targetState`)                   | Command-only event — runs side effects, stays in current state. Right for operator notes, manual context corrections, side-effect kicks |
 | `errorState` + `commands` (no `targetState`)         | Failure-only event — trap a failure and route to recovery without forward progress                                                      |
 
-**v2.0.0 — merged self-loop is allowed.** When `targetState` and `errorState` point at the same state (typically the current state, e.g., `poll: { targetState: "active", errorState: "active" }`), the runtime collapses the two branches into a single transition. Both outcomes resolve to that state and the result still distinguishes `outcome: "success"` vs `"failure"` for history. Use this shape for "stay here regardless of outcome, just record what happened" — typical for polling, idempotent retries, and best-effort tick events.
+**v2.0.0 — merged self-loop is allowed.** When `targetState` and `errorState` point at the same state (typically the current state, e.g., `poll: { targetState: "active", errorState: "active" }`), `WorkflowCompiler` collapses the two branches into a single transition at compile time. Both outcomes resolve to that state and the result still distinguishes `outcome: "success"` vs `"failure"` for history. Use this shape for "stay here regardless of outcome, just record what happened" — typical for polling, idempotent retries, and best-effort tick events.
 
 ### Step 4: Map to Commands
 
