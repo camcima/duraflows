@@ -263,4 +263,25 @@ describe("WorkflowCompiler", () => {
     expect(() => compiler.compile(definition)).toThrow(WorkflowDefinitionError);
     expect(() => compiler.compile(definition)).toThrow(/missingInitialState/);
   });
+
+  it("translates FinitaError from ProcessBuilder as WorkflowDefinitionError", () => {
+    // Event name with leading whitespace trips v3's invalidEventName validation
+    // inside ProcessBuilder. The compiler must wrap that as WorkflowDefinitionError
+    // so the public error contract stays stable.
+    const definition: WorkflowDefinition = {
+      name: "whitespace-event",
+      initialState: "pending",
+      states: {
+        pending: {
+          events: {
+            " submit": { targetState: "submitted" },
+          },
+        },
+        submitted: {},
+      },
+    };
+
+    expect(() => compiler.compile(definition)).toThrow(WorkflowDefinitionError);
+    expect(() => compiler.compile(definition)).toThrow(/submit/);
+  });
 });
