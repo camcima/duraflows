@@ -55,6 +55,8 @@ Each user action, external trigger, or automated transition becomes an event:
 | `commands` only (no `targetState`)                   | Command-only event — runs side effects, stays in current state. Right for operator notes, manual context corrections, side-effect kicks |
 | `errorState` + `commands` (no `targetState`)         | Failure-only event — trap a failure and route to recovery without forward progress                                                      |
 
+**v2.0.0 — merged self-loop is allowed.** When `targetState` and `errorState` point at the same state (typically the current state, e.g., `poll: { targetState: "active", errorState: "active" }`), `WorkflowCompiler` collapses the two branches into a single transition at compile time. Both outcomes resolve to that state and the result still distinguishes `outcome: "success"` vs `"failure"` for history. Use this shape for "stay here regardless of outcome, just record what happened" — typical for polling, idempotent retries, and best-effort tick events.
+
 ### Step 4: Map to Commands
 
 Each side-effecting action becomes a `WorkflowCommand`:
@@ -355,6 +357,7 @@ Observers fire **post-commit, at-most-once, sequential, error-contained**. They 
 | "automatically do X when entering state"                                  | `onEnter` with commands                                                                                     |
 | "if nothing happens in N hours/days"                                      | Timeout event: `timeout: { afterHours: N }`                                                                 |
 | "retry up to N times"                                                     | `errorState` -> state with Retry event, `retryCount` in context                                             |
+| "poll/tick/heartbeat — stay here regardless of outcome, just record it"   | Merged self-loop event: `targetState` and `errorState` both equal current state (v2.0.0)                    |
 | "do X, then Y, then Z automatically"                                      | onEnter chain: gateway1 -> gateway2 -> gateway3                                                             |
 | "if any step fails, undo previous steps"                                  | Saga: error states with compensation onEnter chains; mark cancel/rollback commands `bestEffort: true`       |
 | "needs human approval"                                                    | Waiting state with Approve/Reject events                                                                    |

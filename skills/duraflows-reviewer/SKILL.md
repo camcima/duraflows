@@ -21,6 +21,7 @@ Use this checklist when reviewing code that touches duraflows workflows, command
 
 - [ ] **Every event with mandatory commands that can fail has `errorState`** — OR the command is marked `bestEffort: true`. Without either, a `{ ok: false }` from a mandatory command throws `CommandFailureError` and the transaction rolls back. Verify the choice is intentional.
 - [ ] **`targetState` is defined for state-changing events.** v1.0.0 made `targetState` optional to support command-only events (side effects without state change) and failure-only events. If an event has only `commands` (no `targetState`/`errorState`), confirm the side-effect-only intent.
+- [ ] **`targetState === errorState` is allowed (v2.0.0).** When both branches point at the same state — typically the current state for poll/tick/retry shapes — `WorkflowCompiler` collapses them into a single transition at compile time. Don't flag this as a duplicate-route mistake. Verify the intent ("stay here regardless of outcome, just record what happened") matches the event's `commands`.
 - [ ] **At most one timeout event per state.** If a state has two events with `timeout`, the validator will reject the definition.
 - [ ] **Timeout values are positive.** `afterMinutes`, `afterHours`, `afterDays` must all be > 0.
 - [ ] **Per-command metadata is intentional.** A `WorkflowCommandRef` with `metadata: { ... }` makes that data visible to the handler via `ctx.commandMetadata`. Verify the handler actually reads it; verify metadata is JSON-serializable.
