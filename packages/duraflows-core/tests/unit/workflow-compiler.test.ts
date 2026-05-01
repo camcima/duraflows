@@ -177,7 +177,7 @@ describe("WorkflowCompiler", () => {
     };
 
     expect(() => compiler.compile(definition)).toThrow(WorkflowDefinitionError);
-    expect(() => compiler.compile(definition)).toThrow(/Target state "nonexistent"/);
+    expect(() => compiler.compile(definition)).toThrow(/unknownTarget.*nonexistent/);
   });
 
   it("throws WorkflowDefinitionError for non-existent error state", () => {
@@ -194,7 +194,7 @@ describe("WorkflowCompiler", () => {
     };
 
     expect(() => compiler.compile(definition)).toThrow(WorkflowDefinitionError);
-    expect(() => compiler.compile(definition)).toThrow(/Error state "nonexistent"/);
+    expect(() => compiler.compile(definition)).toThrow(/unknownTarget.*nonexistent/);
   });
 
   it("registers states only reachable via onEnter in the finita process", () => {
@@ -261,6 +261,6 @@ describe("WorkflowCompiler", () => {
     };
 
     expect(() => compiler.compile(definition)).toThrow(WorkflowDefinitionError);
-    expect(() => compiler.compile(definition)).toThrow(/Initial state "nonexistent" does not exist/);
+    expect(() => compiler.compile(definition)).toThrow(/missingInitialState/);
   });
 });
