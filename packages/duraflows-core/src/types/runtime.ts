@@ -35,10 +35,10 @@ export interface WorkflowInstance<TState extends string = string> {
   updatedAt: Date;
 }
 
-export interface WorkflowExecutionResult {
+export interface WorkflowExecutionResult<TState extends string = string> {
   outcome: "success" | "failure" | "guard-rejected";
-  fromState: string;
-  toState: string;
+  fromState: TState;
+  toState: TState;
   commandResults: CommandResult[];
   historyUuid: string;
   rejectedBy?: string;

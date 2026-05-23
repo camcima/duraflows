@@ -50,6 +50,27 @@ export class WorkflowService {
     return this.runtime.triggerEvent(input);
   }
 
+  /**
+   * Type-safe variant of {@link triggerEvent} that narrows the resulting
+   * `fromState`/`toState` to the state union of the supplied
+   * `WorkflowDefinition`. Use when the caller has a typed definition in
+   * hand and wants to avoid widening to `string`.
+   *
+   * Does not validate at runtime that the instance belongs to the given
+   * definition — that is the caller's responsibility (typically enforced
+   * upstream when the instance was created via `createInstanceFor`).
+   */
+  async triggerEventFor<TState extends string>(
+    definition: WorkflowDefinition<TState>,
+    input: TriggerWorkflowEventInput,
+  ): Promise<WorkflowExecutionResult<TState>> {
+    // `definition` is consumed at type-level only; the runtime resolves
+    // the instance by uuid and reads its workflowName from the live row.
+    void definition;
+    const result = await this.runtime.triggerEvent(input);
+    return result as WorkflowExecutionResult<TState>;
+  }
+
   async getAvailableEvents(input: GetAvailableEventsInput): Promise<AvailableWorkflowEvent[]> {
     return this.runtime.getAvailableEvents(input);
   }
