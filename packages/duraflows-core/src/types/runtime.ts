@@ -22,10 +22,10 @@ export interface WorkflowExecutionContext {
   readonly transitionUuid: string;
 }
 
-export interface WorkflowInstance {
+export interface WorkflowInstance<TState extends string = string> {
   uuid: string;
   workflowName: string;
-  currentState: string;
+  currentState: TState;
   version: number;
   expiresAt: Date | null;
   lastTransitionAt: Date;

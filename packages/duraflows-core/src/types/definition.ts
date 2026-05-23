@@ -1,27 +1,27 @@
-export interface WorkflowDefinition {
+export interface WorkflowDefinition<TState extends string = string> {
   name: string;
-  initialState: string;
-  states: Record<string, WorkflowStateDefinition>;
+  initialState: TState;
+  states: Record<TState, WorkflowStateDefinition<TState>>;
 }
 
-export interface WorkflowStateDefinition {
+export interface WorkflowStateDefinition<TState extends string = string> {
   context?: Record<string, unknown>;
-  events?: Record<string, WorkflowEventDefinition>;
-  onEnter?: WorkflowOnEnterDefinition;
+  events?: Record<string, WorkflowEventDefinition<TState>>;
+  onEnter?: WorkflowOnEnterDefinition<TState>;
   metadata?: Record<string, unknown>;
 }
 
-export interface WorkflowOnEnterDefinition {
-  targetState?: string;
-  errorState?: string;
+export interface WorkflowOnEnterDefinition<TState extends string = string> {
+  targetState?: TState;
+  errorState?: TState;
   commands?: WorkflowCommandRef[];
   metadata?: Record<string, unknown>;
 }
 
-export interface WorkflowEventDefinition {
+export interface WorkflowEventDefinition<TState extends string = string> {
   guard?: WorkflowGuardRef;
-  targetState?: string;
-  errorState?: string;
+  targetState?: TState;
+  errorState?: TState;
   commands?: WorkflowCommandRef[];
   timeout?: WorkflowTimeoutDefinition;
   metadata?: Record<string, unknown>;
