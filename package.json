@@ -2,7 +2,7 @@
   "name": "@duraflows/monorepo",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@9.15.9",
   "scripts": {
     "build": "tsc --build && tsc --build tsconfig.cjs.json && sh scripts/add-cjs-package-json.sh",
     "clean": "tsc --build --clean && tsc --build --clean tsconfig.cjs.json",
@@ -22,22 +22,22 @@
     "@commitlint/config-conventional": "^20.5.3",
     "@eslint/js": "^10.0.1",
     "@release-it/conventional-changelog": "^11.0.0",
-    "@types/node": "^25.6.2",
-    "@vitest/coverage-v8": "^4.1.5",
-    "eslint": "^10.3.0",
+    "@types/node": "^25.9.1",
+    "@vitest/coverage-v8": "^4.1.7",
+    "eslint": "^10.4.0",
     "eslint-config-prettier": "^10.1.8",
-    "lefthook": "^2.1.4",
+    "lefthook": "^2.1.8",
     "prettier": "^3.8.3",
     "release-it": "^20.0.1",
-    "typescript": "^5.7.0",
-    "typescript-eslint": "^8.59.2",
-    "vitest": "^4.1.5"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.59.4",
+    "vitest": "^4.1.7"
   },
   "pnpm": {
     "overrides": {
       "basic-ftp": ">=5.3.0",
       "path-to-regexp": "^8.4.0",
-      "typescript": "^5.7.0",
+      "typescript": "^5.9.3",
       "undici": ">=6.24.0"
     }
   },
