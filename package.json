@@ -2,7 +2,7 @@
   "name": "@duraflows/monorepo",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@9.15.9",
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
     "build": "tsc --build && tsc --build tsconfig.cjs.json && sh scripts/add-cjs-package-json.sh",
     "clean": "tsc --build --clean && tsc --build --clean tsconfig.cjs.json",
