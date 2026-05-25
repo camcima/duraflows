@@ -6,7 +6,7 @@ Part of the [duraflows](https://github.com/camcima/duraflows) monorepo.
 
 ## Features
 
-- Declarative workflow definitions in plain TypeScript objects
+- Declarative workflow definitions in plain TypeScript objects, optionally generic over a `TState` union for end-to-end state type safety (`WorkflowDefinition<TState>`, `WorkflowInstance<TState>`, `WorkflowExecutionResult<TState>`)
 - Named states with event-triggered transitions
 - Sequential command execution with success/failure branching
 - Timeout-driven transitions with persisted deadlines
