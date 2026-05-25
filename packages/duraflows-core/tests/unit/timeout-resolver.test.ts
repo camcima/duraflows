@@ -104,6 +104,22 @@ describe("TimeoutResolver", () => {
 
       expect(resolver.computeDeadline(def, "nonexistent", NOW)).toBeNull();
     });
+
+    it("returns null when the timeout sums to zero", () => {
+      // All-zero components — defined but degenerate timeout.
+      const def = makeDefinition({
+        waiting: {
+          events: {
+            expire: {
+              targetState: "expired",
+              timeout: { afterMinutes: 0, afterHours: 0, afterDays: 0 },
+            },
+          },
+        },
+      });
+
+      expect(resolver.computeDeadline(def, "waiting", NOW)).toBeNull();
+    });
   });
 
   describe("getTimeoutEventName", () => {

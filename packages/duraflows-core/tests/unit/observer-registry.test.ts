@@ -149,4 +149,23 @@ describe("ObserverRegistry", () => {
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
   });
+
+  it("default handler coerces non-Error throwables to a string via String(error)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const registry = new ObserverRegistry();
+    registry.add({
+      name: "throws-string",
+      onEnter: () => {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw "raw-string-not-an-error";
+      },
+    });
+
+    await registry.fireOnEnter(makeEvent());
+
+    expect(warnSpy).toHaveBeenCalledOnce();
+    const [message] = warnSpy.mock.calls[0];
+    expect(message).toContain("raw-string-not-an-error");
+    warnSpy.mockRestore();
+  });
 });
