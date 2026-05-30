@@ -201,6 +201,7 @@ export class WorkflowModule {
 
     return {
       module: WorkflowModule,
+      global: true, // allow downstream feature modules to inject WorkflowService without re-importing forRoot
       imports: [DiscoveryModule],
       controllers,
       providers,
@@ -332,6 +333,7 @@ export class WorkflowModule {
 
     return {
       module: WorkflowModule,
+      global: true, // allow downstream feature modules to inject WorkflowService without re-importing forRootAsync
       imports: [DiscoveryModule, ...(options.imports ?? [])],
       controllers,
       providers,

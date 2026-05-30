@@ -238,6 +238,24 @@ describe("WorkflowRuntime.getAvailableEvents", () => {
     ).rejects.toThrow(`Workflow instance "${bogusUuid}" not found`);
   });
 
+  it("triggerEvent throws WorkflowError for non-existent workflow instance UUID", async () => {
+    const bogusUuid = randomUUID();
+
+    await expect(
+      runtime.triggerEvent({
+        workflowInstanceUuid: bogusUuid,
+        eventName: "approve",
+      }),
+    ).rejects.toThrow(WorkflowError);
+
+    await expect(
+      runtime.triggerEvent({
+        workflowInstanceUuid: bogusUuid,
+        eventName: "approve",
+      }),
+    ).rejects.toThrow(`Workflow instance "${bogusUuid}" not found`);
+  });
+
   it("triggerEvent passes fromState, toState, transitionUuid to event commands", async () => {
     const definition: WorkflowDefinition = {
       name: "ctx-fields-event",

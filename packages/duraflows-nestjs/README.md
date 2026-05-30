@@ -7,7 +7,9 @@ Part of the [duraflows](https://github.com/camcima/duraflows) monorepo.
 ## Features
 
 - Dynamic NestJS module with `forRoot()` and `forRootAsync()` configuration
+- Registered as a **global module** -- feature modules can inject `WorkflowService` without re-importing `WorkflowModule.forRoot()`
 - `WorkflowService` for creating instances, triggering events, and querying state
+- Type-safe `createInstanceFor()` / `triggerEventFor()` variants that narrow `currentState` / `fromState` / `toState` to the state union of a `WorkflowDefinition<TState>`
 - `WorkflowTimeoutService` for processing expired workflows
 - Optional REST controllers for full HTTP API
 - `@WorkflowCommand` decorator with automatic discovery
@@ -97,6 +99,40 @@ export class OrderService {
   }
 }
 ```
+
+### Type-Safe Variants
+
+When you have a typed `WorkflowDefinition<TState>` in hand, use `createInstanceFor` / `triggerEventFor` to narrow `currentState`, `fromState`, and `toState` to the state union instead of `string`:
+
+```ts
+import type { WorkflowDefinition } from "@duraflows/nestjs";
+
+type OrderState = "new" | "paid" | "shipped" | "cancelled";
+
+const orderWorkflow: WorkflowDefinition<OrderState> = {
+  name: "order",
+  initialState: "new",
+  states: {
+    new: { events: { PaymentReceived: { targetState: "paid" }, Cancel: { targetState: "cancelled" } } },
+    paid: { events: { Ship: { targetState: "shipped" } } },
+    shipped: {},
+    cancelled: {},
+  },
+};
+
+// `instance.currentState` is typed as OrderState, not string
+const instance = await workflowService.createInstanceFor(orderWorkflow, {
+  metadata: { orderId: "abc" },
+});
+
+// `result.fromState` / `result.toState` are typed as OrderState
+const result = await workflowService.triggerEventFor(orderWorkflow, {
+  workflowInstanceUuid: instance.uuid,
+  eventName: "PaymentReceived",
+});
+```
+
+`triggerEventFor` does not verify at runtime that the instance belongs to the supplied definition -- the type narrowing is the caller's contract. Pair it with `createInstanceFor` to keep that invariant.
 
 ### @WorkflowCommand Decorator
 

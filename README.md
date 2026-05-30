@@ -31,7 +31,7 @@ Pick `@duraflows/pg` for the simpler default (raw `pg` pool, minimal deps). Pick
 
 ## Key Features
 
-- **Declarative workflow definitions** in plain TypeScript objects
+- **Declarative workflow definitions** in plain TypeScript objects, optionally generic over a `TState` union for type-safe `currentState`/`fromState`/`toState`
 - **Command execution** with sequential fail-fast policy and success/failure branching
 - **Timeout processing** with persisted deadlines and batch processing
 - **Mutable context** accessible to commands, with state-defined patches merged on entry

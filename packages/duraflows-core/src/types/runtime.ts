@@ -22,10 +22,10 @@ export interface WorkflowExecutionContext {
   readonly transitionUuid: string;
 }
 
-export interface WorkflowInstance {
+export interface WorkflowInstance<TState extends string = string> {
   uuid: string;
   workflowName: string;
-  currentState: string;
+  currentState: TState;
   version: number;
   expiresAt: Date | null;
   lastTransitionAt: Date;
@@ -35,10 +35,10 @@ export interface WorkflowInstance {
   updatedAt: Date;
 }
 
-export interface WorkflowExecutionResult {
+export interface WorkflowExecutionResult<TState extends string = string> {
   outcome: "success" | "failure" | "guard-rejected";
-  fromState: string;
-  toState: string;
+  fromState: TState;
+  toState: TState;
   commandResults: CommandResult[];
   historyUuid: string;
   rejectedBy?: string;
