@@ -68,7 +68,7 @@ importers:
   packages/duraflows-kysely:
     dependencies:
       '@duraflows/core':
-        specifier: ^1.1.0
+        specifier: ^2.1.0
         version: link:../duraflows-core
       kysely:
         specifier: ^0.29.2
@@ -80,7 +80,7 @@ importers:
   packages/duraflows-nestjs:
     dependencies:
       '@duraflows/core':
-        specifier: ^1.1.0
+        specifier: ^2.1.0
         version: link:../duraflows-core
       '@nestjs/common':
         specifier: ^11.1.24
@@ -108,7 +108,7 @@ importers:
   packages/duraflows-pg:
     dependencies:
       '@duraflows/core':
-        specifier: ^1.1.0
+        specifier: ^2.1.0
         version: link:../duraflows-core
       pg:
         specifier: ^8.21.0

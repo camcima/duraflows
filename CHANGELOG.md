@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.1.0](https://github.com/camcima/duraflows/compare/v1.1.0...v2.1.0) (2026-05-30)
+
+### ⚠ BREAKING CHANGES
+
+* **core:** @duraflows/core now depends on @camcima/finita ^3.0.0,
+which requires Node.js >= 20. The duraflows error contract is unchanged:
+WorkflowCompiler.compile() still throws WorkflowDefinitionError and
+EventExecutor.execute() still throws WorkflowError / InvalidEventError /
+CommandFailureError. Specific message text for "unknown target state",
+"unknown error state", and "missing initial state" cases now originates
+from ProcessBuilder.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+### Features
+
+* **core:** upgrade to @camcima/finita v3 ([ddfa91c](https://github.com/camcima/duraflows/commit/ddfa91c97667da21eba458dad59821f80ba39a45))
+* improve type-safety and others minor changes ([#36](https://github.com/camcima/duraflows/issues/36)) ([d65993b](https://github.com/camcima/duraflows/commit/d65993b74455d38b142ff8d73ee02270d4f60eac))
+
+### Bug Fixes
+
+* **core:** merge target/error transitions when both lead to the same state ([8dbbf6b](https://github.com/camcima/duraflows/commit/8dbbf6bf204925519c504d45348ad3016c49ddab))
+
 ## [1.1.0](https://github.com/camcima/duraflows/compare/v1.0.0...v1.1.0) (2026-04-27)
 
 ### Features

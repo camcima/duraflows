@@ -50,6 +50,6 @@
     "duraflows-persistence-adapter": "skills/duraflows-persistence-adapter/SKILL.md",
     "duraflows-reviewer": "skills/duraflows-reviewer/SKILL.md"
   },
-  "version": "1.1.0",
+  "version": "2.1.0",
   "license": "MIT"
 }
