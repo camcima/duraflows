@@ -39,13 +39,14 @@ Thanks for your interest in contributing! This guide covers everything you need 
 
 ## Project Structure
 
-This is a monorepo with three packages:
+This is a monorepo with four packages:
 
-| Package             | Path                        | Description                          |
-| ------------------- | --------------------------- | ------------------------------------ |
-| `@duraflows/core`   | `packages/duraflows-core`   | Framework-agnostic runtime and types |
-| `@duraflows/pg`     | `packages/duraflows-pg`     | PostgreSQL persistence adapter       |
-| `@duraflows/nestjs` | `packages/duraflows-nestjs` | NestJS module integration            |
+| Package             | Path                        | Description                             |
+| ------------------- | --------------------------- | --------------------------------------- |
+| `@duraflows/core`   | `packages/duraflows-core`   | Framework-agnostic runtime and types    |
+| `@duraflows/pg`     | `packages/duraflows-pg`     | PostgreSQL persistence adapter (`pg`)   |
+| `@duraflows/kysely` | `packages/duraflows-kysely` | PostgreSQL persistence adapter (Kysely) |
+| `@duraflows/nestjs` | `packages/duraflows-nestjs` | NestJS module integration               |
 
 ## Development Workflow
 
