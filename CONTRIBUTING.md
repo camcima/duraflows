@@ -108,6 +108,11 @@ If a commit message doesn't follow this format, the `commit-msg` hook will rejec
 
 4. Ensure CI passes -- the PR will be reviewed once all checks are green.
 
+## Releasing
+
+Maintainers: see [RELEASING.md](RELEASING.md) for how to cut a new
+`@duraflows/*` release to npm.
+
 ## Reporting Issues
 
 Use [GitHub Issues](https://github.com/camcima/duraflows/issues) to report bugs or request features. Please include:
