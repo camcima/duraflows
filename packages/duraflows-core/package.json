@@ -60,6 +60,6 @@
     "build": "tsc --build"
   },
   "dependencies": {
-    "@camcima/finita": "^3.0.0"
+    "@camcima/finita": "^3.0.1"
   }
 }
