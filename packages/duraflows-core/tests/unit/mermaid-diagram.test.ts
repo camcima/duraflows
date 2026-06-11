@@ -516,3 +516,57 @@ describe("state with both events and onEnter", () => {
     expect(autoIdx).toBeLessThan(skipIdx);
   });
 });
+
+describe("node id collisions", () => {
+  it("keeps distinct ids for names that sanitize identically", () => {
+    const def: WorkflowDefinition = {
+      name: "wf",
+      initialState: "a b",
+      states: {
+        "a b": { events: { go: { targetState: "a_b" } } },
+        a_b: {},
+      },
+    };
+    const diagram = toMermaidDiagram(def);
+    // Both states get their own node definitions with distinct ids.
+    expect(diagram).toContain('a_b["<b>a b</b>"]');
+    expect(diagram).toContain('a_b_2["<b>a_b</b>"]');
+    // The transition must point at the second state's id, not the first's.
+    expect(diagram).toContain("a_b__go --> a_b_2");
+  });
+
+  it("does not collide with the synthetic _start and _end nodes", () => {
+    const def: WorkflowDefinition = {
+      name: "wf",
+      initialState: "*start",
+      states: {
+        "*start": { events: { finish: { targetState: "-end" } } },
+        "-end": {},
+      },
+    };
+    const diagram = toMermaidDiagram(def);
+    // "*start" sanitizes to "_start" (reserved) and "-end" to "_end" (reserved),
+    // so both must receive suffixed ids.
+    expect(diagram).toContain('_start_2["<b>*start</b>"]');
+    expect(diagram).toContain('_end_2["<b>-end</b>"]');
+    expect(diagram).toContain("_start --> _start_2");
+    expect(diagram).toContain("_end_2 --> _end");
+  });
+
+  it("disambiguates event nodes whose joined ids would collide", () => {
+    const def: WorkflowDefinition = {
+      name: "wf",
+      initialState: "a",
+      states: {
+        a: { events: { b__c: { targetState: "done" } } },
+        a__b: { events: { c: { targetState: "done" } } },
+        done: {},
+      },
+    };
+    const diagram = toMermaidDiagram(def);
+    // state "a" + event "b__c" and state "a__b" + event "c" both join to
+    // "a__b__c" — the allocator must keep them distinct.
+    expect(diagram).toContain("a --> a__b__c");
+    expect(diagram).toContain("a__b --> a__b__c_2");
+  });
+});

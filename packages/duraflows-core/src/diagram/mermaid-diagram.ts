@@ -15,8 +15,35 @@ export interface MermaidDiagramOptions {
 
 const INDENT = "    ";
 
-function nodeId(name: string): string {
+function sanitizeId(name: string): string {
   return name.replace(/[^A-Za-z0-9_]/g, "_");
+}
+
+/**
+ * Per-diagram node-id allocator. Sanitization is lossy ("a b" and "a_b" both
+ * sanitize to "a_b"), so ids are allocated per logical key with a numeric
+ * suffix on collision — distinct names always get distinct ids, and the same
+ * key always resolves to the same id wherever it is referenced.
+ */
+function createIdAllocator(): (key: string, rawName: string) => string {
+  // _start/_end are synthetic nodes emitted unconditionally — reserve them so
+  // a state that sanitizes to the same token cannot merge with them.
+  const used = new Set(["_start", "_end"]);
+  const byKey = new Map<string, string>();
+  return (key, rawName) => {
+    const existing = byKey.get(key);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const base = sanitizeId(rawName) || "_node";
+    let id = base;
+    for (let n = 2; used.has(id); n++) {
+      id = `${base}_${n}`;
+    }
+    used.add(id);
+    byKey.set(key, id);
+    return id;
+  };
 }
 
 function escapeLabel(text: string): string {
@@ -36,6 +63,9 @@ export function toMermaidDiagram(definition: WorkflowDefinition, options?: Merma
   const errorEdgeIndices: number[] = [];
   let edgeIndex = 0;
 
+  const allocateId = createIdAllocator();
+  const stateId = (name: string): string => allocateId(`state:${name}`, name);
+
   // Header
   lines.push(`flowchart ${opts.direction}`);
   lines.push("");
@@ -47,7 +77,7 @@ export function toMermaidDiagram(definition: WorkflowDefinition, options?: Merma
   // State node definitions
   lines.push(`${INDENT}_start@{ shape: sm-circ }`);
   for (const stateName of Object.keys(definition.states)) {
-    lines.push(`${INDENT}${nodeId(stateName)}["<b>${escapeLabel(stateName)}</b>"]:::stateNode`);
+    lines.push(`${INDENT}${stateId(stateName)}["<b>${escapeLabel(stateName)}</b>"]:::stateNode`);
   }
   const hasTerminals = Object.values(definition.states).some((sd) => isTerminalState(sd));
   if (hasTerminals) {
@@ -56,7 +86,7 @@ export function toMermaidDiagram(definition: WorkflowDefinition, options?: Merma
   lines.push("");
 
   // Start edge
-  lines.push(`${INDENT}_start --> ${nodeId(definition.initialState)}`);
+  lines.push(`${INDENT}_start --> ${stateId(definition.initialState)}`);
   plainEdgeIndices.push(edgeIndex);
   edgeIndex++;
   lines.push("");
@@ -67,19 +97,19 @@ export function toMermaidDiagram(definition: WorkflowDefinition, options?: Merma
 
     // onEnter
     if (stateDef.onEnter && (stateDef.onEnter.targetState || stateDef.onEnter.errorState)) {
-      const nId = `${nodeId(stateName)}__onEnter`;
+      const nId = allocateId(`onEnter:${stateName}`, `${stateId(stateName)}__onEnter`);
       const label = formatOnEnterNodeLabel(stateDef.onEnter, opts);
       stateLines.push(`${INDENT}${nId}${label}`);
-      stateLines.push(`${INDENT}${nodeId(stateName)} --> ${nId}`);
+      stateLines.push(`${INDENT}${stateId(stateName)} --> ${nId}`);
       plainEdgeIndices.push(edgeIndex);
       edgeIndex++;
       if (stateDef.onEnter.targetState) {
-        stateLines.push(`${INDENT}${nId} --> ${nodeId(stateDef.onEnter.targetState)}`);
+        stateLines.push(`${INDENT}${nId} --> ${stateId(stateDef.onEnter.targetState)}`);
         successEdgeIndices.push(edgeIndex);
         edgeIndex++;
       }
       if (stateDef.onEnter.errorState) {
-        stateLines.push(`${INDENT}${nId} --> ${nodeId(stateDef.onEnter.errorState)}`);
+        stateLines.push(`${INDENT}${nId} --> ${stateId(stateDef.onEnter.errorState)}`);
         errorEdgeIndices.push(edgeIndex);
         edgeIndex++;
       }
@@ -89,19 +119,24 @@ export function toMermaidDiagram(definition: WorkflowDefinition, options?: Merma
     if (stateDef.events) {
       for (const [eventName, eventDef] of Object.entries(stateDef.events)) {
         if (!eventDef.targetState && !eventDef.errorState) continue;
-        const nId = `${nodeId(stateName)}__${nodeId(eventName)}`;
+        // The (state, event) pair is JSON-encoded so names containing any
+        // separator character cannot produce ambiguous allocator keys.
+        const nId = allocateId(
+          `event:${JSON.stringify([stateName, eventName])}`,
+          `${stateId(stateName)}__${eventName}`,
+        );
         const label = formatEventNodeLabel(eventName, eventDef, opts);
         stateLines.push(`${INDENT}${nId}${label}`);
-        stateLines.push(`${INDENT}${nodeId(stateName)} --> ${nId}`);
+        stateLines.push(`${INDENT}${stateId(stateName)} --> ${nId}`);
         plainEdgeIndices.push(edgeIndex);
         edgeIndex++;
         if (eventDef.targetState) {
-          stateLines.push(`${INDENT}${nId} --> ${nodeId(eventDef.targetState)}`);
+          stateLines.push(`${INDENT}${nId} --> ${stateId(eventDef.targetState)}`);
           successEdgeIndices.push(edgeIndex);
           edgeIndex++;
         }
         if (eventDef.errorState) {
-          stateLines.push(`${INDENT}${nId} --> ${nodeId(eventDef.errorState)}`);
+          stateLines.push(`${INDENT}${nId} --> ${stateId(eventDef.errorState)}`);
           errorEdgeIndices.push(edgeIndex);
           edgeIndex++;
         }
@@ -118,7 +153,7 @@ export function toMermaidDiagram(definition: WorkflowDefinition, options?: Merma
   if (hasTerminals) {
     for (const [stateName, stateDef] of Object.entries(definition.states)) {
       if (isTerminalState(stateDef)) {
-        lines.push(`${INDENT}${nodeId(stateName)} --> _end`);
+        lines.push(`${INDENT}${stateId(stateName)} --> _end`);
         plainEdgeIndices.push(edgeIndex);
         edgeIndex++;
       }
