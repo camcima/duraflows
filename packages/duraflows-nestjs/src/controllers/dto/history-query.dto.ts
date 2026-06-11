@@ -1,13 +1,19 @@
-import { IsOptional, IsNumberString, IsUUID } from "class-validator";
+import { Type } from "class-transformer";
+import { IsInt, IsOptional, IsUUID, Max, Min } from "class-validator";
 
 export class HistoryQueryDto {
   @IsOptional()
-  @IsNumberString()
-  limit?: string;
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  limit?: number;
 
   @IsOptional()
-  @IsNumberString()
-  offset?: string;
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offset?: number;
 }
 
 export class HistoryParamsDto {

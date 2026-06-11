@@ -28,7 +28,7 @@ describe("WorkflowQueryController", () => {
   it("getHistory() delegates with parsed limit and offset", async () => {
     const { controller, workflowService } = createMocks();
 
-    await controller.getHistory({ workflowInstanceUuid: "uuid-1" } as any, { limit: "10", offset: "5" } as any);
+    await controller.getHistory({ workflowInstanceUuid: "uuid-1" } as any, { limit: 10, offset: 5 } as any);
 
     expect(workflowService.getHistory).toHaveBeenCalledWith("uuid-1", {
       limit: 10,

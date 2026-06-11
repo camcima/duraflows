@@ -6,7 +6,7 @@ import { WorkflowExceptionFilter } from "../filters/workflow-exception.filter.js
 
 @Controller("workflows")
 @UseFilters(WorkflowExceptionFilter)
-@UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+@UsePipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }))
 export class WorkflowQueryController {
   constructor(private readonly workflowService: WorkflowService) {}
 
@@ -23,8 +23,8 @@ export class WorkflowQueryController {
     @Query() query: HistoryQueryDto,
   ): Promise<WorkflowHistoryRecord[]> {
     return this.workflowService.getHistory(params.workflowInstanceUuid, {
-      limit: query.limit ? parseInt(query.limit, 10) : undefined,
-      offset: query.offset ? parseInt(query.offset, 10) : undefined,
+      limit: query.limit,
+      offset: query.offset,
     });
   }
 }

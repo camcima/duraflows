@@ -17,7 +17,7 @@ import { WorkflowExceptionFilter } from "../filters/workflow-exception.filter.js
 
 @Controller("workflows")
 @UseFilters(WorkflowExceptionFilter)
-@UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+@UsePipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }))
 export class WorkflowInstanceController {
   constructor(private readonly workflowService: WorkflowService) {}
 
