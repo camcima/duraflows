@@ -39,6 +39,7 @@ export type {
 export {
   WorkflowError,
   WorkflowDefinitionError,
+  WorkflowInstanceNotFoundError,
   InvalidEventError,
   CommandFailureError,
   OnEnterDepthExceededError,

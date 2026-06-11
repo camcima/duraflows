@@ -28,7 +28,7 @@ import { OnEnterExecutor } from "../execution/on-enter-executor.js";
 import { TimeoutResolver } from "../execution/timeout-resolver.js";
 import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
 import type { WorkflowGuardRegistry } from "../registry/guard-registry.js";
-import { WorkflowError } from "../errors/index.js";
+import { WorkflowInstanceNotFoundError } from "../errors/index.js";
 import { WorkflowHandle } from "./workflow-handle.js";
 import type { WorkflowObserver, StateEnterEvent, ObserverErrorHandler } from "../types/observer.js";
 import { ObserverRegistry } from "./observer-registry.js";
@@ -178,7 +178,7 @@ export class WorkflowRuntime {
     const result = await this.transactionRunner.runInTransaction(async () => {
       const instance = await this.instanceStore.lockByUuid(input.workflowInstanceUuid);
       if (!instance) {
-        throw new WorkflowError(`Workflow instance "${input.workflowInstanceUuid}" not found`);
+        throw new WorkflowInstanceNotFoundError(input.workflowInstanceUuid);
       }
 
       const definition = this.definitionRegistry.get(instance.workflowName);
@@ -570,7 +570,7 @@ export class WorkflowRuntime {
   async getAvailableEvents(input: GetAvailableEventsInput): Promise<AvailableWorkflowEvent[]> {
     const instance = await this.instanceStore.findByUuid(input.workflowInstanceUuid);
     if (!instance) {
-      throw new WorkflowError(`Workflow instance "${input.workflowInstanceUuid}" not found`);
+      throw new WorkflowInstanceNotFoundError(input.workflowInstanceUuid);
     }
 
     const definition = this.definitionRegistry.get(instance.workflowName);
