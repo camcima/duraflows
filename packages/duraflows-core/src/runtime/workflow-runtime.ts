@@ -149,7 +149,9 @@ export class WorkflowRuntime {
       return result;
     }
 
-    await this.instanceStore.create(instance);
+    await this.transactionRunner.runInTransaction(async () => {
+      await this.instanceStore.create(instance);
+    });
 
     eventsToFire.push({
       workflowName: instance.workflowName,
@@ -218,7 +220,7 @@ export class WorkflowRuntime {
           outcome: "guard-rejected",
           rejectedBy: eventResult.rejectedBy,
           commandResultsJson: [],
-          triggerMetadata: input.triggerMetadata,
+          triggerMetadata: structuredClone(input.triggerMetadata ?? {}),
         });
 
         return {
@@ -262,7 +264,7 @@ export class WorkflowRuntime {
         outcome: eventResult.outcome,
         errorMessage,
         commandResultsJson: eventResult.commandResults,
-        triggerMetadata: input.triggerMetadata,
+        triggerMetadata: structuredClone(input.triggerMetadata ?? {}),
       });
 
       eventsToFire.push({
