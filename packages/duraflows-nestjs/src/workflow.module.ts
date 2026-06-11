@@ -66,7 +66,12 @@ export interface WorkflowModuleAsyncOptions<TArgs extends unknown[] = unknown[]>
   commands?: WorkflowCommandRegistration[];
   enableControllers?: boolean;
   useFactory: (...args: TArgs) => Promise<WorkflowModuleFactoryConfig> | WorkflowModuleFactoryConfig;
-  inject?: InjectionToken[];
+  /**
+   * DI tokens resolved and passed to `useFactory`, positionally. The tuple
+   * length is type-checked against the factory's parameter list when `TArgs`
+   * is supplied (e.g. `forRootAsync<[Pool, AuditObserver]>({ ... })`).
+   */
+  inject?: { [K in keyof TArgs]: InjectionToken };
 }
 
 const EXPORTED_TOKENS = [
@@ -220,7 +225,7 @@ export class WorkflowModule {
     const configProvider: Provider = {
       provide: "WORKFLOW_MODULE_OPTIONS",
       useFactory: options.useFactory,
-      inject: options.inject ?? [],
+      inject: (options.inject ?? []) as InjectionToken[],
     };
 
     const providers: Provider[] = [
