@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Kysely, PostgresDialect, sql } from "kysely";
 import { Pool } from "pg";
@@ -85,6 +85,12 @@ if (!databaseUrl) {
   });
 
   describe("kysely adapter integration", () => {
+    // Cleanup runs in afterEach (not at the end of each test body) so a
+    // failing assertion cannot leak rows into the next test.
+    afterEach(async () => {
+      await sql`TRUNCATE workflow_history, workflow_instances CASCADE`.execute(db);
+    });
+
     it("findExpired executes and claims only expired rows", async () => {
       const expired = makeInstance({ expiresAt: new Date("2020-01-01T00:00:00Z") });
       const future = makeInstance({ expiresAt: new Date("2099-01-01T00:00:00Z") });
@@ -96,7 +102,6 @@ if (!databaseUrl) {
       const found = await transactionRunner.runInTransaction(() => instanceStore.findExpired(10, new Date()));
 
       expect(found.map((i) => i.uuid)).toEqual([expired.uuid]);
-      await sql`TRUNCATE workflow_history, workflow_instances CASCADE`.execute(db);
     });
 
     it("history maps NULL rejected_by/error_message to undefined", async () => {
@@ -115,7 +120,6 @@ if (!databaseUrl) {
       const [record] = await historyStore.findByInstanceUuid(instance.uuid);
       expect(record.rejectedBy).toBeUndefined();
       expect(record.errorMessage).toBeUndefined();
-      await sql`TRUNCATE workflow_history, workflow_instances CASCADE`.execute(db);
     });
   });
 }

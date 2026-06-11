@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { runInstanceStoreConformance } from "@duraflows/core/testing";
@@ -57,6 +57,12 @@ if (!databaseUrl) {
   });
 
   describe("pg adapter integration", () => {
+    // Cleanup runs in afterEach (not at the end of each test body) so a
+    // failing assertion cannot leak rows into the next test.
+    afterEach(async () => {
+      await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
+    });
+
     it("findExpired executes against a real database and claims only expired rows", async () => {
       const expired = makeInstance({ expiresAt: new Date("2020-01-01T00:00:00Z") });
       const future = makeInstance({ expiresAt: new Date("2099-01-01T00:00:00Z") });
@@ -70,7 +76,6 @@ if (!databaseUrl) {
       const found = await transactionRunner.runInTransaction(() => instanceStore.findExpired(10, new Date()));
 
       expect(found.map((i) => i.uuid)).toEqual([expired.uuid]);
-      await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
     });
 
     it("update with a stale version throws (optimistic locking against real WHERE clause)", async () => {
@@ -84,7 +89,6 @@ if (!databaseUrl) {
       await expect(transactionRunner.runInTransaction(() => instanceStore.update(instance))).rejects.toThrow(
         /Optimistic locking failure/,
       );
-      await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
     });
 
     it("history round-trips guard-rejected outcome with rejected_by, and maps NULL to undefined", async () => {
@@ -120,7 +124,6 @@ if (!databaseUrl) {
       expect(guardRow.errorMessage).toBeUndefined(); // NULL must map to undefined, not null
       const successRow = records.find((r) => r.outcome === "success")!;
       expect(successRow.rejectedBy).toBeUndefined();
-      await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
     });
   });
 }
