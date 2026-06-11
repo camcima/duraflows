@@ -28,15 +28,15 @@ pnpm add @duraflows/nestjs
 
 You can set up the schema in two ways:
 
-**Option A: Copy the reference migration**
+**Option A: Copy the reference migrations**
 
-The `@duraflows/pg` package ships a reference SQL migration at:
+The `@duraflows/pg` package ships its reference SQL migrations at:
 
 ```
-node_modules/@duraflows/pg/sql/dbmate/001_workflow_core.sql
+node_modules/@duraflows/pg/sql/dbmate/
 ```
 
-Copy it into your migration directory and apply it with your migration tool (dbmate, Flyway, Knex, Prisma, etc.). This migration uses `gen_random_uuid()` (PostgreSQL 13+) for history record UUIDs.
+Copy **all** migration files in that directory and apply them in order with your migration tool (dbmate, Flyway, Knex, Prisma, etc.). Applying only the first migration produces an incomplete schema — the current runtime requires the columns added by the later migrations. The migrations use `gen_random_uuid()` (PostgreSQL 13+) for history record UUIDs.
 
 **Option B: Generate a migration with `generateMigrationSql()`**
 

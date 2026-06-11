@@ -114,7 +114,7 @@ const { up, down } = generateMigrationSql({ uuidStrategy: "uuidv7" });
 // Paste into your migration file
 ```
 
-A ready-made dbmate migration using `gen_random_uuid()` is also shipped at `sql/dbmate/001_workflow_core.sql`.
+Ready-made dbmate migrations using `gen_random_uuid()` are also shipped under `sql/dbmate/` — apply all of them in order (`001` alone is not sufficient for the current runtime).
 
 ### Guard rejections
 

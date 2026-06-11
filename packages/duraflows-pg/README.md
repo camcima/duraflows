@@ -60,15 +60,15 @@ export class AppModule {}
 
 ## Database Setup
 
-### Option 1: Copy the reference migration
+### Option 1: Copy the reference migrations
 
-A ready-made dbmate migration is shipped at:
+Ready-made dbmate migrations are shipped at:
 
 ```
-node_modules/@duraflows/pg/sql/dbmate/001_workflow_core.sql
+node_modules/@duraflows/pg/sql/dbmate/
 ```
 
-Copy it into your migration directory. It uses `gen_random_uuid()` (PostgreSQL 13+) for history record UUIDs.
+Copy **all** files in that directory (`001_workflow_core.sql`, `002_replace_trigger_with_metadata.sql`, `003_event_guards.sql`) into your migration directory and apply them in order. Applying only `001` produces a schema the current runtime cannot write to — `002`/`003` add the `metadata_json` handling and the `rejected_by` column / `guard-rejected` outcome that the history store requires. The migrations use `gen_random_uuid()` (PostgreSQL 13+) for history record UUIDs.
 
 ### Option 2: Generate with `generateMigrationSql()`
 
