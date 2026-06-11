@@ -41,8 +41,11 @@
       }
     }
   },
+  "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.tsbuildinfo",
+    "!dist/**/*.map"
   ],
   "publishConfig": {
     "access": "public"

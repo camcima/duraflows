@@ -40,9 +40,12 @@
       }
     }
   },
+  "sideEffects": false,
   "files": [
     "dist",
-    "sql"
+    "sql",
+    "!dist/**/*.tsbuildinfo",
+    "!dist/**/*.map"
   ],
   "publishConfig": {
     "access": "public"
