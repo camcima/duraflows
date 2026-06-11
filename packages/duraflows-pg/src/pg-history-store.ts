@@ -43,7 +43,7 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
     const result = await client.query(
       `SELECT * FROM workflow_history
        WHERE workflow_instance_uuid = $1
-       ORDER BY created_at DESC
+       ORDER BY created_at DESC, uuid DESC
        LIMIT $2 OFFSET $3`,
       [workflowInstanceUuid, limit, offset],
     );

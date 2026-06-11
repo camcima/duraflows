@@ -44,6 +44,7 @@ export class KyselyWorkflowHistoryStore implements WorkflowHistoryStore {
       .selectAll()
       .where("workflow_instance_uuid", "=", workflowInstanceUuid)
       .orderBy("created_at", "desc")
+      .orderBy("uuid", "desc")
       .limit(limit)
       .offset(offset)
       .execute();
