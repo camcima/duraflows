@@ -33,6 +33,9 @@ export { WorkflowEventController } from "./controllers/workflow-event.controller
 export { WorkflowQueryController } from "./controllers/workflow-query.controller.js";
 export { WorkflowTimeoutController } from "./controllers/workflow-timeout.controller.js";
 
+// Filters
+export { WorkflowExceptionFilter } from "./filters/workflow-exception.filter.js";
+
 // DTOs
 export {
   TriggerEventDto,

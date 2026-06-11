@@ -1,9 +1,11 @@
-import { Controller, Get, Param, Query, UsePipes, ValidationPipe } from "@nestjs/common";
+import { Controller, Get, Param, Query, UsePipes, UseFilters, ValidationPipe } from "@nestjs/common";
 import type { AvailableWorkflowEvent, WorkflowHistoryRecord } from "@duraflows/core";
 import { WorkflowService } from "../services/workflow.service.js";
 import { AvailableEventsParamsDto, HistoryQueryDto, HistoryParamsDto } from "./dto/index.js";
+import { WorkflowExceptionFilter } from "../filters/workflow-exception.filter.js";
 
 @Controller("workflows")
+@UseFilters(WorkflowExceptionFilter)
 @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
 export class WorkflowQueryController {
   constructor(private readonly workflowService: WorkflowService) {}

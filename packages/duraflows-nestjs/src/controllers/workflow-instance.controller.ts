@@ -5,6 +5,7 @@ import {
   Param,
   Body,
   UsePipes,
+  UseFilters,
   ValidationPipe,
   NotFoundException,
   ParseUUIDPipe,
@@ -12,8 +13,10 @@ import {
 import type { WorkflowInstance } from "@duraflows/core";
 import { WorkflowService } from "../services/workflow.service.js";
 import { CreateInstanceDto } from "./dto/index.js";
+import { WorkflowExceptionFilter } from "../filters/workflow-exception.filter.js";
 
 @Controller("workflows")
+@UseFilters(WorkflowExceptionFilter)
 @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
 export class WorkflowInstanceController {
   constructor(private readonly workflowService: WorkflowService) {}
