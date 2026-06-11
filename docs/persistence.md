@@ -389,6 +389,16 @@ Each `triggerEvent()` call runs in a single transaction:
 
 If any step fails (including command exceptions), the entire transaction rolls back. No partial state is persisted.
 
+### Context serialization fidelity
+
+`context` and `metadata` are persisted as JSONB via `JSON.stringify`. Only plain JSON survives the round-trip:
+
+- `Date` values are serialized to ISO strings and come back as **strings** — store `ctx.now.toISOString()` explicitly rather than `Date` objects.
+- Keys with `undefined` values are dropped on write and never restored.
+- `bigint`, `Map`, `Set`, class instances, and circular references are not supported (`bigint` throws; the others silently lose data).
+
+Store IDs and primitives, not rich objects.
+
 ## Adapter Conformance Tests
 
 `@duraflows/core` ships a shared conformance suite that any adapter can import to verify it satisfies the cross-adapter contract. The helper is exported from the `@duraflows/core/testing` subpath (a dev-time entry point, not part of the main bundle).
