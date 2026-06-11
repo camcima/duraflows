@@ -101,6 +101,25 @@ export function runInstanceStoreConformance(label: string, harness: InstanceStor
       }
     });
 
+    it("update with a stale version throws (optimistic locking)", async () => {
+      const { store, transactionRunner, teardown } = await harness.setup();
+      try {
+        const instance = makeInstance();
+        await transactionRunner.runInTransaction(() => store.create(instance));
+
+        // Runtime convention: `version` is pre-incremented before update(),
+        // so adapters match on `version = instance.version - 1`.
+        instance.version = 1;
+        instance.updatedAt = new Date("2026-01-02T00:00:00Z");
+        await transactionRunner.runInTransaction(() => store.update(instance));
+
+        // Re-issuing the same (now stale) version must throw.
+        await expect(transactionRunner.runInTransaction(() => store.update(instance))).rejects.toThrow();
+      } finally {
+        await teardown();
+      }
+    });
+
     it("update does NOT overwrite metadata (metadata is immutable)", async () => {
       const { store, transactionRunner, teardown } = await harness.setup();
       try {
@@ -110,7 +129,10 @@ export function runInstanceStoreConformance(label: string, harness: InstanceStor
         await transactionRunner.runInTransaction(async () => {
           const locked = await store.lockByUuid(instance.uuid);
           expect(locked).not.toBeNull();
-          // Mutate the metadata on the in-memory object — adapters must ignore it
+          // Mutate the metadata on the in-memory object — adapters must ignore it.
+          // Must increment version to satisfy the optimistic-locking contract
+          // (same convention as the runtime: version is pre-incremented before update()).
+          locked!.version = 1;
           locked!.metadata = { tenant: "bob" };
           await store.update(locked!);
         });

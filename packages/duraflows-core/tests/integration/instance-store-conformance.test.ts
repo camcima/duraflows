@@ -4,14 +4,8 @@
  * core integration tests. This both demonstrates the helper and ensures it
  * stays in sync with the interface.
  */
-import { randomUUID } from "node:crypto";
 import { runInstanceStoreConformance } from "../../src/testing/index.js";
-import type {
-  WorkflowInstanceStore,
-  WorkflowHistoryStore,
-  WorkflowHistoryRecord,
-  WorkflowTransactionRunner,
-} from "../../src/types/persistence.js";
+import type { WorkflowInstanceStore, WorkflowTransactionRunner } from "../../src/types/persistence.js";
 import type { WorkflowInstance } from "../../src/types/runtime.js";
 
 // ---------------------------------------------------------------------------
@@ -37,7 +31,11 @@ class InMemoryInstanceStore implements WorkflowInstanceStore {
 
   async update(instance: WorkflowInstance): Promise<void> {
     const existing = this.instances.get(instance.uuid);
-    if (!existing) return;
+    // Optimistic locking: the runtime pre-increments `version`, so the stored
+    // row must be at `instance.version - 1` for the update to apply.
+    if (!existing || existing.version !== instance.version - 1) {
+      throw new Error(`Optimistic locking failure: workflow instance "${instance.uuid}" was modified concurrently`);
+    }
     // Metadata is immutable — restore it from the stored record
     this.instances.set(instance.uuid, structuredClone({ ...instance, metadata: existing.metadata }));
   }
@@ -51,26 +49,6 @@ class InMemoryInstanceStore implements WorkflowInstanceStore {
       }
     }
     return results;
-  }
-}
-
-class InMemoryHistoryStore implements WorkflowHistoryStore {
-  private readonly records: Array<WorkflowHistoryRecord & { uuid: string }> = [];
-
-  async append(entry: WorkflowHistoryRecord): Promise<string> {
-    const uuid = randomUUID();
-    this.records.push({ ...entry, uuid });
-    return uuid;
-  }
-
-  async findByInstanceUuid(
-    workflowInstanceUuid: string,
-    options?: { limit?: number; offset?: number },
-  ): Promise<WorkflowHistoryRecord[]> {
-    const matching = this.records.filter((r) => r.workflowInstanceUuid === workflowInstanceUuid);
-    const offset = options?.offset ?? 0;
-    const limit = options?.limit ?? matching.length;
-    return matching.slice(offset, offset + limit);
   }
 }
 
