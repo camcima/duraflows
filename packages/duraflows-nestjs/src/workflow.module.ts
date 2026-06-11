@@ -1,4 +1,4 @@
-import { Module, type DynamicModule, type Type, type Provider, type InjectionToken } from "@nestjs/common";
+import { Logger, Module, type DynamicModule, type Type, type Provider, type InjectionToken } from "@nestjs/common";
 import { DiscoveryModule, DiscoveryService, ModuleRef } from "@nestjs/core";
 import type {
   WorkflowDefinition,
@@ -74,6 +74,13 @@ export interface WorkflowModuleAsyncOptions<TArgs extends unknown[] = unknown[]>
   inject?: { [K in keyof TArgs]: InjectionToken };
 }
 
+// Surfaces non-fatal definition warnings (e.g. unreachable states) that the
+// registry would otherwise compute and discard.
+const validationLogger = new Logger("WorkflowModule");
+const logValidationWarning = (workflowName: string, warning: { path: string; message: string }): void => {
+  validationLogger.warn(`Workflow "${workflowName}": ${warning.message} (${warning.path})`);
+};
+
 const EXPORTED_TOKENS = [
   WorkflowService,
   WorkflowTimeoutService,
@@ -141,6 +148,7 @@ export class WorkflowModule {
             validator: new WorkflowValidator(),
             compiler: new WorkflowCompiler(),
             validationOptions: { knownCommandNames, knownGuardNames },
+            onValidationWarning: logValidationWarning,
           });
           for (const workflow of options.workflows) {
             registry.register(workflow);
@@ -267,6 +275,7 @@ export class WorkflowModule {
             validator: new WorkflowValidator(),
             compiler: new WorkflowCompiler(),
             validationOptions: { knownCommandNames, knownGuardNames },
+            onValidationWarning: logValidationWarning,
           });
           for (const workflow of config.workflows) {
             registry.register(workflow);

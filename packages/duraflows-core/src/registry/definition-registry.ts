@@ -1,6 +1,10 @@
 import type { WorkflowDefinition } from "../types/definition.js";
 import { WorkflowDefinitionError } from "../errors/index.js";
-import type { WorkflowValidator, WorkflowValidationOptions } from "../validation/workflow-validator.js";
+import type {
+  WorkflowValidator,
+  WorkflowValidationOptions,
+  ValidationError,
+} from "../validation/workflow-validator.js";
 import type { WorkflowCompiler } from "../compilation/workflow-compiler.js";
 import { deepFreeze } from "../util/deep-freeze.js";
 
@@ -14,6 +18,11 @@ export interface InMemoryDefinitionRegistryOptions {
   validator?: WorkflowValidator;
   compiler?: WorkflowCompiler;
   validationOptions?: WorkflowValidationOptions;
+  /**
+   * Called once per non-fatal validation warning (e.g. unreachable states)
+   * at registration time. Without it, warnings are computed and discarded.
+   */
+  onValidationWarning?: (workflowName: string, warning: ValidationError) => void;
 }
 
 export class InMemoryDefinitionRegistry implements WorkflowDefinitionRegistry {
@@ -21,11 +30,13 @@ export class InMemoryDefinitionRegistry implements WorkflowDefinitionRegistry {
   private readonly validator?: WorkflowValidator;
   private readonly compiler?: WorkflowCompiler;
   private readonly validationOptions?: WorkflowValidationOptions;
+  private readonly onValidationWarning?: (workflowName: string, warning: ValidationError) => void;
 
   constructor(options?: InMemoryDefinitionRegistryOptions) {
     this.validator = options?.validator;
     this.compiler = options?.compiler;
     this.validationOptions = options?.validationOptions;
+    this.onValidationWarning = options?.onValidationWarning;
   }
 
   register(definition: WorkflowDefinition): void {
@@ -42,6 +53,11 @@ export class InMemoryDefinitionRegistry implements WorkflowDefinitionRegistry {
           frozen.name,
           `Invalid definition: ${validation.errors.map((e) => e.message).join("; ")}`,
         );
+      }
+      if (this.onValidationWarning) {
+        for (const warning of validation.warnings ?? []) {
+          this.onValidationWarning(frozen.name, warning);
+        }
       }
     }
 
