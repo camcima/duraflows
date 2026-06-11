@@ -1,4 +1,12 @@
-import { Logger, Module, type DynamicModule, type Type, type Provider, type InjectionToken } from "@nestjs/common";
+import {
+  Logger,
+  Module,
+  type DynamicModule,
+  type Type,
+  type Provider,
+  type InjectionToken,
+  type OptionalFactoryDependency,
+} from "@nestjs/common";
 import { DiscoveryModule, DiscoveryService, ModuleRef } from "@nestjs/core";
 import type {
   WorkflowDefinition,
@@ -71,7 +79,7 @@ export interface WorkflowModuleAsyncOptions<TArgs extends unknown[] = unknown[]>
    * length is type-checked against the factory's parameter list when `TArgs`
    * is supplied (e.g. `forRootAsync<[Pool, AuditObserver]>({ ... })`).
    */
-  inject?: { [K in keyof TArgs]: InjectionToken };
+  inject?: { [K in keyof TArgs]: InjectionToken | OptionalFactoryDependency };
 }
 
 // Surfaces non-fatal definition warnings (e.g. unreachable states) that the
@@ -230,7 +238,7 @@ export class WorkflowModule {
     const configProvider: Provider = {
       provide: "WORKFLOW_MODULE_OPTIONS",
       useFactory: options.useFactory,
-      inject: (options.inject ?? []) as InjectionToken[],
+      inject: (options.inject ?? []) as Array<InjectionToken | OptionalFactoryDependency>,
     };
 
     const providers: Provider[] = [
