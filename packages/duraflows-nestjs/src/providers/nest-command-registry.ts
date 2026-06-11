@@ -28,7 +28,16 @@ export class NestCommandRegistry implements WorkflowCommandRegistry {
     if (!cls) {
       throw new WorkflowError(`Command "${name}" not found in registry`);
     }
-    return this.moduleRef.get(cls, { strict: false });
+    try {
+      return this.moduleRef.get(cls, { strict: false });
+    } catch (error) {
+      throw new WorkflowError(
+        `Command "${name}" could not be resolved from the NestJS container. ` +
+          `Workflow command providers must be singleton-scoped (the default); ` +
+          `REQUEST- and TRANSIENT-scoped providers are not supported.`,
+        error,
+      );
+    }
   }
 
   has(name: string): boolean {

@@ -83,4 +83,15 @@ describe("NestCommandRegistry", () => {
     expect(registry.getRegisteredNames()).toEqual(new Set());
     expect(registry.has("anything")).toBe(false);
   });
+
+  it("wraps scope-resolution failures with a singleton-scope hint", () => {
+    const moduleRef = {
+      get: vi.fn(() => {
+        throw new Error("ScopedCommand is marked as a scoped provider. Use the resolve() method instead.");
+      }),
+    } as unknown as ModuleRef;
+    class ScopedCommand {}
+    const registry = new NestCommandRegistry(moduleRef, [{ name: "scoped", useClass: ScopedCommand as any }]);
+    expect(() => registry.get("scoped")).toThrow(/singleton-scoped/);
+  });
 });
