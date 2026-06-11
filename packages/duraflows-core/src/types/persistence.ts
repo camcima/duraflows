@@ -30,9 +30,12 @@ export interface WorkflowInstanceStore {
    * `version`, `context`, `expiresAt`, `lastTransitionAt`, `updatedAt`).
    * `metadata` is immutable and is NOT updated.
    *
-   * Uses optimistic locking: adapters must include `version` in the WHERE
-   * clause and throw `WorkflowError` if no row is matched (concurrent
-   * modification).
+   * Uses optimistic locking. The runtime increments `instance.version`
+   * BEFORE calling this method, so the passed `version` is the NEW value.
+   * Adapters must match on the previous version in the WHERE clause
+   * (`WHERE version = instance.version - 1`), SET `version` to
+   * `instance.version`, and throw `WorkflowError` if no row is matched
+   * (concurrent modification).
    *
    * Transactional: typically inside the same transaction as `lockByUuid`,
    * history appends, and observer-event queuing.
@@ -44,9 +47,12 @@ export interface WorkflowInstanceStore {
    * `now` parameter — not the database clock).
    *
    * **Transactional: REQUIRED.** Must use `SELECT ... FOR UPDATE SKIP LOCKED`
-   * (or equivalent) so multiple workers can safely call this concurrently
-   * without processing the same instance twice. The row locks are held for
-   * the duration of the caller's transaction.
+   * (or equivalent) so concurrently sweeping workers skip rows another
+   * worker is currently scanning. The locks last only as long as the
+   * caller's transaction — the runtime intentionally runs this in a short
+   * transaction and re-locks each instance individually (via `lockByUuid`
+   * plus an `expiresAt` re-check) before processing, so cross-worker
+   * exclusivity comes from that re-lock, not from this scan.
    */
   findExpired(limit: number, now: Date): Promise<WorkflowInstance[]>;
 }
