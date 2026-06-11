@@ -13,7 +13,8 @@ export interface CommandResult {
 
 export interface WorkflowExecutionContext {
   triggerMetadata: Readonly<Record<string, unknown>>;
-  now: Date;
+  /** Injected clock value for this transition. Treat as immutable — do not call Date mutators on it. */
+  readonly now: Date;
   context: Record<string, unknown>;
   metadata: Readonly<Record<string, unknown>>;
   readonly commandMetadata: Readonly<Record<string, unknown>>;
