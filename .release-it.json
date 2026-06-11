@@ -10,7 +10,7 @@
     "publish": false
   },
   "hooks": {
-    "before:bump": "pnpm -r exec npm version ${version} --no-git-tag-version --allow-same-version && pnpm --filter @duraflows/pg exec npm pkg set \"dependencies.@duraflows/core=^${version}\" && pnpm --filter @duraflows/kysely exec npm pkg set \"dependencies.@duraflows/core=^${version}\" && pnpm --filter @duraflows/nestjs exec npm pkg set \"dependencies.@duraflows/core=^${version}\"",
+    "before:bump": "pnpm -r exec npm version ${version} --no-git-tag-version --allow-same-version && pnpm --filter @duraflows/pg exec npm pkg set \"peerDependencies.@duraflows/core=^${version}\" && pnpm --filter @duraflows/kysely exec npm pkg set \"peerDependencies.@duraflows/core=^${version}\" && pnpm --filter @duraflows/nestjs exec npm pkg set \"peerDependencies.@duraflows/core=^${version}\"",
     "after:bump": "pnpm install --lockfile-only && pnpm run build",
     "after:release": "pnpm -r publish --no-git-checks"
   },

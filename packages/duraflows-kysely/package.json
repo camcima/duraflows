@@ -51,15 +51,15 @@
     "build": "tsc --build"
   },
   "dependencies": {
-    "@duraflows/core": "^2.1.0",
     "kysely": "^0.29.2"
+  },
+  "peerDependencies": {
+    "@duraflows/core": "^2.1.0"
   },
   "devDependencies": {
     "pg": "^8.21.0",
     "@types/pg": "^8.11.0",
-    "@duraflows/pg": "workspace:*"
-  },
-  "peerDependencies": {
-    "pg": "^8.13.0"
+    "@duraflows/pg": "workspace:*",
+    "@duraflows/core": "workspace:*"
   }
 }
