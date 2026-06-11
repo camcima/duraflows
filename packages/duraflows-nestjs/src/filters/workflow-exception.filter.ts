@@ -1,8 +1,10 @@
-import { Catch, HttpStatus, type ArgumentsHost, type ExceptionFilter } from "@nestjs/common";
+import { Catch, HttpStatus, Logger, type ArgumentsHost, type ExceptionFilter } from "@nestjs/common";
 import { WorkflowError, WorkflowInstanceNotFoundError, InvalidEventError } from "@duraflows/core";
 
+// `send()` (unlike `json()`) exists on both Express and Fastify replies, and
+// both serialize a plain object to JSON — keep this filter platform-agnostic.
 interface HttpResponseLike {
-  status(code: number): { json(body: unknown): void };
+  status(code: number): { send(body: unknown): void };
 }
 
 /**
@@ -13,11 +15,13 @@ interface HttpResponseLike {
  */
 @Catch(WorkflowError)
 export class WorkflowExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(WorkflowExceptionFilter.name);
+
   catch(exception: WorkflowError, host: ArgumentsHost): void {
     const response = host.switchToHttp().getResponse<HttpResponseLike>();
 
     if (exception instanceof WorkflowInstanceNotFoundError) {
-      response.status(HttpStatus.NOT_FOUND).json({
+      response.status(HttpStatus.NOT_FOUND).send({
         statusCode: HttpStatus.NOT_FOUND,
         error: "Not Found",
         message: exception.message,
@@ -26,7 +30,7 @@ export class WorkflowExceptionFilter implements ExceptionFilter {
     }
 
     if (exception instanceof InvalidEventError) {
-      response.status(HttpStatus.CONFLICT).json({
+      response.status(HttpStatus.CONFLICT).send({
         statusCode: HttpStatus.CONFLICT,
         error: "Conflict",
         message: exception.message,
@@ -34,7 +38,11 @@ export class WorkflowExceptionFilter implements ExceptionFilter {
       return;
     }
 
-    response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+    // The response body is sanitized, so log the real cause here — otherwise
+    // unmapped domain errors (e.g. optimistic-locking conflicts under
+    // concurrency) become undiagnosable silent 500s.
+    this.logger.error(exception.message, exception.stack);
+    response.status(HttpStatus.INTERNAL_SERVER_ERROR).send({
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       error: "Internal Server Error",
       message: "Internal server error",
