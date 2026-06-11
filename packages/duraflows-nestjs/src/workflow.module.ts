@@ -117,12 +117,9 @@ export class WorkflowModule {
       },
       {
         provide: WORKFLOW_GUARD_REGISTRY,
+        // guards/guardRegistry mutual exclusion is enforced synchronously at
+        // the top of forRoot, before this factory can ever run.
         useFactory: () => {
-          if (options.guardRegistry && options.guards && options.guards.length > 0) {
-            throw new Error(
-              "WorkflowModule: cannot supply both `guards` and `guardRegistry` — they are mutually exclusive. Pass guards or a custom registry, not both.",
-            );
-          }
           if (options.guardRegistry) return options.guardRegistry;
           const registry = new InMemoryGuardRegistry();
           for (const guard of options.guards ?? []) {
