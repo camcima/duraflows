@@ -450,6 +450,50 @@ describe("node shapes", () => {
   });
 });
 
+describe("special characters in names", () => {
+  it("sanitizes node ids and escapes labels", () => {
+    const diagram = toMermaidDiagram({
+      name: "wf",
+      initialState: "draft <v1>",
+      states: {
+        "draft <v1>": { events: { 'approve "fast"': { targetState: "done" } } },
+        done: {},
+      },
+    });
+    // Labels must be HTML-escaped
+    expect(diagram).toContain("draft &lt;v1&gt;");
+    expect(diagram).toContain("approve &quot;fast&quot;");
+    // Raw unescaped forms must NOT appear in label text
+    expect(diagram).not.toContain("<b>draft <v1></b>");
+    // Node ids must be sanitized to [A-Za-z0-9_] — the raw state name with
+    // spaces/angle brackets must never appear as a bare node id token.
+    expect(diagram).not.toMatch(/(^|\s)draft <v1>(\[|__| -->)/);
+  });
+
+  it("escapes command names containing special characters when showCommands is enabled", () => {
+    const diagram = toMermaidDiagram(
+      {
+        name: "wf",
+        initialState: "a",
+        states: {
+          a: {
+            events: {
+              Go: {
+                targetState: "b",
+                commands: [{ name: 'send<email>"now"' }],
+              },
+            },
+          },
+          b: {},
+        },
+      },
+      { showCommands: true },
+    );
+    expect(diagram).toContain("send&lt;email&gt;&quot;now&quot;");
+    expect(diagram).not.toContain('send<email>"now"');
+  });
+});
+
 describe("state with both events and onEnter", () => {
   it("emits onEnter node before event nodes", () => {
     const def: WorkflowDefinition = {

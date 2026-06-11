@@ -15,6 +15,14 @@ export interface MermaidDiagramOptions {
 
 const INDENT = "    ";
 
+function nodeId(name: string): string {
+  return name.replace(/[^A-Za-z0-9_]/g, "_");
+}
+
+function escapeLabel(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 export function toMermaidDiagram(definition: WorkflowDefinition, options?: MermaidDiagramOptions): string {
   const opts: Required<MermaidDiagramOptions> = {
     showCommands: false,
@@ -39,7 +47,7 @@ export function toMermaidDiagram(definition: WorkflowDefinition, options?: Merma
   // State node definitions
   lines.push(`${INDENT}_start@{ shape: sm-circ }`);
   for (const stateName of Object.keys(definition.states)) {
-    lines.push(`${INDENT}${stateName}["<b>${stateName}</b>"]:::stateNode`);
+    lines.push(`${INDENT}${nodeId(stateName)}["<b>${escapeLabel(stateName)}</b>"]:::stateNode`);
   }
   const hasTerminals = Object.values(definition.states).some((sd) => isTerminalState(sd));
   if (hasTerminals) {
@@ -48,7 +56,7 @@ export function toMermaidDiagram(definition: WorkflowDefinition, options?: Merma
   lines.push("");
 
   // Start edge
-  lines.push(`${INDENT}_start --> ${definition.initialState}`);
+  lines.push(`${INDENT}_start --> ${nodeId(definition.initialState)}`);
   plainEdgeIndices.push(edgeIndex);
   edgeIndex++;
   lines.push("");
@@ -59,19 +67,19 @@ export function toMermaidDiagram(definition: WorkflowDefinition, options?: Merma
 
     // onEnter
     if (stateDef.onEnter && (stateDef.onEnter.targetState || stateDef.onEnter.errorState)) {
-      const nodeId = `${stateName}__onEnter`;
+      const nId = `${nodeId(stateName)}__onEnter`;
       const label = formatOnEnterNodeLabel(stateDef.onEnter, opts);
-      stateLines.push(`${INDENT}${nodeId}${label}`);
-      stateLines.push(`${INDENT}${stateName} --> ${nodeId}`);
+      stateLines.push(`${INDENT}${nId}${label}`);
+      stateLines.push(`${INDENT}${nodeId(stateName)} --> ${nId}`);
       plainEdgeIndices.push(edgeIndex);
       edgeIndex++;
       if (stateDef.onEnter.targetState) {
-        stateLines.push(`${INDENT}${nodeId} --> ${stateDef.onEnter.targetState}`);
+        stateLines.push(`${INDENT}${nId} --> ${nodeId(stateDef.onEnter.targetState)}`);
         successEdgeIndices.push(edgeIndex);
         edgeIndex++;
       }
       if (stateDef.onEnter.errorState) {
-        stateLines.push(`${INDENT}${nodeId} --> ${stateDef.onEnter.errorState}`);
+        stateLines.push(`${INDENT}${nId} --> ${nodeId(stateDef.onEnter.errorState)}`);
         errorEdgeIndices.push(edgeIndex);
         edgeIndex++;
       }
@@ -81,19 +89,19 @@ export function toMermaidDiagram(definition: WorkflowDefinition, options?: Merma
     if (stateDef.events) {
       for (const [eventName, eventDef] of Object.entries(stateDef.events)) {
         if (!eventDef.targetState && !eventDef.errorState) continue;
-        const nodeId = `${stateName}__${eventName}`;
+        const nId = `${nodeId(stateName)}__${nodeId(eventName)}`;
         const label = formatEventNodeLabel(eventName, eventDef, opts);
-        stateLines.push(`${INDENT}${nodeId}${label}`);
-        stateLines.push(`${INDENT}${stateName} --> ${nodeId}`);
+        stateLines.push(`${INDENT}${nId}${label}`);
+        stateLines.push(`${INDENT}${nodeId(stateName)} --> ${nId}`);
         plainEdgeIndices.push(edgeIndex);
         edgeIndex++;
         if (eventDef.targetState) {
-          stateLines.push(`${INDENT}${nodeId} --> ${eventDef.targetState}`);
+          stateLines.push(`${INDENT}${nId} --> ${nodeId(eventDef.targetState)}`);
           successEdgeIndices.push(edgeIndex);
           edgeIndex++;
         }
         if (eventDef.errorState) {
-          stateLines.push(`${INDENT}${nodeId} --> ${eventDef.errorState}`);
+          stateLines.push(`${INDENT}${nId} --> ${nodeId(eventDef.errorState)}`);
           errorEdgeIndices.push(edgeIndex);
           edgeIndex++;
         }
@@ -110,7 +118,7 @@ export function toMermaidDiagram(definition: WorkflowDefinition, options?: Merma
   if (hasTerminals) {
     for (const [stateName, stateDef] of Object.entries(definition.states)) {
       if (isTerminalState(stateDef)) {
-        lines.push(`${INDENT}${stateName} --> _end`);
+        lines.push(`${INDENT}${nodeId(stateName)} --> _end`);
         plainEdgeIndices.push(edgeIndex);
         edgeIndex++;
       }
@@ -138,14 +146,14 @@ function formatEventNodeLabel(
   eventDef: WorkflowEventDefinition,
   opts: Required<MermaidDiagramOptions>,
 ): string {
-  let label = eventName;
+  let label = escapeLabel(eventName);
 
   if (eventDef.timeout) {
     label += ` ⧖${formatTimeout(eventDef.timeout)}`;
   }
 
   if (opts.showCommands && eventDef.commands && eventDef.commands.length > 0) {
-    const cmdLines = eventDef.commands.map((c) => c.name).join("<br/>");
+    const cmdLines = eventDef.commands.map((c) => escapeLabel(c.name)).join("<br/>");
     label += `<br/><small><i>${cmdLines}</i></small>`;
   }
 
@@ -156,7 +164,7 @@ function formatOnEnterNodeLabel(onEnterDef: WorkflowOnEnterDefinition, opts: Req
   let label = "🗲";
 
   if (opts.showCommands && onEnterDef.commands && onEnterDef.commands.length > 0) {
-    const cmdLines = onEnterDef.commands.map((c) => c.name).join("<br/>");
+    const cmdLines = onEnterDef.commands.map((c) => escapeLabel(c.name)).join("<br/>");
     label += `<br/><small><i>${cmdLines}</i></small>`;
   }
 
