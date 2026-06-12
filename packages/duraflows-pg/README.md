@@ -19,6 +19,8 @@ Part of the [duraflows](https://github.com/camcima/duraflows) monorepo.
 pnpm add @duraflows/core @duraflows/pg pg
 ```
 
+> **Note:** `@duraflows/core` and `pg` are peer dependencies — you install them alongside this package so your app and the adapter share a single `Pool` driver and core instance.
+
 ## Quick Start
 
 ```ts

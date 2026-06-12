@@ -53,14 +53,13 @@
   "scripts": {
     "build": "tsc --build"
   },
-  "dependencies": {
-    "pg": "^8.21.0"
-  },
   "peerDependencies": {
-    "@duraflows/core": "^2.1.0"
+    "@duraflows/core": "^2.1.0",
+    "pg": "^8.13.0"
   },
   "devDependencies": {
     "@duraflows/core": "workspace:*",
-    "@types/pg": "^8.11.0"
+    "@types/pg": "^8.11.0",
+    "pg": "^8.21.0"
   }
 }
