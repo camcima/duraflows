@@ -517,6 +517,59 @@ describe("state with both events and onEnter", () => {
   });
 });
 
+describe("fallback and edge cases", () => {
+  it("uses the _node fallback id for a state name that sanitizes to empty", () => {
+    const def: WorkflowDefinition = {
+      name: "wf",
+      initialState: "",
+      states: {
+        "": {},
+      },
+    };
+    const diagram = toMermaidDiagram(def);
+    // The empty state name sanitizes to "" — the allocator falls back to "_node".
+    expect(diagram).toContain('_node["<b></b>"]:::stateNode');
+    expect(diagram).toContain("_start --> _node");
+  });
+
+  it("emits no _end node when the workflow has no terminal states", () => {
+    const def: WorkflowDefinition = {
+      name: "ping-pong",
+      initialState: "a",
+      states: {
+        a: { events: { go: { targetState: "b" } } },
+        b: { events: { back: { targetState: "a" } } },
+      },
+    };
+    const diagram = toMermaidDiagram(def);
+    expect(diagram).not.toContain("_end@");
+    expect(diagram).not.toContain("--> _end");
+  });
+
+  it("renders onEnter with only errorState — error edge but no success edge", () => {
+    const def: WorkflowDefinition = {
+      name: "on-enter-error-only",
+      initialState: "a",
+      states: {
+        a: {
+          onEnter: {
+            errorState: "err",
+            commands: [{ name: "mayFail" }],
+          },
+        },
+        err: {},
+      },
+    };
+    const diagram = toMermaidDiagram(def);
+    expect(diagram).toContain('a__onEnter(["🗲"])');
+    expect(diagram).toContain("a --> a__onEnter");
+    expect(diagram).toContain("a__onEnter --> err");
+    // The only colored edge is the error edge — no success edge exists.
+    expect(diagram).toContain("stroke:#dc3545");
+    expect(diagram).not.toContain("stroke:#22c55e");
+  });
+});
+
 describe("node id collisions", () => {
   it("keeps distinct ids for names that sanitize identically", () => {
     const def: WorkflowDefinition = {

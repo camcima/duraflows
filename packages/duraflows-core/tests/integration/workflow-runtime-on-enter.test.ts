@@ -1184,4 +1184,278 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     expect((sharedDefinition.states.processing.context!.policy as { retries: number }).retries).toBe(3);
   });
+
+  it("processExpiredWorkflows routes a mandatory timeout-command failure to errorState with the fallback error message", async () => {
+    const definition: WorkflowDefinition = {
+      name: "timeout-error-route",
+      initialState: "waiting",
+      states: {
+        waiting: {
+          events: {
+            expire: {
+              targetState: "expired",
+              errorState: "expireFailed",
+              timeout: { afterMinutes: 30 },
+              commands: [{ name: "bareFail" }],
+            },
+          },
+        },
+        expired: {},
+        expireFailed: {},
+      },
+    };
+
+    definitionRegistry.register(definition);
+    // Bare failure: no message, no code — exercises the "Command failed" fallback.
+    commandRegistry.register("bareFail", {
+      execute: async () => ({ ok: false }),
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "timeout-error-route" });
+
+    // Force expiration in the past.
+    const stored = await instanceStore.findByUuid(instance.uuid);
+    stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    await instanceStore.update(stored!);
+
+    const result = await runtime.processExpiredWorkflows();
+    expect(result.processed).toBe(1);
+    expect(result.failed).toHaveLength(0);
+
+    // The instance moved to the errorState, not the targetState.
+    const updated = await instanceStore.findByUuid(instance.uuid);
+    expect(updated!.currentState).toBe("expireFailed");
+
+    const history = await historyStore.findByInstanceUuid(instance.uuid);
+    expect(history).toHaveLength(1);
+    expect(history[0].eventName).toBe("expire");
+    expect(history[0].fromState).toBe("waiting");
+    expect(history[0].toState).toBe("expireFailed");
+    expect(history[0].outcome).toBe("failure");
+    expect(history[0].errorMessage).toBe("Command failed");
+  });
+
+  it("processExpiredWorkflows skips an instance that disappeared between scan and re-lock", async () => {
+    const definition: WorkflowDefinition = {
+      name: "vanished-between-scan-and-lock",
+      initialState: "waiting",
+      states: {
+        waiting: {
+          events: {
+            expire: {
+              targetState: "expired",
+              timeout: { afterMinutes: 30 },
+            },
+          },
+        },
+        expired: {},
+      },
+    };
+
+    definitionRegistry.register(definition);
+
+    const instance = await runtime.createInstance({ workflowName: "vanished-between-scan-and-lock" });
+
+    const stored = await instanceStore.findByUuid(instance.uuid);
+    stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    await instanceStore.update(stored!);
+
+    // Simulate: instance deleted by another worker between findExpired and lockByUuid.
+    const lockSpy = vi.spyOn(instanceStore, "lockByUuid").mockResolvedValueOnce(null);
+
+    const result = await runtime.processExpiredWorkflows();
+
+    expect(result).toEqual({ processed: 0, rejected: 0, failed: [] });
+
+    // Nothing was transitioned or recorded.
+    const history = await historyStore.findByInstanceUuid(instance.uuid);
+    expect(history).toHaveLength(0);
+
+    lockSpy.mockRestore();
+  });
+
+  it("processExpiredWorkflows skips an instance that is no longer expired at re-lock", async () => {
+    const definition: WorkflowDefinition = {
+      name: "deadline-pushed-out-at-relock",
+      initialState: "waiting",
+      states: {
+        waiting: {
+          events: {
+            expire: {
+              targetState: "expired",
+              timeout: { afterMinutes: 30 },
+            },
+          },
+        },
+        expired: {},
+      },
+    };
+
+    definitionRegistry.register(definition);
+
+    const instance = await runtime.createInstance({ workflowName: "deadline-pushed-out-at-relock" });
+
+    const stored = await instanceStore.findByUuid(instance.uuid);
+    stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    await instanceStore.update(stored!);
+
+    // Simulate: another worker pushed the deadline into the future between scan and re-lock.
+    const originalLock = instanceStore.lockByUuid.bind(instanceStore);
+    const lockSpy = vi.spyOn(instanceStore, "lockByUuid");
+    lockSpy.mockImplementationOnce(async (uuid: string) => {
+      const row = await originalLock(uuid);
+      if (row) {
+        row.expiresAt = new Date("2025-06-15T13:00:00.000Z"); // future vs fixed clock 12:00
+      }
+      return row;
+    });
+
+    const result = await runtime.processExpiredWorkflows();
+
+    expect(result.processed).toBe(0);
+    expect(result.failed).toHaveLength(0);
+
+    // Instance untouched: still waiting, no history.
+    const final = await instanceStore.findByUuid(instance.uuid);
+    expect(final!.currentState).toBe("waiting");
+    const history = await historyStore.findByInstanceUuid(instance.uuid);
+    expect(history).toHaveLength(0);
+
+    lockSpy.mockRestore();
+  });
+
+  it("processExpiredWorkflows records a non-Error throw as a failed instance via String(error)", async () => {
+    const definition: WorkflowDefinition = {
+      name: "non-error-throw",
+      initialState: "waiting",
+      states: {
+        waiting: {
+          events: {
+            expire: {
+              targetState: "expired",
+              timeout: { afterMinutes: 30 },
+            },
+          },
+        },
+        expired: {},
+      },
+    };
+
+    definitionRegistry.register(definition);
+
+    const instance = await runtime.createInstance({ workflowName: "non-error-throw" });
+
+    const stored = await instanceStore.findByUuid(instance.uuid);
+    stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    await instanceStore.update(stored!);
+
+    // Re-lock throws a plain string (not an Error instance).
+    const lockSpy = vi.spyOn(instanceStore, "lockByUuid").mockRejectedValueOnce("boom");
+
+    const result = await runtime.processExpiredWorkflows();
+
+    expect(result.processed).toBe(0);
+    expect(result.failed).toEqual([{ uuid: instance.uuid, error: "boom" }]);
+
+    lockSpy.mockRestore();
+  });
+
+  it("processExpiredWorkflows handles a timeout event without targetState — instance stays in current state", async () => {
+    const definition: WorkflowDefinition = {
+      name: "timeout-no-target",
+      initialState: "waiting",
+      states: {
+        waiting: {
+          events: {
+            heartbeat: {
+              // No targetState: prospectiveToState falls back to the current state.
+              timeout: { afterMinutes: 30 },
+              commands: [{ name: "recordHeartbeat" }],
+            },
+          },
+        },
+      },
+    };
+
+    definitionRegistry.register(definition);
+
+    let captured: WorkflowExecutionContext | undefined;
+    commandRegistry.register("recordHeartbeat", {
+      execute: async (_subject, ctx) => {
+        captured = ctx;
+        return { ok: true };
+      },
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "timeout-no-target" });
+
+    const stored = await instanceStore.findByUuid(instance.uuid);
+    stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    await instanceStore.update(stored!);
+
+    const result = await runtime.processExpiredWorkflows();
+    expect(result.processed).toBe(1);
+    expect(result.failed).toHaveLength(0);
+
+    // prospectiveToState fell back to the current state.
+    expect(captured).toBeDefined();
+    expect(captured!.toState).toBe("waiting");
+
+    // On success with no targetState the instance stays where it was.
+    const final = await instanceStore.findByUuid(instance.uuid);
+    expect(final!.currentState).toBe("waiting");
+
+    const history = await historyStore.findByInstanceUuid(instance.uuid);
+    expect(history).toHaveLength(1);
+    expect(history[0].eventName).toBe("heartbeat");
+    expect(history[0].fromState).toBe("waiting");
+    expect(history[0].toState).toBe("waiting");
+    expect(history[0].outcome).toBe("success");
+  });
+
+  it("onEnter hop failure with a bare {ok:false} result records the fallback error message", async () => {
+    const definition: WorkflowDefinition = {
+      name: "on-enter-bare-failure",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            process: { targetState: "processing" },
+          },
+        },
+        processing: {
+          onEnter: {
+            targetState: "done",
+            errorState: "failed",
+            commands: [{ name: "bareFailOnEnter" }],
+          },
+        },
+        done: {},
+        failed: {},
+      },
+    };
+
+    definitionRegistry.register(definition);
+    // Bare failure: no message, no code — exercises the "Command failed" fallback.
+    commandRegistry.register("bareFailOnEnter", {
+      execute: async () => ({ ok: false }),
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "on-enter-bare-failure" });
+
+    const result = await runtime.triggerEvent({
+      workflowInstanceUuid: instance.uuid,
+      eventName: "process",
+    });
+
+    expect(result.outcome).toBe("failure");
+    expect(result.toState).toBe("failed");
+
+    const history = await historyStore.findByInstanceUuid(instance.uuid);
+    expect(history).toHaveLength(2);
+    expect(history[1].eventName).toBe("onEnter");
+    expect(history[1].toState).toBe("failed");
+    expect(history[1].outcome).toBe("failure");
+    expect(history[1].errorMessage).toBe("Command failed");
+  });
 });

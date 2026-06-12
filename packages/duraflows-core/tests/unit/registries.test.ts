@@ -284,6 +284,16 @@ describe("InMemoryDefinitionRegistry onValidationWarning", () => {
     expect(onValidationWarning).not.toHaveBeenCalled();
   });
 
+  it("does not invoke the callback when the validator omits the warnings field entirely", () => {
+    // `warnings` is optional on ValidationResult — registration must tolerate
+    // its absence via the `?? []` fallback.
+    const mockValidator = { validate: vi.fn().mockReturnValue({ valid: true, errors: [] }) };
+    const onValidationWarning = vi.fn();
+    const registry = new InMemoryDefinitionRegistry({ validator: mockValidator, onValidationWarning });
+    expect(() => registry.register(minimalDefinition)).not.toThrow();
+    expect(onValidationWarning).not.toHaveBeenCalled();
+  });
+
   it("surfaces real unreachable-state warnings end-to-end with the actual validator", async () => {
     const { WorkflowValidator } = await import("../../src/validation/workflow-validator.js");
     const warnings: string[] = [];

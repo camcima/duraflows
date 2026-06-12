@@ -182,6 +182,17 @@ describe("KyselyWorkflowInstanceStore", () => {
       await expect(store.update(updated)).rejects.toThrow("Optimistic locking failure");
     });
 
+    it("throws WorkflowError when the update returns an empty result array", async () => {
+      // Some dialects/drivers can resolve to [] instead of a row with
+      // numUpdatedRows — the `?? BigInt(0)` fallback must treat it as a miss.
+      const { db, executeMock } = createMockDb();
+      executeMock.mockResolvedValue([]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      const updated = { ...sampleInstance, version: 1 };
+      await expect(store.update(updated)).rejects.toThrow(/Optimistic locking failure/);
+    });
+
     it("does not include metadata_json in the SET payload (metadata is immutable)", async () => {
       const { db, executeMock, calls } = createMockDb();
       executeMock.mockResolvedValue([{ numUpdatedRows: BigInt(1) }]);
