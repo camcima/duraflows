@@ -17,7 +17,14 @@ if (!databaseUrl) {
     it.skip("skipped", () => {});
   });
 } else {
-  const pool = new Pool({ connectionString: databaseUrl });
+  // `options` sets the backend `search_path` as a startup parameter, applied at
+  // connection establishment for EVERY pooled connection before any query runs.
+  // This isolates the suite's tables in a dedicated, throwaway schema so a
+  // DATABASE_URL accidentally pointed at a shared database can never DROP or
+  // TRUNCATE real tables in `public`. The path is duraflows_pg_it ONLY (no `public`) so
+  // the unqualified DDL/DML here stays inside the throwaway schema; built-ins
+  // like gen_random_uuid() resolve from pg_catalog regardless.
+  const pool = new Pool({ connectionString: databaseUrl, options: "-c search_path=duraflows_pg_it" });
   const transactionRunner = new PgTransactionRunner(pool);
   const instanceStore = new PgWorkflowInstanceStore(pool);
   const historyStore = new PgWorkflowHistoryStore(pool);
@@ -37,12 +44,28 @@ if (!databaseUrl) {
   });
 
   beforeAll(async () => {
-    await pool.query("DROP TABLE IF EXISTS workflow_history, workflow_instances CASCADE");
-    const { up } = generateMigrationSql();
-    await pool.query(up);
+    // Bootstrap the dedicated schema on a single client. CREATE SCHEMA is
+    // explicit (creates duraflows_pg_it regardless of search_path); every
+    // subsequent unqualified statement resolves into it via the pool's startup
+    // option. The name avoids the reserved pg_* prefix Postgres rejects.
+    const client = await pool.connect();
+    try {
+      await client.query("CREATE SCHEMA IF NOT EXISTS duraflows_pg_it");
+      await client.query("DROP TABLE IF EXISTS workflow_history, workflow_instances CASCADE");
+      const { up } = generateMigrationSql();
+      await client.query(up);
+    } finally {
+      client.release();
+    }
   });
 
   afterAll(async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("DROP SCHEMA IF EXISTS duraflows_pg_it CASCADE");
+    } finally {
+      client.release();
+    }
     await pool.end();
   });
 
