@@ -17,6 +17,16 @@ export class WorkflowDefinitionError extends WorkflowError {
   }
 }
 
+export class WorkflowInstanceNotFoundError extends WorkflowError {
+  public readonly workflowInstanceUuid: string;
+
+  constructor(workflowInstanceUuid: string) {
+    super(`Workflow instance "${workflowInstanceUuid}" not found`);
+    this.name = "WorkflowInstanceNotFoundError";
+    this.workflowInstanceUuid = workflowInstanceUuid;
+  }
+}
+
 export class InvalidEventError extends WorkflowError {
   public readonly workflowInstanceUuid: string;
   public readonly currentState: string;

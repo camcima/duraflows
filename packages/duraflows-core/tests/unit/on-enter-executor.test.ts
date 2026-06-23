@@ -628,4 +628,37 @@ describe("OnEnterExecutor", () => {
     expect(result.hops).toHaveLength(1);
     expect(result.hops[0].transitionUuid).toBe(callerUuid);
   });
+
+  it("onEnter with no commands and no targetState completes without recording a hop", async () => {
+    const definition: WorkflowDefinition = {
+      name: "test-wf",
+      initialState: "processing",
+      states: {
+        processing: {
+          // Constructible and valid: all WorkflowOnEnterDefinition fields are
+          // optional and the validator imposes no "must do something" rule on
+          // onEnter (unlike events). No commands -> empty commandResults ->
+          // no hop is recorded.
+          onEnter: {},
+        },
+      },
+    };
+
+    const registry = makeRegistry({});
+    const commandExecutor = new CommandExecutor(registry);
+    const executor = new OnEnterExecutor(commandExecutor);
+
+    const result = await executor.executeChain(
+      definition,
+      "processing",
+      "instance-empty",
+      undefined,
+      makeContext(),
+      10,
+    );
+
+    expect(result.finalState).toBe("processing");
+    expect(result.outcome).toBe("success");
+    expect(result.hops).toHaveLength(0);
+  });
 });

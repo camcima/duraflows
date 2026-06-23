@@ -8,6 +8,7 @@ export interface ValidationError {
 export interface ValidationResult {
   valid: boolean;
   errors: ValidationError[];
+  warnings?: ValidationError[];
 }
 
 export interface WorkflowValidationOptions {
@@ -18,6 +19,7 @@ export interface WorkflowValidationOptions {
 export class WorkflowValidator {
   validate(definition: WorkflowDefinition, options?: WorkflowValidationOptions): ValidationResult {
     const errors: ValidationError[] = [];
+    const warnings: ValidationError[] = [];
 
     if (!definition.name || definition.name.trim() === "") {
       errors.push({ path: "name", message: "Workflow name must be non-empty" });
@@ -140,7 +142,36 @@ export class WorkflowValidator {
     // Validate onEnter cycles
     this.validateOnEnterCycles(definition, errors);
 
-    return { valid: errors.length === 0, errors };
+    // Reachability pass: warn about states unreachable from the initial state
+    if (definition.states[definition.initialState]) {
+      const reachable = new Set<string>([definition.initialState]);
+      const queue = [definition.initialState];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        const state = definition.states[current];
+        if (!state) continue;
+        const targets: (string | undefined)[] = [state.onEnter?.targetState, state.onEnter?.errorState];
+        for (const event of Object.values(state.events ?? {})) {
+          targets.push(event.targetState, event.errorState);
+        }
+        for (const target of targets) {
+          if (target && definition.states[target] && !reachable.has(target)) {
+            reachable.add(target);
+            queue.push(target);
+          }
+        }
+      }
+      for (const stateName of stateNames) {
+        if (!reachable.has(stateName)) {
+          warnings.push({
+            path: `states.${stateName}`,
+            message: `State "${stateName}" is unreachable from initial state "${definition.initialState}"`,
+          });
+        }
+      }
+    }
+
+    return { valid: errors.length === 0, errors, warnings };
   }
 
   private validateOnEnterCycles(definition: WorkflowDefinition, errors: ValidationError[]): void {

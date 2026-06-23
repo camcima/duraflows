@@ -584,4 +584,40 @@ describe("WorkflowValidator", () => {
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual([]);
   });
+
+  // --- unreachable state detection ---
+
+  describe("unreachable state detection", () => {
+    it("warns about states unreachable from the initial state", () => {
+      const result = new WorkflowValidator().validate({
+        name: "wf",
+        initialState: "a",
+        states: {
+          a: { events: { go: { targetState: "b" } } },
+          b: {},
+          orphan: {},
+        },
+      });
+      expect(result.valid).toBe(true); // warnings do not fail validation
+      expect(result.warnings).toEqual([
+        {
+          path: "states.orphan",
+          message: 'State "orphan" is unreachable from initial state "a"',
+        },
+      ]);
+    });
+
+    it("treats onEnter targets and errorStates as reachable", () => {
+      const result = new WorkflowValidator().validate({
+        name: "wf",
+        initialState: "a",
+        states: {
+          a: { onEnter: { commands: [{ name: "x" }], targetState: "b", errorState: "c" } },
+          b: {},
+          c: {},
+        },
+      });
+      expect(result.warnings).toEqual([]);
+    });
+  });
 });

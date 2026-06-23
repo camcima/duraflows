@@ -450,6 +450,50 @@ describe("node shapes", () => {
   });
 });
 
+describe("special characters in names", () => {
+  it("sanitizes node ids and escapes labels", () => {
+    const diagram = toMermaidDiagram({
+      name: "wf",
+      initialState: "draft <v1>",
+      states: {
+        "draft <v1>": { events: { 'approve "fast"': { targetState: "done" } } },
+        done: {},
+      },
+    });
+    // Labels must be HTML-escaped
+    expect(diagram).toContain("draft &lt;v1&gt;");
+    expect(diagram).toContain("approve &quot;fast&quot;");
+    // Raw unescaped forms must NOT appear in label text
+    expect(diagram).not.toContain("<b>draft <v1></b>");
+    // Node ids must be sanitized to [A-Za-z0-9_] — the raw state name with
+    // spaces/angle brackets must never appear as a bare node id token.
+    expect(diagram).not.toMatch(/(^|\s)draft <v1>(\[|__| -->)/);
+  });
+
+  it("escapes command names containing special characters when showCommands is enabled", () => {
+    const diagram = toMermaidDiagram(
+      {
+        name: "wf",
+        initialState: "a",
+        states: {
+          a: {
+            events: {
+              Go: {
+                targetState: "b",
+                commands: [{ name: 'send<email>"now"' }],
+              },
+            },
+          },
+          b: {},
+        },
+      },
+      { showCommands: true },
+    );
+    expect(diagram).toContain("send&lt;email&gt;&quot;now&quot;");
+    expect(diagram).not.toContain('send<email>"now"');
+  });
+});
+
 describe("state with both events and onEnter", () => {
   it("emits onEnter node before event nodes", () => {
     const def: WorkflowDefinition = {
@@ -470,5 +514,112 @@ describe("state with both events and onEnter", () => {
     const autoIdx = result.indexOf("a__onEnter");
     const skipIdx = result.indexOf("a__Skip");
     expect(autoIdx).toBeLessThan(skipIdx);
+  });
+});
+
+describe("fallback and edge cases", () => {
+  it("uses the _node fallback id for a state name that sanitizes to empty", () => {
+    const def: WorkflowDefinition = {
+      name: "wf",
+      initialState: "",
+      states: {
+        "": {},
+      },
+    };
+    const diagram = toMermaidDiagram(def);
+    // The empty state name sanitizes to "" — the allocator falls back to "_node".
+    expect(diagram).toContain('_node["<b></b>"]:::stateNode');
+    expect(diagram).toContain("_start --> _node");
+  });
+
+  it("emits no _end node when the workflow has no terminal states", () => {
+    const def: WorkflowDefinition = {
+      name: "ping-pong",
+      initialState: "a",
+      states: {
+        a: { events: { go: { targetState: "b" } } },
+        b: { events: { back: { targetState: "a" } } },
+      },
+    };
+    const diagram = toMermaidDiagram(def);
+    expect(diagram).not.toContain("_end@");
+    expect(diagram).not.toContain("--> _end");
+  });
+
+  it("renders onEnter with only errorState — error edge but no success edge", () => {
+    const def: WorkflowDefinition = {
+      name: "on-enter-error-only",
+      initialState: "a",
+      states: {
+        a: {
+          onEnter: {
+            errorState: "err",
+            commands: [{ name: "mayFail" }],
+          },
+        },
+        err: {},
+      },
+    };
+    const diagram = toMermaidDiagram(def);
+    expect(diagram).toContain('a__onEnter(["🗲"])');
+    expect(diagram).toContain("a --> a__onEnter");
+    expect(diagram).toContain("a__onEnter --> err");
+    // The only colored edge is the error edge — no success edge exists.
+    expect(diagram).toContain("stroke:#dc3545");
+    expect(diagram).not.toContain("stroke:#22c55e");
+  });
+});
+
+describe("node id collisions", () => {
+  it("keeps distinct ids for names that sanitize identically", () => {
+    const def: WorkflowDefinition = {
+      name: "wf",
+      initialState: "a b",
+      states: {
+        "a b": { events: { go: { targetState: "a_b" } } },
+        a_b: {},
+      },
+    };
+    const diagram = toMermaidDiagram(def);
+    // Both states get their own node definitions with distinct ids.
+    expect(diagram).toContain('a_b["<b>a b</b>"]');
+    expect(diagram).toContain('a_b_2["<b>a_b</b>"]');
+    // The transition must point at the second state's id, not the first's.
+    expect(diagram).toContain("a_b__go --> a_b_2");
+  });
+
+  it("does not collide with the synthetic _start and _end nodes", () => {
+    const def: WorkflowDefinition = {
+      name: "wf",
+      initialState: "*start",
+      states: {
+        "*start": { events: { finish: { targetState: "-end" } } },
+        "-end": {},
+      },
+    };
+    const diagram = toMermaidDiagram(def);
+    // "*start" sanitizes to "_start" (reserved) and "-end" to "_end" (reserved),
+    // so both must receive suffixed ids.
+    expect(diagram).toContain('_start_2["<b>*start</b>"]');
+    expect(diagram).toContain('_end_2["<b>-end</b>"]');
+    expect(diagram).toContain("_start --> _start_2");
+    expect(diagram).toContain("_end_2 --> _end");
+  });
+
+  it("disambiguates event nodes whose joined ids would collide", () => {
+    const def: WorkflowDefinition = {
+      name: "wf",
+      initialState: "a",
+      states: {
+        a: { events: { b__c: { targetState: "done" } } },
+        a__b: { events: { c: { targetState: "done" } } },
+        done: {},
+      },
+    };
+    const diagram = toMermaidDiagram(def);
+    // state "a" + event "b__c" and state "a__b" + event "c" both join to
+    // "a__b__c" — the allocator must keep them distinct.
+    expect(diagram).toContain("a --> a__b__c");
+    expect(diagram).toContain("a__b --> a__b__c_2");
   });
 });

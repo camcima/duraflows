@@ -83,4 +83,52 @@ describe("NestCommandRegistry", () => {
     expect(registry.getRegisteredNames()).toEqual(new Set());
     expect(registry.has("anything")).toBe(false);
   });
+
+  it("wraps scope-resolution failures with a singleton-scope hint", () => {
+    const moduleRef = {
+      get: vi.fn(() => {
+        throw new Error("ScopedCommand is marked as a scoped provider. Use the resolve() method instead.");
+      }),
+    } as unknown as ModuleRef;
+    class ScopedCommand {}
+    const registry = new NestCommandRegistry(moduleRef, [{ name: "scoped", useClass: ScopedCommand as any }]);
+    expect(() => registry.get("scoped")).toThrow(/singleton-scoped/);
+  });
+
+  it("detects the scoped-provider error by its Nest exception class name", () => {
+    // Nest's real InvalidClassScopeException leaves `.name` as "Error"; the
+    // distinguishing signal is the constructor name, not the message.
+    class InvalidClassScopeException extends Error {}
+    const moduleRef = {
+      get: vi.fn(() => {
+        throw new InvalidClassScopeException("unhelpful generic text");
+      }),
+    } as unknown as ModuleRef;
+    class ScopedCommand {}
+    const registry = new NestCommandRegistry(moduleRef, [{ name: "scoped", useClass: ScopedCommand as any }]);
+    expect(() => registry.get("scoped")).toThrow(/singleton-scoped/);
+  });
+
+  it("does not blame singleton scope for unrelated resolution failures", () => {
+    const cause = new Error("Nest can't resolve dependencies of the StubCommandA (circular dependency).");
+    const moduleRef = {
+      get: vi.fn(() => {
+        throw cause;
+      }),
+    } as unknown as ModuleRef;
+    const registry = new NestCommandRegistry(moduleRef, [{ name: "cmdA", useClass: StubCommandA }]);
+
+    let thrown: unknown;
+    try {
+      registry.get("cmdA");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(WorkflowError);
+    expect((thrown as Error).message).toMatch(/could not be resolved from the NestJS container/);
+    expect((thrown as Error).message).not.toMatch(/singleton-scoped/);
+    // The original container error is preserved as the cause for diagnosis.
+    expect((thrown as WorkflowError).cause).toBe(cause);
+  });
 });

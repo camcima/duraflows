@@ -31,6 +31,35 @@ jobs:
           flags: unit
           fail_ci_if_error: true
 
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: duraflows_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm vitest run packages/duraflows-pg/tests/integration packages/duraflows-kysely/tests/integration
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/duraflows_test
+
   osv-scanner:
     runs-on: ubuntu-latest
     permissions:

@@ -257,3 +257,55 @@ describe("InMemoryDefinitionRegistry", () => {
     expect(Object.isFrozen(stored.states.ready.context!.nested)).toBe(true);
   });
 });
+
+describe("InMemoryDefinitionRegistry onValidationWarning", () => {
+  it("invokes the callback once per validator warning", () => {
+    const mockValidator = {
+      validate: vi.fn().mockReturnValue({
+        valid: true,
+        errors: [],
+        warnings: [{ path: "states.orphan", message: 'State "orphan" is unreachable from initial state "start"' }],
+      }),
+    };
+    const received: Array<{ name: string; path: string }> = [];
+    const registry = new InMemoryDefinitionRegistry({
+      validator: mockValidator,
+      onValidationWarning: (name, warning) => received.push({ name, path: warning.path }),
+    });
+    registry.register(minimalDefinition);
+    expect(received).toEqual([{ name: "test-wf", path: "states.orphan" }]);
+  });
+
+  it("does not invoke the callback when there are no warnings", () => {
+    const mockValidator = { validate: vi.fn().mockReturnValue({ valid: true, errors: [], warnings: [] }) };
+    const onValidationWarning = vi.fn();
+    const registry = new InMemoryDefinitionRegistry({ validator: mockValidator, onValidationWarning });
+    registry.register(minimalDefinition);
+    expect(onValidationWarning).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke the callback when the validator omits the warnings field entirely", () => {
+    // `warnings` is optional on ValidationResult — registration must tolerate
+    // its absence via the `?? []` fallback.
+    const mockValidator = { validate: vi.fn().mockReturnValue({ valid: true, errors: [] }) };
+    const onValidationWarning = vi.fn();
+    const registry = new InMemoryDefinitionRegistry({ validator: mockValidator, onValidationWarning });
+    expect(() => registry.register(minimalDefinition)).not.toThrow();
+    expect(onValidationWarning).not.toHaveBeenCalled();
+  });
+
+  it("surfaces real unreachable-state warnings end-to-end with the actual validator", async () => {
+    const { WorkflowValidator } = await import("../../src/validation/workflow-validator.js");
+    const warnings: string[] = [];
+    const registry = new InMemoryDefinitionRegistry({
+      validator: new WorkflowValidator(),
+      onValidationWarning: (name, warning) => warnings.push(`${name}:${warning.path}`),
+    });
+    registry.register({
+      name: "wf-with-orphan",
+      initialState: "a",
+      states: { a: {}, orphan: {} },
+    });
+    expect(warnings).toEqual(["wf-with-orphan:states.orphan"]);
+  });
+});

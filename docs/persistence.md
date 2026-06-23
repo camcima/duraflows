@@ -114,7 +114,7 @@ const { up, down } = generateMigrationSql({ uuidStrategy: "uuidv7" });
 // Paste into your migration file
 ```
 
-A ready-made dbmate migration using `gen_random_uuid()` is also shipped at `sql/dbmate/001_workflow_core.sql`.
+Ready-made dbmate migrations using `gen_random_uuid()` are also shipped under `sql/dbmate/` — apply all of them in order (`001` alone is not sufficient for the current runtime).
 
 ### Guard rejections
 
@@ -388,6 +388,16 @@ Each `triggerEvent()` call runs in a single transaction:
 - Commit
 
 If any step fails (including command exceptions), the entire transaction rolls back. No partial state is persisted.
+
+### Context serialization fidelity
+
+`context` and `metadata` are persisted as JSONB via `JSON.stringify`. Only plain JSON survives the round-trip:
+
+- `Date` values are serialized to ISO strings and come back as **strings** — store `ctx.now.toISOString()` explicitly rather than `Date` objects.
+- Keys with `undefined` values are dropped on write and never restored.
+- `bigint`, `Map`, `Set`, class instances, and circular references are not supported (`bigint` throws; the others silently lose data).
+
+Store IDs and primitives, not rich objects.
 
 ## Adapter Conformance Tests
 

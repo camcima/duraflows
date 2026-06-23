@@ -1,4 +1,12 @@
-import { Module, type DynamicModule, type Type, type Provider, type InjectionToken } from "@nestjs/common";
+import {
+  Logger,
+  Module,
+  type DynamicModule,
+  type Type,
+  type Provider,
+  type InjectionToken,
+  type OptionalFactoryDependency,
+} from "@nestjs/common";
 import { DiscoveryModule, DiscoveryService, ModuleRef } from "@nestjs/core";
 import type {
   WorkflowDefinition,
@@ -66,8 +74,20 @@ export interface WorkflowModuleAsyncOptions<TArgs extends unknown[] = unknown[]>
   commands?: WorkflowCommandRegistration[];
   enableControllers?: boolean;
   useFactory: (...args: TArgs) => Promise<WorkflowModuleFactoryConfig> | WorkflowModuleFactoryConfig;
-  inject?: InjectionToken[];
+  /**
+   * DI tokens resolved and passed to `useFactory`, positionally. The tuple
+   * length is type-checked against the factory's parameter list when `TArgs`
+   * is supplied (e.g. `forRootAsync<[Pool, AuditObserver]>({ ... })`).
+   */
+  inject?: { [K in keyof TArgs]: InjectionToken | OptionalFactoryDependency };
 }
+
+// Surfaces non-fatal definition warnings (e.g. unreachable states) that the
+// registry would otherwise compute and discard.
+const validationLogger = new Logger("WorkflowModule");
+const logValidationWarning = (workflowName: string, warning: { path: string; message: string }): void => {
+  validationLogger.warn(`Workflow "${workflowName}": ${warning.message} (${warning.path})`);
+};
 
 const EXPORTED_TOKENS = [
   WorkflowService,
@@ -112,12 +132,9 @@ export class WorkflowModule {
       },
       {
         provide: WORKFLOW_GUARD_REGISTRY,
+        // guards/guardRegistry mutual exclusion is enforced synchronously at
+        // the top of forRoot, before this factory can ever run.
         useFactory: () => {
-          if (options.guardRegistry && options.guards && options.guards.length > 0) {
-            throw new Error(
-              "WorkflowModule: cannot supply both `guards` and `guardRegistry` — they are mutually exclusive. Pass guards or a custom registry, not both.",
-            );
-          }
           if (options.guardRegistry) return options.guardRegistry;
           const registry = new InMemoryGuardRegistry();
           for (const guard of options.guards ?? []) {
@@ -139,6 +156,7 @@ export class WorkflowModule {
             validator: new WorkflowValidator(),
             compiler: new WorkflowCompiler(),
             validationOptions: { knownCommandNames, knownGuardNames },
+            onValidationWarning: logValidationWarning,
           });
           for (const workflow of options.workflows) {
             registry.register(workflow);
@@ -220,7 +238,7 @@ export class WorkflowModule {
     const configProvider: Provider = {
       provide: "WORKFLOW_MODULE_OPTIONS",
       useFactory: options.useFactory,
-      inject: options.inject ?? [],
+      inject: (options.inject ?? []) as Array<InjectionToken | OptionalFactoryDependency>,
     };
 
     const providers: Provider[] = [
@@ -265,6 +283,7 @@ export class WorkflowModule {
             validator: new WorkflowValidator(),
             compiler: new WorkflowCompiler(),
             validationOptions: { knownCommandNames, knownGuardNames },
+            onValidationWarning: logValidationWarning,
           });
           for (const workflow of config.workflows) {
             registry.register(workflow);

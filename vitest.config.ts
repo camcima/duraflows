@@ -10,6 +10,7 @@ export default defineConfig({
     // counted as 0% by v8 (because the file path coverage sees does not
     // match the package's compiled file path).
     alias: [
+      { find: /^@duraflows\/core\/testing$/, replacement: fromHere("./packages/duraflows-core/src/testing/index.ts") },
       { find: /^@duraflows\/core$/, replacement: fromHere("./packages/duraflows-core/src/index.ts") },
       { find: /^@duraflows\/nestjs$/, replacement: fromHere("./packages/duraflows-nestjs/src/index.ts") },
       { find: /^@duraflows\/pg$/, replacement: fromHere("./packages/duraflows-pg/src/index.ts") },

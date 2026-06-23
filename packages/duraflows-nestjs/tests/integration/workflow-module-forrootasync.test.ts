@@ -365,6 +365,33 @@ describe("WorkflowModule.forRootAsync()", () => {
     expect(definitionRegistry.has("guarded-async-wf")).toBe(true);
   });
 
+  it("defaults the clock to the system clock when the async factory config omits clock", async () => {
+    const before = new Date();
+
+    const mod = await Test.createTestingModule({
+      imports: [
+        WorkflowModule.forRootAsync({
+          commands: [{ name: "test-ship", useClass: TestShipCommand }],
+          useFactory: () => ({
+            workflows: [testWorkflow],
+            persistence: stubPersistence,
+            // no clock — the module must fall back to the system clock
+          }),
+        }),
+      ],
+    }).compile();
+
+    const service = mod.get(WorkflowService);
+    const instance = await service.createInstance({ workflowName: "test-shipping" });
+
+    const after = new Date();
+    expect(instance.createdAt).toBeInstanceOf(Date);
+    expect(instance.createdAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    expect(instance.createdAt.getTime()).toBeLessThanOrEqual(after.getTime());
+
+    await mod.close();
+  });
+
   it("forwards observers returned from forRootAsync useFactory config to WorkflowRuntime", async () => {
     const captured: { state: string }[] = [];
 

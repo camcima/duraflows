@@ -1,7 +1,11 @@
-import { IsOptional, IsNumberString } from "class-validator";
+import { Type } from "class-transformer";
+import { IsInt, IsOptional, Max, Min } from "class-validator";
 
 export class TimeoutProcessQueryDto {
   @IsOptional()
-  @IsNumberString()
-  limit?: string;
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  limit?: number;
 }

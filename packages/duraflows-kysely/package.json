@@ -41,8 +41,11 @@
       }
     }
   },
+  "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.tsbuildinfo",
+    "!dist/**/*.map"
   ],
   "publishConfig": {
     "access": "public"
@@ -50,11 +53,15 @@
   "scripts": {
     "build": "tsc --build"
   },
-  "dependencies": {
+  "peerDependencies": {
     "@duraflows/core": "^2.1.0",
     "kysely": "^0.29.2"
   },
-  "peerDependencies": {
-    "pg": "^8.13.0"
+  "devDependencies": {
+    "kysely": "^0.29.2",
+    "pg": "^8.21.0",
+    "@types/pg": "^8.11.0",
+    "@duraflows/pg": "workspace:*",
+    "@duraflows/core": "workspace:*"
   }
 }

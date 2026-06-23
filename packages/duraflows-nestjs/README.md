@@ -157,6 +157,8 @@ export class SendToWarehouseCommand implements IWorkflowCommand {
 
 When `enableControllers: true` is set, the following endpoints are registered:
 
+> **Security:** the generated controllers ship **without authentication**. They expose instance creation, arbitrary event triggering, full history reads, and `POST /workflows/timeouts/process` (an administrative bulk operation). Apply your own auth guards and rate limiting before enabling them in production — e.g. a global `APP_GUARD`, or guards bound per controller. Note also that `triggerEvent` responses include each command's `CommandResult` verbatim, so command authors must not place sensitive data in `CommandResult.error` / `message` if the controllers are enabled.
+
 | Controller                   | Endpoints                              |
 | ---------------------------- | -------------------------------------- |
 | `WorkflowInstanceController` | Create and retrieve workflow instances |

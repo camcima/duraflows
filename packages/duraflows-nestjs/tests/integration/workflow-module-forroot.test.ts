@@ -1,7 +1,7 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Test, type TestingModule } from "@nestjs/testing";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import {
   WorkflowModule,
   WorkflowService,
@@ -366,6 +366,62 @@ describe("WorkflowModule.forRoot()", () => {
         guardRegistry: customRegistry,
       }),
     ).toThrow(/cannot supply both `guards` and `guardRegistry`/);
+  });
+
+  it("logs a warning for workflows with unreachable states at registration", async () => {
+    const warnSpy = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+
+    const definitionWithOrphan: WorkflowDefinition = {
+      name: "orphan-wf",
+      initialState: "a",
+      states: {
+        a: {},
+        orphan: {}, // no inbound transitions — unreachable from "a"
+      },
+    };
+
+    try {
+      const mod = await Test.createTestingModule({
+        imports: [
+          WorkflowModule.forRoot(
+            defaultOptions({
+              workflows: [definitionWithOrphan],
+              commands: [],
+            }),
+          ),
+        ],
+      }).compile();
+
+      // Resolving the registry guarantees the provider factory (and thus
+      // registration + warning emission) has run.
+      const registry = mod.get<WorkflowDefinitionRegistry>(WORKFLOW_DEFINITION_REGISTRY);
+      expect(registry.has("orphan-wf")).toBe(true);
+
+      const warnMessages = warnSpy.mock.calls.map((call) => String(call[0]));
+      expect(warnMessages.some((m) => m.includes("unreachable") && m.includes("orphan"))).toBe(true);
+
+      await mod.close();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("defaults the clock to the system clock when no clock option is provided", async () => {
+    const before = new Date();
+
+    const mod = await Test.createTestingModule({
+      imports: [WorkflowModule.forRoot(defaultOptions({ clock: undefined }))],
+    }).compile();
+
+    const service = mod.get(WorkflowService);
+    const instance = await service.createInstance({ workflowName: "test-order" });
+
+    const after = new Date();
+    expect(instance.createdAt).toBeInstanceOf(Date);
+    expect(instance.createdAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    expect(instance.createdAt.getTime()).toBeLessThanOrEqual(after.getTime());
+
+    await mod.close();
   });
 
   it("forwards observers from WorkflowModule.forRoot to WorkflowRuntime", async () => {

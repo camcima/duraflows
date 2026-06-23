@@ -5,6 +5,7 @@ import {
   InvalidEventError,
   OnEnterDepthExceededError,
   CommandFailureError,
+  WorkflowInstanceNotFoundError,
 } from "../../src/errors/index.js";
 
 describe("WorkflowError", () => {
@@ -103,5 +104,15 @@ describe("CommandFailureError", () => {
   it("extends WorkflowError", () => {
     const err = new CommandFailureError("u", "e", "c", { ok: false });
     expect(err).toBeInstanceOf(WorkflowError);
+  });
+});
+
+describe("WorkflowInstanceNotFoundError", () => {
+  it("extends WorkflowError and carries the instance uuid", () => {
+    const err = new WorkflowInstanceNotFoundError("abc-123");
+    expect(err).toBeInstanceOf(WorkflowError);
+    expect(err.name).toBe("WorkflowInstanceNotFoundError");
+    expect(err.workflowInstanceUuid).toBe("abc-123");
+    expect(err.message).toBe('Workflow instance "abc-123" not found');
   });
 });

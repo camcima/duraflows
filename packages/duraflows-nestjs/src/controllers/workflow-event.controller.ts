@@ -1,10 +1,12 @@
-import { Controller, Post, Param, Body, UsePipes, ValidationPipe } from "@nestjs/common";
+import { Controller, Post, Param, Body, UsePipes, UseFilters, ValidationPipe } from "@nestjs/common";
 import type { WorkflowExecutionResult } from "@duraflows/core";
 import { WorkflowService } from "../services/workflow.service.js";
 import { TriggerEventDto, TriggerEventParamsDto } from "./dto/index.js";
+import { WorkflowExceptionFilter } from "../filters/workflow-exception.filter.js";
 
 @Controller("workflows")
-@UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+@UseFilters(WorkflowExceptionFilter)
+@UsePipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }))
 export class WorkflowEventController {
   constructor(private readonly workflowService: WorkflowService) {}
 

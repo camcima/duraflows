@@ -593,4 +593,41 @@ describe("WorkflowRuntime.getAvailableEvents", () => {
     const stored = await instanceStore.findByUuid(instance.uuid);
     expect(stored!.currentState).toBe("active");
   });
+
+  it("event failure with a bare {ok:false} result records the fallback error message", async () => {
+    const definition: WorkflowDefinition = {
+      name: "bare-failure-event",
+      initialState: "draft",
+      states: {
+        draft: {
+          events: {
+            submit: {
+              targetState: "submitted",
+              errorState: "failed",
+              commands: [{ name: "bareFail" }],
+            },
+          },
+        },
+        submitted: {},
+        failed: {},
+      },
+    };
+    definitionRegistry.register(definition);
+
+    // Bare failure: no message, no code — exercises the "Command failed" fallback.
+    commandRegistry.register("bareFail", {
+      execute: async () => ({ ok: false }),
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "bare-failure-event" });
+    const result = await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "submit" });
+
+    expect(result.outcome).toBe("failure");
+    expect(result.toState).toBe("failed");
+
+    const history = await runtime.getHistory(instance.uuid);
+    expect(history).toHaveLength(1);
+    expect(history[0].outcome).toBe("failure");
+    expect(history[0].errorMessage).toBe("Command failed");
+  });
 });

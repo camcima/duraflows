@@ -18,6 +18,8 @@ Part of the [duraflows](https://github.com/camcima/duraflows) monorepo.
 pnpm add @duraflows/core @duraflows/kysely kysely pg
 ```
 
+> **Note:** `@duraflows/core` and `kysely` are peer dependencies — you install them alongside this package so your app and the adapter share a single copy. There is intentionally no `pg` peer: Kysely's `PostgresDialect` requires a driver, but the choice is yours — install `pg` (or your preferred Postgres driver) and configure it on your `Kysely` instance.
+
 ## Quick Start
 
 ```ts

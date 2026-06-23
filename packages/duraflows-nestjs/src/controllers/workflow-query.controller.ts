@@ -1,10 +1,12 @@
-import { Controller, Get, Param, Query, UsePipes, ValidationPipe } from "@nestjs/common";
+import { Controller, Get, Param, Query, UsePipes, UseFilters, ValidationPipe } from "@nestjs/common";
 import type { AvailableWorkflowEvent, WorkflowHistoryRecord } from "@duraflows/core";
 import { WorkflowService } from "../services/workflow.service.js";
 import { AvailableEventsParamsDto, HistoryQueryDto, HistoryParamsDto } from "./dto/index.js";
+import { WorkflowExceptionFilter } from "../filters/workflow-exception.filter.js";
 
 @Controller("workflows")
-@UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+@UseFilters(WorkflowExceptionFilter)
+@UsePipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }))
 export class WorkflowQueryController {
   constructor(private readonly workflowService: WorkflowService) {}
 
@@ -21,8 +23,8 @@ export class WorkflowQueryController {
     @Query() query: HistoryQueryDto,
   ): Promise<WorkflowHistoryRecord[]> {
     return this.workflowService.getHistory(params.workflowInstanceUuid, {
-      limit: query.limit ? parseInt(query.limit, 10) : undefined,
-      offset: query.offset ? parseInt(query.offset, 10) : undefined,
+      limit: query.limit,
+      offset: query.offset,
     });
   }
 }

@@ -50,8 +50,11 @@
       }
     }
   },
+  "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.tsbuildinfo",
+    "!dist/**/*.map"
   ],
   "publishConfig": {
     "access": "public"
@@ -61,5 +64,13 @@
   },
   "dependencies": {
     "@camcima/finita": "^3.0.0"
+  },
+  "peerDependencies": {
+    "vitest": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
   }
 }

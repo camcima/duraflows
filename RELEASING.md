@@ -57,9 +57,9 @@ git checkout -b chore/release-$VERSION
 # Bump root + all packages, re-pin internal deps (mirrors the before:bump hook)
 npm version $VERSION --no-git-tag-version --allow-same-version
 pnpm -r exec npm version $VERSION --no-git-tag-version --allow-same-version
-pnpm --filter @duraflows/pg     exec npm pkg set "dependencies.@duraflows/core=^$VERSION"
-pnpm --filter @duraflows/kysely exec npm pkg set "dependencies.@duraflows/core=^$VERSION"
-pnpm --filter @duraflows/nestjs exec npm pkg set "dependencies.@duraflows/core=^$VERSION"
+pnpm --filter @duraflows/pg     exec npm pkg set "peerDependencies.@duraflows/core=^$VERSION"
+pnpm --filter @duraflows/kysely exec npm pkg set "peerDependencies.@duraflows/core=^$VERSION"
+pnpm --filter @duraflows/nestjs exec npm pkg set "peerDependencies.@duraflows/core=^$VERSION"
 pnpm install --lockfile-only
 ```
 
