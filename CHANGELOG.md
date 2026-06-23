@@ -1,5 +1,39 @@
 # Changelog
 
+## [3.0.0](https://github.com/camcima/duraflows/compare/v2.1.0...v3.0.0) (2026-06-23)
+
+### ⚠ BREAKING CHANGES
+
+* **deps:** pg (^8.13.0) is now a peerDependency of @duraflows/pg and kysely (^0.29.2) a peerDependency of @duraflows/kysely. Consumers already install both per the documented setup, so most projects need no change.
+* **deps:** @nestjs/common, @nestjs/core, and @duraflows/core are now peerDependencies of the adapter packages; vitest is an optional peer of @duraflows/core (required only for @duraflows/core/testing). The unused pg peer of @duraflows/kysely was removed.
+
+### Features
+
+* **core:** surface validation warnings at registration time ([73aa15d](https://github.com/camcima/duraflows/commit/73aa15de0601e109bf12670ee286f36d2f02274a))
+* **core:** warn about states unreachable from the initial state ([bf80428](https://github.com/camcima/duraflows/commit/bf80428382c8d35e89e42003d7d4f0b8ec156206))
+* **nestjs:** map workflow domain errors to 404/409 via exception filter ([87d8db8](https://github.com/camcima/duraflows/commit/87d8db81918eef6e7cdae7a55049527c608f51d3))
+* **core:** add WorkflowInstanceNotFoundError for typed not-found handling ([2944a3c](https://github.com/camcima/duraflows/commit/2944a3cf3b4dc277e9174125fb6ca39d7addf197))
+
+### Bug Fixes
+
+* **nestjs:** scope-aware command-resolution errors and log the real cause ([c72567d](https://github.com/camcima/duraflows/commit/c72567d20982345ecaebc34a823f19edde8ee0a7))
+* **deps:** make pg and kysely peerDependencies of their adapters ([eaab37c](https://github.com/camcima/duraflows/commit/eaab37c9fee4262ad832a5b07582947c73441af8))
+* **nestjs:** accept OptionalFactoryDependency in forRootAsync inject ([2ba9b30](https://github.com/camcima/duraflows/commit/2ba9b304084cee503dbdb35331029fcac3f91620))
+* **core:** allocate collision-free mermaid node ids ([bf548cd](https://github.com/camcima/duraflows/commit/bf548cdb7ffd9276a8e4371f7be667032f006021))
+* **core:** make deepFreeze cycle-safe for Maps and Sets ([2e3ed65](https://github.com/camcima/duraflows/commit/2e3ed6552ea22efcb23fb5072399cb43d3c735b5))
+* **nestjs:** make exception filter platform-agnostic and log unmapped errors ([0b1774d](https://github.com/camcima/duraflows/commit/0b1774dfdd7a446695da0f4a6f54d3160d89b4ea))
+* **core:** mark WorkflowExecutionContext.now readonly ([4ab843a](https://github.com/camcima/duraflows/commit/4ab843a4ff9086b2c985cb0c46cce6a193084e3e))
+* exclude build cache and dead source maps from tarballs, add sideEffects flag ([d74fe39](https://github.com/camcima/duraflows/commit/d74fe3972f13224c4626c234ead3630a0d32e3a8))
+* **nestjs:** clear error when a command provider is not singleton-scoped ([df31c72](https://github.com/camcima/duraflows/commit/df31c72ce14420cae745abe0229ff05167a1523b))
+* **nestjs:** type-correlate forRootAsync inject tuple with factory params ([6428a9a](https://github.com/camcima/duraflows/commit/6428a9a7d7a1aec2c84101d7bbb040476dbf1adf))
+* **core:** sanitize mermaid node ids and escape diagram labels ([e230ce9](https://github.com/camcima/duraflows/commit/e230ce95cf576d925980bb52377865e2f6eb9455))
+* **core:** clone triggerMetadata into history, run no-onEnter create in a transaction ([80a095f](https://github.com/camcima/duraflows/commit/80a095f3dfdc89d9c4606bdc1081af09397e37fb))
+* **adapters:** stable history ordering with uuid tie-breaker ([ab2f745](https://github.com/camcima/duraflows/commit/ab2f74582270d9f520deeb2c9654c7ff285a373d))
+* **core:** make deepFreeze neutralize Map/Set mutators and freeze their entries ([a4c86db](https://github.com/camcima/duraflows/commit/a4c86db49391399a0a95df3e2a02de6d03f2fe07))
+* **nestjs:** bound and type numeric query params, reject unknown fields ([6e385c9](https://github.com/camcima/duraflows/commit/6e385c9af36e0af146681355d25f8abb5ed0a59b))
+* **deps:** reclassify framework and core packages as peerDependencies ([a917257](https://github.com/camcima/duraflows/commit/a9172579fecbf5ce48d5ae370ae65ab49341b63d))
+* **pg:** ship sql/ migrations in the npm tarball and document the full migration set ([bd58fbb](https://github.com/camcima/duraflows/commit/bd58fbb196ada4db8d392a2147d956026b354e4b))
+
 ## [2.1.0](https://github.com/camcima/duraflows/compare/v1.1.0...v2.1.0) (2026-05-30)
 
 ### ⚠ BREAKING CHANGES
