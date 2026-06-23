@@ -8,7 +8,7 @@ The release is split in two phases because `main` is protected (see below):
 
 1. **Phase 1 (local + PR):** prepare the version bump + CHANGELOG and merge it.
 2. **Phase 2 (CI):** push a `vX.Y.Z` tag — a GitHub Actions workflow publishes
-   to npm and creates the GitHub release. No maintainer publishes from a laptop.
+   to npm. No maintainer publishes from a laptop.
 
 ## Tooling
 
@@ -17,10 +17,11 @@ The release is split in two phases because `main` is protected (see below):
   configured in [`.release-it.json`](./.release-it.json) as a **prepare-only**
   tool. It bumps every package, re-pins the internal `@duraflows/core` peer,
   generates the `CHANGELOG.md` section, and commits — but does **not** tag,
-  push, publish, or create a GitHub release (those are Phase 2 / CI).
+  push, or publish (those are Phase 2 / CI).
 - **Phase 2** is [`.github/workflows/release.yml`](./.github/workflows/release.yml),
-  triggered on `v*` tag push. It builds the tagged commit, runs
-  `pnpm -r publish`, and creates the GitHub release from the CHANGELOG.
+  triggered on `v*` tag push. It builds the tagged commit and runs
+  `pnpm -r publish`. (No GitHub release is created — the tag is the source of
+  truth; the CHANGELOG holds the notes.)
 
 ## ⚠️ `main` is protected by a ruleset
 
@@ -117,7 +118,7 @@ git fetch origin && git reset --hard origin/main   # pick up the squashed releas
 pnpm run build && pnpm test                          # final sanity
 
 # Tag the release commit and push the tag — this triggers release.yml, which
-# publishes all four packages and creates the GitHub release.
+# publishes all four packages to npm.
 git tag -a v$VERSION -m "Release v$VERSION"
 git push origin v$VERSION
 ```
@@ -126,7 +127,6 @@ Watch the **Release** workflow finish, then verify:
 
 ```bash
 for p in core pg kysely nestjs; do printf "@duraflows/%s: " "$p"; npm view "@duraflows/$p" version; done
-gh release view v$VERSION
 git push origin --delete chore/release-$VERSION 2>/dev/null   # if not auto-deleted on merge
 ```
 

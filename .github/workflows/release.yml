@@ -2,15 +2,15 @@ name: Release
 
 # Phase 2 of the release (see RELEASING.md): publishing is driven by pushing a
 # `vX.Y.Z` tag — never by a direct push to protected `main`. This job builds the
-# tagged commit, publishes all four packages to npm, and creates the GitHub
-# release from the matching CHANGELOG section.
+# tagged commit and publishes all four packages to npm. (No GitHub release is
+# created; the tag is the source of truth.)
 on:
   push:
     tags:
       - "v*"
 
 permissions:
-  contents: write # create the GitHub release
+  contents: read
 
 jobs:
   publish:
@@ -36,13 +36,3 @@ jobs:
           pnpm -r publish --no-git-checks --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          node scripts/extract-release-notes.mjs "$VERSION" > RELEASE_NOTES.md
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --notes-file RELEASE_NOTES.md \
-            --verify-tag
