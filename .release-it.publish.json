@@ -1,0 +1,15 @@
+{
+  "git": {
+    "commit": false,
+    "tag": true,
+    "tagName": "v${version}",
+    "push": false,
+    "requireUpstream": false,
+    "requireCleanWorkingDir": true
+  },
+  "github": { "release": false },
+  "npm": { "publish": false },
+  "hooks": {
+    "after:release": "pnpm -r publish --no-git-checks"
+  }
+}
