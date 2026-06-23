@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.1.0](https://github.com/camcima/duraflows/compare/v3.0.0...v3.1.0) (2026-06-23)
+
+### Bug Fixes
+
+* **deps:** upgrade @camcima/finita to v4 ([99c0464](https://github.com/camcima/duraflows/commit/99c04645c0a19a506dedbfb5c1dd00ca98823896))
+
 ## [3.0.0](https://github.com/camcima/duraflows/compare/v2.1.0...v3.0.0) (2026-06-23)
 
 ### ⚠ BREAKING CHANGES
