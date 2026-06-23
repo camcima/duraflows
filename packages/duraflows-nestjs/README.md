@@ -22,6 +22,11 @@ Part of the [duraflows](https://github.com/camcima/duraflows) monorepo.
 pnpm add @duraflows/core @duraflows/nestjs
 ```
 
+> **Note:** `@duraflows/core` is a peer dependency — you install it alongside this
+> package so your app and the adapter share a single core instance. `@nestjs/common`,
+> `@nestjs/core`, `reflect-metadata`, and `rxjs` are peers too, but any NestJS app
+> already has them, so no extra install is normally needed.
+
 You will also need a persistence adapter such as [`@duraflows/pg`](https://www.npmjs.com/package/@duraflows/pg):
 
 ```bash

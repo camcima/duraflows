@@ -50,7 +50,7 @@ pnpm add @duraflows/core
 
 # Pick ONE persistence adapter:
 pnpm add @duraflows/pg pg          # raw pg pool
-pnpm add @duraflows/kysely kysely  # kysely query builder (also needs pg as a peer dep)
+pnpm add @duraflows/kysely kysely pg  # kysely query builder (pg = your Postgres driver, not a declared peer)
 
 # NestJS integration (if using NestJS)
 pnpm add @duraflows/nestjs
