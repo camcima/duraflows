@@ -40,8 +40,15 @@ export class WorkflowExceptionFilter implements ExceptionFilter {
 
     // The response body is sanitized, so log the real cause here — otherwise
     // unmapped domain errors (e.g. optimistic-locking conflicts under
-    // concurrency) become undiagnosable silent 500s.
-    this.logger.error(exception.message, exception.stack);
+    // concurrency) become undiagnosable silent 500s. `WorkflowError` wraps the
+    // originating DI/persistence failure as `cause` (e.g. NestCommandRegistry
+    // attaches the container error), so prefer the cause's message and stack —
+    // the wrapper alone hides the underlying failure from operators.
+    const cause = exception.cause instanceof Error ? exception.cause : undefined;
+    this.logger.error(
+      cause ? `${exception.message} (cause: ${cause.message})` : exception.message,
+      (cause ?? exception).stack,
+    );
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).send({
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       error: "Internal Server Error",

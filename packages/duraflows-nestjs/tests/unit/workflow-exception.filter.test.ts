@@ -61,6 +61,22 @@ describe("WorkflowExceptionFilter", () => {
     }
   });
 
+  it("prefers the wrapped cause when logging the generic 500", () => {
+    const { host } = mockHost();
+    const errorSpy = vi.spyOn(Logger.prototype, "error").mockImplementation(() => {});
+    try {
+      const cause = new Error("ECONNREFUSED 127.0.0.1:5432");
+      new WorkflowExceptionFilter().catch(new WorkflowError("command resolution failed", cause), host);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      // The wrapper message stays for context, but the cause's message and
+      // stack are surfaced so the underlying failure is diagnosable.
+      expect(errorSpy.mock.calls[0][0]).toBe("command resolution failed (cause: ECONNREFUSED 127.0.0.1:5432)");
+      expect(errorSpy.mock.calls[0][1]).toBe(cause.stack);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it("does not log on the mapped 404/409 paths", () => {
     const errorSpy = vi.spyOn(Logger.prototype, "error").mockImplementation(() => {});
     try {
