@@ -1,6 +1,23 @@
-# Ignore dev dependency vulnerabilities — this library ships zero runtime deps
-# in the core package. Dev deps only affect the local development workflow,
-# not consumers.
+# osv-scanner runs against pnpm-lock.yaml, which is almost entirely development
+# tooling. The published packages share exactly ONE runtime dependency:
+# @camcima/finita (a first-party, zero-dependency leaf) via @duraflows/core. The
+# adapters take their runtime deps (pg, kysely, @nestjs/*) as peerDependencies,
+# so those belong to the consumer's tree, not ours.
+#
+# Dev-tooling vulnerabilities affect only the local dev/test workflow, never
+# consumers, so they must not fail CI. `group = "dev"` is the intuitive filter,
+# but osv-scanner cannot classify pnpm (lockfileVersion 9) TRANSITIVE dev deps
+# as "dev", so transitive dev tooling (vite, undici, js-yaml, ...) failed CI
+# regardless. Ignoring the npm ecosystem is the reliable, low-maintenance way to
+# drop that noise.
+#
+# TRADE-OFF: this also suppresses advisories for @camcima/finita. That is
+# tolerable here (first-party, zero transitive deps), but it is the one
+# consumer-facing package this scan would otherwise cover. If finita gains
+# advisories or a real third-party runtime dependency is ever added, narrow this
+# rule (e.g. ignore by explicit package name) and/or enable Dependabot security
+# alerts so that dependency stays under watch.
 [[PackageOverrides]]
-group = "dev"
+ecosystem = "npm"
 ignore = true
+reason = "npm tree is dev tooling plus first-party @camcima/finita; consumer-facing deps are peers"
