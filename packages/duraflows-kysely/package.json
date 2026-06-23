@@ -1,6 +1,6 @@
 {
   "name": "@duraflows/kysely",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "PostgreSQL persistence adapter for duraflows using `kysely`. Integrates with kysely's type-safe query builder and AsyncLocalStorage-based transaction context.",
   "keywords": [
     "duraflows",
@@ -54,7 +54,7 @@
     "build": "tsc --build"
   },
   "peerDependencies": {
-    "@duraflows/core": "^3.0.0",
+    "@duraflows/core": "^3.1.0",
     "kysely": "^0.29.2"
   },
   "devDependencies": {
