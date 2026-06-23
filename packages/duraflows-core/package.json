@@ -63,7 +63,7 @@
     "build": "tsc --build"
   },
   "dependencies": {
-    "@camcima/finita": "^3.0.0"
+    "@camcima/finita": "^4.0.0"
   },
   "peerDependencies": {
     "vitest": "^4.0.0"
