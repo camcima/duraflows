@@ -62,6 +62,6 @@
     "@duraflows/pg": "workspace:*",
     "@types/pg": "^8.11.0",
     "kysely": "^0.29.2",
-    "pg": "^8.21.0"
+    "pg": "^8.22.0"
   }
 }
