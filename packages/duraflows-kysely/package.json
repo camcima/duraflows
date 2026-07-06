@@ -55,13 +55,13 @@
   },
   "peerDependencies": {
     "@duraflows/core": "^3.1.0",
-    "kysely": "^0.29.2"
+    "kysely": "^0.29.3"
   },
   "devDependencies": {
     "@duraflows/core": "workspace:*",
     "@duraflows/pg": "workspace:*",
     "@types/pg": "^8.11.0",
-    "kysely": "^0.29.2",
-    "pg": "^8.21.0"
+    "kysely": "^0.29.3",
+    "pg": "^8.22.0"
   }
 }
