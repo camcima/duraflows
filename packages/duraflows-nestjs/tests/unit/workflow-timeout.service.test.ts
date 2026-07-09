@@ -4,7 +4,7 @@ import { WorkflowTimeoutService } from "../../src/services/workflow-timeout.serv
 
 function createMocks() {
   const runtime = {
-    processExpiredWorkflows: vi.fn().mockResolvedValue({ processed: 5, rejected: 0, failed: [] }),
+    processExpiredWorkflows: vi.fn().mockResolvedValue({ processed: 5, rejected: 0, businessFailed: [], failed: [] }),
   };
 
   const service = new WorkflowTimeoutService(runtime as any);

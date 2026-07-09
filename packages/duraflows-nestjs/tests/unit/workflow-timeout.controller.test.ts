@@ -5,7 +5,7 @@ import { TimeoutProcessQueryDto } from "../../src/controllers/dto/index.js";
 
 function createMocks() {
   const timeoutService = {
-    processExpiredWorkflows: vi.fn().mockResolvedValue({ processed: 3, rejected: 0, failed: [] }),
+    processExpiredWorkflows: vi.fn().mockResolvedValue({ processed: 3, rejected: 0, businessFailed: [], failed: [] }),
   };
 
   const controller = new WorkflowTimeoutController(timeoutService as any);
