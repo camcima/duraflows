@@ -234,10 +234,10 @@ export class WorkflowValidator {
       const value = timeout[field];
       if (value !== undefined) {
         hasField = true;
-        if (typeof value !== "number" || value <= 0) {
+        if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
           errors.push({
             path: `${path}.${field}`,
-            message: `Timeout field "${field}" must be a positive number`,
+            message: `Timeout field "${field}" must be a positive finite number`,
           });
         }
       }
