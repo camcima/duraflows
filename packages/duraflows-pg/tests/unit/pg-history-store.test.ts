@@ -79,7 +79,7 @@ describe("PgWorkflowHistoryStore", () => {
       const txClient = createMockClient({ rows: [{ uuid: "tx-uuid" }] });
       const store = new PgWorkflowHistoryStore(pool);
 
-      const uuid = await PgTransactionContext.run(txClient, () => store.append(sampleEntry));
+      const uuid = await PgTransactionContext.run(pool, txClient, () => store.append(sampleEntry));
 
       expect(uuid).toBe("tx-uuid");
       expect(txClient.query).toHaveBeenCalledOnce();

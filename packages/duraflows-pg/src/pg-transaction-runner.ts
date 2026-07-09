@@ -7,7 +7,7 @@ export class PgTransactionRunner implements WorkflowTransactionRunner {
 
   async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
     // If already within a transaction, reuse the existing client
-    const existingClient = PgTransactionContext.getClient();
+    const existingClient = PgTransactionContext.getClient(this.pool);
     if (existingClient) {
       return callback();
     }
@@ -15,7 +15,7 @@ export class PgTransactionRunner implements WorkflowTransactionRunner {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const result = await PgTransactionContext.run(client, callback);
+      const result = await PgTransactionContext.run(this.pool, client, callback);
       await client.query("COMMIT");
       return result;
     } catch (error) {

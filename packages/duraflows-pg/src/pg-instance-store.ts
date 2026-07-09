@@ -7,7 +7,7 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
   constructor(private readonly pool: Pool) {}
 
   private getClient(): PoolClient | Pool {
-    return PgTransactionContext.getClient() ?? this.pool;
+    return PgTransactionContext.getClient(this.pool) ?? this.pool;
   }
 
   async create(instance: WorkflowInstance): Promise<void> {
@@ -41,7 +41,7 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
   }
 
   async lockByUuid(uuid: string): Promise<WorkflowInstance | null> {
-    const client = PgTransactionContext.getClient();
+    const client = PgTransactionContext.getClient(this.pool);
     if (!client) {
       throw new Error("lockByUuid requires an active transaction");
     }
@@ -81,7 +81,7 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
   }
 
   async findExpired(limit: number, now: Date): Promise<WorkflowInstance[]> {
-    const client = PgTransactionContext.getClient();
+    const client = PgTransactionContext.getClient(this.pool);
     if (!client) {
       throw new Error("findExpired requires an active transaction");
     }
