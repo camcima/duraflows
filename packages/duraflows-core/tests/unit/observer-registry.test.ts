@@ -168,4 +168,51 @@ describe("ObserverRegistry", () => {
     expect(message).toContain("raw-string-not-an-error");
     warnSpy.mockRestore();
   });
+
+  it("does not reject when the onObserverError handler itself throws", async () => {
+    const registry = new ObserverRegistry(
+      [
+        {
+          name: "boom",
+          onEnter: () => {
+            throw new Error("observer failed");
+          },
+        },
+      ],
+      () => {
+        throw new Error("handler failed");
+      },
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(registry.fireOnEnter(makeEvent())).resolves.toBeUndefined();
+
+    // Falls back to the default handler (console.warn) for the original error
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("observer failed"));
+    warnSpy.mockRestore();
+  });
+
+  it("continues with remaining observers after the error handler throws", async () => {
+    const secondObserver = vi.fn();
+    const registry = new ObserverRegistry(
+      [
+        {
+          name: "boom",
+          onEnter: () => {
+            throw new Error("observer failed");
+          },
+        },
+        { name: "after", onEnter: secondObserver },
+      ],
+      () => {
+        throw new Error("handler failed");
+      },
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await registry.fireOnEnter(makeEvent());
+
+    expect(secondObserver).toHaveBeenCalledOnce();
+    warnSpy.mockRestore();
+  });
 });
