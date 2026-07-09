@@ -316,6 +316,7 @@ interface ProcessExpiredWorkflowsInput {
 interface ProcessExpiredWorkflowsResult {
   processed: number; // timeout fired and the instance transitioned
   rejected: number; // v1.1.0: timeout fired but a guard rejected — instance stays in place
+  businessFailed: Array<{ uuid: string; finalState: string }>; // subset of processed whose event commands or on-enter chain failed
   failed: Array<{ uuid: string; error: string }>;
 }
 ```

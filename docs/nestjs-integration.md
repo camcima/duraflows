@@ -416,9 +416,9 @@ import { WorkflowTimeoutService } from "@duraflows/nestjs";
 
 **Methods:**
 
-| Method                            | Parameters          | Returns                                  | Description                                                          |
-| --------------------------------- | ------------------- | ---------------------------------------- | -------------------------------------------------------------------- |
-| `processExpiredWorkflows(limit?)` | `number` (optional) | `Promise<ProcessExpiredWorkflowsResult>` | Process expired instances. Returns `{ processed, rejected, failed }` |
+| Method                            | Parameters          | Returns                                  | Description                                                                          |
+| --------------------------------- | ------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------ |
+| `processExpiredWorkflows(limit?)` | `number` (optional) | `Promise<ProcessExpiredWorkflowsResult>` | Process expired instances. Returns `{ processed, rejected, businessFailed, failed }` |
 
 **Example with @nestjs/schedule:**
 
