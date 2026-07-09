@@ -491,7 +491,10 @@ type ObserverErrorHandler = (error: unknown, observer: { readonly name: string }
 - **Post-commit** — observer runs only after the state-entering transaction has committed successfully. An observer never sees a state that was rolled back.
 - **At-most-once** — an observer that throws is not retried. Observer errors do **not** cause rollback or affect runtime correctness.
 - **Sequential** — observers run one after another in registration order.
-- **Error-contained** — a thrown error is routed to `onObserverError` (default: `console.warn`).
+- **Error-contained** — a thrown error is routed to `onObserverError`
+  (default: `console.warn`). The handler itself is also guarded: if it throws,
+  the runtime logs via the default handler and continues with the remaining
+  observers.
 - **Self-transitions count** — command-only events (no `targetState`) fire observers with `fromState === toState`. Filter on `event.fromState === event.toState` to distinguish.
 - **Snapshot guarantees** — `context`, `metadata`, and `triggerMetadata` are deep-cloned via `structuredClone` and deep-frozen at event time. Consumers may retain references indefinitely.
 

@@ -186,12 +186,12 @@ class PgWorkflowHistoryStore implements WorkflowHistoryStore {
 
 **PgTransactionContext**
 
-An `AsyncLocalStorage`-based mechanism for propagating the transaction-scoped `PoolClient`:
+An `AsyncLocalStorage`-based mechanism for propagating the transaction-scoped `PoolClient`. The context is scoped per pool instance:
 
 ```ts
 const PgTransactionContext = {
-  getClient(): PoolClient | undefined;
-  run<T>(client: PoolClient, callback: () => T): T;
+  getClient(pool: Pool): PoolClient | undefined;
+  run<T>(pool: Pool, client: PoolClient, callback: () => T): T;
 };
 ```
 

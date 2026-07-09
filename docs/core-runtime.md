@@ -196,13 +196,24 @@ async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<Pro
 
 **Behavior:**
 
-1. Opens a single transaction and finds expired instances via `instanceStore.findExpired(limit, now)` (uses `FOR UPDATE SKIP LOCKED` in PostgreSQL). The `now` parameter comes from the injected clock rather than the database's `now()`.
-2. Within that same transaction, for each expired instance:
-   - Resolves the timeout event name from the current state definition
-   - Triggers the event with `triggerMetadata: { source: "timeout" }`
-   - If the definition changed and no timeout event exists, clears `expiresAt`
-3. Individual instance failures are collected (not thrown). They do not stop the batch.
-4. Commits the transaction.
+1. Opens a short-lived scan transaction that finds up to `limit` expired
+   instances via `instanceStore.findExpired(limit, now)` (uses
+   `FOR UPDATE SKIP LOCKED` in PostgreSQL). The scan's row locks are released
+   when this transaction ends; `now` comes from the injected clock rather than
+   the database's `now()`.
+2. Processes each expired instance in its **own transaction**:
+   - Re-locks the instance with `lockByUuid` and re-checks `expiresAt` — the
+     scan's locks were released, so another worker may have processed the
+     instance in between. Instances no longer expired are skipped.
+   - Resolves the timeout event name from the freshly locked state. If the
+     definition changed and no timeout event exists, clears `expiresAt`.
+   - Triggers the event with `triggerMetadata: { source: "timeout" }` and runs
+     the destination state's on-enter chain.
+3. A failure in one instance's transaction rolls back only that instance and
+   is collected into `failed`; it does not stop the batch. Short lock duration
+   and per-instance failure isolation are the reason for this two-phase model.
+4. After all per-instance transactions, fires observers post-commit for the
+   instances that committed.
 
 **Returns:**
 
@@ -210,23 +221,28 @@ async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<Pro
 interface ProcessExpiredWorkflowsResult {
   processed: number;
   rejected: number;
+  businessFailed: Array<{ uuid: string; finalState: string }>;
   failed: Array<{ uuid: string; error: string }>;
 }
 ```
 
-| Property    | Type                                     | Description                                                                              |
-| ----------- | ---------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `processed` | `number`                                 | Number of instances whose timeout event transitioned successfully                        |
-| `rejected`  | `number`                                 | Number of instances whose timeout event was short-circuited by a guard returning `false` |
-| `failed`    | `Array<{ uuid: string; error: string }>` | Instances that failed, with their UUIDs and error messages                               |
+| Property         | Type                                          | Description                                                                                                     |
+| ---------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `processed`      | `number`                                      | Instances whose timeout event transitioned — including those that ended on an error path (see `businessFailed`) |
+| `rejected`       | `number`                                      | Instances whose timeout event was short-circuited by a guard returning `false`                                  |
+| `businessFailed` | `Array<{ uuid: string; finalState: string }>` | Subset of `processed` whose event commands or on-enter chain failed and routed to an `errorState`               |
+| `failed`         | `Array<{ uuid: string; error: string }>`      | Infrastructure failures: the instance's transaction rolled back                                                 |
 
 **Example:**
 
 ```ts
 const result = await runtime.processExpiredWorkflows({ limit: 50 });
 console.log(`Processed ${result.processed}, guard-rejected ${result.rejected}`);
+if (result.businessFailed.length > 0) {
+  console.warn(`Business errors: ${result.businessFailed.map((f) => `${f.uuid} → ${f.finalState}`).join(", ")}`);
+}
 if (result.failed.length > 0) {
-  console.warn(`Failed: ${result.failed.map((f) => f.uuid).join(", ")}`);
+  console.warn(`Infrastructure failures: ${result.failed.map((f) => f.uuid).join(", ")}`);
 }
 ```
 
@@ -987,7 +1003,12 @@ runtime.addObserver(auditObserver);
 - Observers fire **post-commit** — only after the state-entering transaction has committed successfully.
 - Observers fire **sequentially** in registration order.
 - Each state entry fires observers **at-most-once**. If the process crashes between commit and the observer call, the event is skipped (no outbox pattern; at-least-once delivery is deferred to a future version).
-- If an observer's `onEnter` throws, the error is caught and logged via `console.warn`. Other observers still fire. Observer errors do **not** cause rollback or affect runtime correctness.
+- If an observer's `onEnter` throws, the error is caught and routed to
+  `onObserverError` (default: `console.warn`). If the handler itself throws,
+  the runtime falls back to the default handler and continues with the
+  remaining observers — a throwing handler never rejects a committed
+  operation. Observer errors do **not** cause rollback or affect runtime
+  correctness.
 
 ### Snapshot guarantees
 
