@@ -19,7 +19,13 @@ export class PgTransactionRunner implements WorkflowTransactionRunner {
       await client.query("COMMIT");
       return result;
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        // Never mask the causative error with a rollback failure.
+        const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+        console.warn(`[duraflows] ROLLBACK failed after transaction error: ${message}`);
+      }
       throw error;
     } finally {
       client.release();

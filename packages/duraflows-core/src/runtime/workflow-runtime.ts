@@ -28,12 +28,24 @@ import { OnEnterExecutor } from "../execution/on-enter-executor.js";
 import { TimeoutResolver } from "../execution/timeout-resolver.js";
 import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
 import type { WorkflowGuardRegistry } from "../registry/guard-registry.js";
-import { WorkflowInstanceNotFoundError } from "../errors/index.js";
+import { WorkflowInstanceNotFoundError, InvalidArgumentError } from "../errors/index.js";
 import { WorkflowHandle } from "./workflow-handle.js";
 import type { WorkflowObserver, StateEnterEvent, ObserverErrorHandler } from "../types/observer.js";
 import { ObserverRegistry } from "./observer-registry.js";
 
 const DEFAULT_MAX_ON_ENTER_DEPTH = 10;
+
+function assertPositiveSafeInteger(value: number, name: string): void {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new InvalidArgumentError(`${name} must be a positive integer, got ${value}`);
+  }
+}
+
+function assertNonNegativeSafeInteger(value: number, name: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new InvalidArgumentError(`${name} must be a non-negative integer, got ${value}`);
+  }
+}
 
 export interface WorkflowRuntimeOptions {
   definitionRegistry: WorkflowDefinitionRegistry;
@@ -72,6 +84,9 @@ export class WorkflowRuntime {
     this.eventExecutor = new EventExecutor(commandExecutor, options.guardRegistry);
     this.onEnterExecutor = new OnEnterExecutor(commandExecutor);
     this.timeoutResolver = new TimeoutResolver();
+    if (options.maxOnEnterDepth !== undefined) {
+      assertPositiveSafeInteger(options.maxOnEnterDepth, "maxOnEnterDepth");
+    }
     this.maxOnEnterDepth = options.maxOnEnterDepth ?? DEFAULT_MAX_ON_ENTER_DEPTH;
     this.observerRegistry = new ObserverRegistry(options.observers ?? [], options.onObserverError);
   }
@@ -317,6 +332,7 @@ export class WorkflowRuntime {
 
   async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<ProcessExpiredWorkflowsResult> {
     const limit = input?.limit ?? 100;
+    assertPositiveSafeInteger(limit, "limit");
     const now = this.clock.now();
     const eventsToFire: StateEnterEvent[] = [];
     let processed = 0;
@@ -603,6 +619,12 @@ export class WorkflowRuntime {
     workflowInstanceUuid: string,
     options?: { limit?: number; offset?: number },
   ): Promise<WorkflowHistoryRecord[]> {
+    if (options?.limit !== undefined) {
+      assertPositiveSafeInteger(options.limit, "limit");
+    }
+    if (options?.offset !== undefined) {
+      assertNonNegativeSafeInteger(options.offset, "offset");
+    }
     return this.historyStore.findByInstanceUuid(workflowInstanceUuid, options);
   }
 

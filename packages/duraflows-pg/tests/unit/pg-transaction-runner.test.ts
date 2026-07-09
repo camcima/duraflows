@@ -65,4 +65,24 @@ describe("PgTransactionRunner", () => {
     // No BEGIN/COMMIT on the nested call
     expect(client.query).not.toHaveBeenCalled();
   });
+
+  it("rethrows the callback error even when ROLLBACK fails, and still releases the client", async () => {
+    const { pool, client } = createMocks();
+    (client.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: string) => {
+      if (sql === "ROLLBACK") throw new Error("rollback failed");
+      return { rows: [] };
+    });
+    const runner = new PgTransactionRunner(pool);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(
+      runner.runInTransaction(async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+
+    expect(client.release).toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("rollback failed"));
+    warnSpy.mockRestore();
+  });
 });
