@@ -583,6 +583,17 @@ Response:
 }
 ```
 
+### Error Responses
+
+All four controllers apply `@UseFilters(WorkflowExceptionFilter)`, which maps domain errors thrown by the runtime to HTTP status codes instead of leaking a generic 500:
+
+| Error class                     | HTTP status                                                                      |
+| ------------------------------- | -------------------------------------------------------------------------------- |
+| `WorkflowInstanceNotFoundError` | 404 Not Found                                                                    |
+| `InvalidEventError`             | 409 Conflict                                                                     |
+| `InvalidArgumentError`          | 400 Bad Request                                                                  |
+| Any other `WorkflowError`       | 500 Internal Server Error (sanitized message; original cause logged server-side) |
+
 ## Injection Tokens
 
 For advanced use cases, you can inject individual components using their tokens:

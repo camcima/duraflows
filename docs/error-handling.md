@@ -8,6 +8,7 @@ The workflow runtime defines a hierarchy of error classes that represent differe
 classDiagram
     Error <|-- WorkflowError
     WorkflowError <|-- WorkflowDefinitionError
+    WorkflowError <|-- InvalidArgumentError
     WorkflowError <|-- InvalidEventError
     WorkflowError <|-- CommandFailureError
     WorkflowError <|-- OnEnterDepthExceededError
@@ -96,6 +97,37 @@ try {
   }
 }
 ```
+
+## InvalidArgumentError
+
+Thrown when a caller passes an invalid numeric argument to a public runtime API.
+
+```ts
+class InvalidArgumentError extends WorkflowError {
+  constructor(message: string);
+}
+```
+
+**When thrown:**
+
+- `runtime.processExpiredWorkflows({ limit })` — `limit` must be a positive safe integer
+- `runtime.getHistory({ limit, offset })` — `limit` must be a positive safe integer; `offset` must be a non-negative safe integer
+- `new WorkflowRuntime({ maxOnEnterDepth })` — `maxOnEnterDepth` must be a positive safe integer
+
+Message shape: `"<name> must be a positive integer, got <value>"` for positive-only arguments (`limit`, `maxOnEnterDepth`), or `"<name> must be a non-negative integer, got <value>"` for `offset`.
+
+```ts
+try {
+  await runtime.processExpiredWorkflows({ limit: -5 });
+} catch (err) {
+  if (err instanceof InvalidArgumentError) {
+    console.error(err.message);
+    // 'limit must be a positive integer, got -5'
+  }
+}
+```
+
+**How to fix:** Pass a positive safe integer (or a non-negative safe integer for `offset`). `NaN`, `Infinity`, non-integers, and out-of-range values are all rejected.
 
 ## InvalidEventError
 
