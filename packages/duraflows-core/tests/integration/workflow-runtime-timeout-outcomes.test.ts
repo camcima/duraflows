@@ -6,13 +6,12 @@ import { InMemoryCommandRegistry } from "../../src/registry/command-registry.js"
 import { WorkflowValidator } from "../../src/validation/workflow-validator.js";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
-import type { WorkflowInstance, WorkflowCommand } from "../../src/types/runtime.js";
+import type { WorkflowInstance } from "../../src/types/runtime.js";
 import type {
   WorkflowInstanceStore,
   WorkflowHistoryStore,
   WorkflowHistoryRecord,
   WorkflowTransactionRunner,
-  WorkflowClock,
 } from "../../src/types/persistence.js";
 
 // ---------------------------------------------------------------------------
@@ -105,6 +104,25 @@ const DEFINITION: WorkflowDefinition = {
   },
 };
 
+const EVENT_FAILURE_DEFINITION: WorkflowDefinition = {
+  name: "timeout-event-failure-wf",
+  initialState: "waiting",
+  states: {
+    waiting: {
+      events: {
+        expire: {
+          targetState: "processed",
+          errorState: "failed",
+          commands: [{ name: "expireCleanup" }],
+          timeout: { afterMinutes: 5 },
+        },
+      },
+    },
+    processed: {},
+    failed: {},
+  },
+};
+
 describe("processExpiredWorkflows outcome reporting (AR-03)", () => {
   let now: Date;
   let runtime: WorkflowRuntime;
@@ -117,6 +135,7 @@ describe("processExpiredWorkflows outcome reporting (AR-03)", () => {
       compiler: new WorkflowCompiler(),
     });
     definitionRegistry.register(DEFINITION);
+    definitionRegistry.register(EVENT_FAILURE_DEFINITION);
     commandRegistry = new InMemoryCommandRegistry();
 
     runtime = new WorkflowRuntime({
@@ -157,5 +176,21 @@ describe("processExpiredWorkflows outcome reporting (AR-03)", () => {
 
     expect(result.processed).toBe(1);
     expect(result.businessFailed).toEqual([]);
+  });
+
+  it("reports a business failure when the timeout event's own commands fail", async () => {
+    commandRegistry.register("expireCleanup", {
+      execute: async () => ({ ok: false, code: "CLEANUP_FAILED" }),
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "timeout-event-failure-wf" });
+    now = new Date("2025-06-15T12:10:00.000Z");
+
+    const result = await runtime.processExpiredWorkflows();
+
+    expect(result.processed).toBe(1);
+    expect(result.businessFailed).toEqual([{ uuid: instance.uuid, finalState: "failed" }]);
+    expect(result.failed).toEqual([]);
+    expect(result.rejected).toBe(0);
   });
 });

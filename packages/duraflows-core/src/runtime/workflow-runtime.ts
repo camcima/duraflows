@@ -393,7 +393,7 @@ export class WorkflowRuntime {
       }
     }
 
-    // Step 3: fire observers post-commit (only for successful instances).
+    // Step 3: fire observers post-commit (only for instances whose transaction committed).
     for (const event of eventsToFire) {
       await this.observerRegistry.fireOnEnter(event);
     }
