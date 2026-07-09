@@ -7,7 +7,7 @@ export class KyselyWorkflowHistoryStore implements WorkflowHistoryStore {
   constructor(private readonly db: Kysely<WorkflowDatabase>) {}
 
   private getExecutor() {
-    return KyselyTransactionContext.getTransaction() ?? this.db;
+    return KyselyTransactionContext.getTransaction(this.db) ?? this.db;
   }
 
   async append(entry: WorkflowHistoryRecord): Promise<string> {

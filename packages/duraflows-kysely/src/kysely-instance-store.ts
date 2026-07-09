@@ -8,7 +8,7 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
   constructor(private readonly db: Kysely<WorkflowDatabase>) {}
 
   private getExecutor() {
-    return KyselyTransactionContext.getTransaction() ?? this.db;
+    return KyselyTransactionContext.getTransaction(this.db) ?? this.db;
   }
 
   async create(instance: WorkflowInstance): Promise<void> {
@@ -39,7 +39,7 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
   }
 
   async lockByUuid(uuid: string): Promise<WorkflowInstance | null> {
-    const trx = KyselyTransactionContext.getTransaction();
+    const trx = KyselyTransactionContext.getTransaction(this.db);
     if (!trx) {
       throw new Error("lockByUuid requires an active transaction");
     }
@@ -80,7 +80,7 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
   }
 
   async findExpired(limit: number, now: Date): Promise<WorkflowInstance[]> {
-    const trx = KyselyTransactionContext.getTransaction();
+    const trx = KyselyTransactionContext.getTransaction(this.db);
     if (!trx) {
       throw new Error("findExpired requires an active transaction");
     }

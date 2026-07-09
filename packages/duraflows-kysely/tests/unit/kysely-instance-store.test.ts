@@ -138,7 +138,7 @@ describe("KyselyWorkflowInstanceStore", () => {
       const store = new KyselyWorkflowInstanceStore(db);
       const trx = db as unknown as Transaction<WorkflowDatabase>;
 
-      const result = await KyselyTransactionContext.run(trx, () => store.lockByUuid("inst-uuid"));
+      const result = await KyselyTransactionContext.run(db, trx, () => store.lockByUuid("inst-uuid"));
 
       expect(result).not.toBeNull();
       expect(result!.uuid).toBe("inst-uuid");
@@ -150,7 +150,7 @@ describe("KyselyWorkflowInstanceStore", () => {
       const store = new KyselyWorkflowInstanceStore(db);
       const trx = db as unknown as Transaction<WorkflowDatabase>;
 
-      const result = await KyselyTransactionContext.run(trx, () => store.lockByUuid("missing"));
+      const result = await KyselyTransactionContext.run(db, trx, () => store.lockByUuid("missing"));
 
       expect(result).toBeNull();
     });
@@ -221,7 +221,7 @@ describe("KyselyWorkflowInstanceStore", () => {
       const store = new KyselyWorkflowInstanceStore(db);
       const trx = db as unknown as Transaction<WorkflowDatabase>;
 
-      const results = await KyselyTransactionContext.run(trx, () => store.findExpired(10, now));
+      const results = await KyselyTransactionContext.run(db, trx, () => store.findExpired(10, now));
 
       expect(results).toHaveLength(1);
       expect(results[0].uuid).toBe("inst-uuid");

@@ -132,7 +132,7 @@ describe("KyselyWorkflowHistoryStore", () => {
       const store = new KyselyWorkflowHistoryStore(db);
       const trx = db as unknown as Transaction<WorkflowDatabase>;
 
-      const uuid = await KyselyTransactionContext.run(trx, () => store.append(sampleEntry));
+      const uuid = await KyselyTransactionContext.run(db, trx, () => store.append(sampleEntry));
       expect(uuid).toBe("tx-uuid");
     });
   });
