@@ -168,4 +168,79 @@ describe("ObserverRegistry", () => {
     expect(message).toContain("raw-string-not-an-error");
     warnSpy.mockRestore();
   });
+
+  it("does not reject when the onObserverError handler itself throws", async () => {
+    const registry = new ObserverRegistry(
+      [
+        {
+          name: "boom",
+          onEnter: () => {
+            throw new Error("observer failed");
+          },
+        },
+      ],
+      () => {
+        throw new Error("handler failed");
+      },
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(registry.fireOnEnter(makeEvent())).resolves.toBeUndefined();
+
+    // Falls back to the default handler (console.warn) for the original error
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("observer failed"));
+    warnSpy.mockRestore();
+  });
+
+  it("contains an async onObserverError handler that rejects", async () => {
+    const secondObserver = vi.fn();
+    const registry = new ObserverRegistry(
+      [
+        {
+          name: "boom",
+          onEnter: () => {
+            throw new Error("observer failed");
+          },
+        },
+        { name: "after", onEnter: secondObserver },
+      ],
+      async () => {
+        throw new Error("async handler rejected");
+      },
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(registry.fireOnEnter(makeEvent())).resolves.toBeUndefined();
+
+    // The rejection is caught: fall back to the default handler for the
+    // original error and keep firing the remaining observers.
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("observer failed"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("async handler rejected"));
+    expect(secondObserver).toHaveBeenCalledOnce();
+    warnSpy.mockRestore();
+  });
+
+  it("continues with remaining observers after the error handler throws", async () => {
+    const secondObserver = vi.fn();
+    const registry = new ObserverRegistry(
+      [
+        {
+          name: "boom",
+          onEnter: () => {
+            throw new Error("observer failed");
+          },
+        },
+        { name: "after", onEnter: secondObserver },
+      ],
+      () => {
+        throw new Error("handler failed");
+      },
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await registry.fireOnEnter(makeEvent());
+
+    expect(secondObserver).toHaveBeenCalledOnce();
+    warnSpy.mockRestore();
+  });
 });

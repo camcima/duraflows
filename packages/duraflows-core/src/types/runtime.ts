@@ -80,6 +80,13 @@ export interface ProcessExpiredWorkflowsInput {
 export interface ProcessExpiredWorkflowsResult {
   processed: number;
   rejected: number;
+  /**
+   * Subset of `processed` whose timeout event or subsequent on-enter chain
+   * ended on an error path (a command returned `ok: false` and routed to
+   * `errorState`). These instances transitioned, but to a failure state.
+   */
+  businessFailed: Array<{ uuid: string; finalState: string }>;
+  /** Infrastructure failures: the per-instance transaction rolled back. */
   failed: Array<{ uuid: string; error: string }>;
 }
 

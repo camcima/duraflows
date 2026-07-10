@@ -1265,7 +1265,7 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const result = await runtime.processExpiredWorkflows();
 
-    expect(result).toEqual({ processed: 0, rejected: 0, failed: [] });
+    expect(result).toEqual({ processed: 0, rejected: 0, businessFailed: [], failed: [] });
 
     // Nothing was transitioned or recorded.
     const history = await historyStore.findByInstanceUuid(instance.uuid);

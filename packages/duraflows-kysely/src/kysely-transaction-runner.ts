@@ -7,13 +7,13 @@ export class KyselyTransactionRunner implements WorkflowTransactionRunner {
   constructor(private readonly db: Kysely<WorkflowDatabase>) {}
 
   async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
-    const existing = KyselyTransactionContext.getTransaction();
+    const existing = KyselyTransactionContext.getTransaction(this.db);
     if (existing) {
       return callback();
     }
 
     return this.db.transaction().execute(async (trx) => {
-      return KyselyTransactionContext.run(trx, callback);
+      return KyselyTransactionContext.run(this.db, trx, callback);
     });
   }
 }

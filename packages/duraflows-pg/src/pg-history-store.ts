@@ -6,7 +6,7 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
   constructor(private readonly pool: Pool) {}
 
   private getClient(): PoolClient | Pool {
-    return PgTransactionContext.getClient() ?? this.pool;
+    return PgTransactionContext.getClient(this.pool) ?? this.pool;
   }
 
   async append(entry: WorkflowHistoryRecord): Promise<string> {

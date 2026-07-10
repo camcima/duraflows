@@ -39,11 +39,12 @@ export function kyselyWorkflowProvidersFromTransaction<DB extends WorkflowDataba
   const narrowed = trx as unknown as Kysely<WorkflowDatabase>;
   const transactionRunner: WorkflowPersistenceProvider["transactionRunner"] = {
     async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
-      const existing = KyselyTransactionContext.getTransaction();
-      if (existing) {
+      // Nested calls reuse the bound transaction; an unrelated ambient
+      // transaction from another provider must never supersede it.
+      if (KyselyTransactionContext.getTransaction(narrowed)) {
         return callback();
       }
-      return KyselyTransactionContext.run(trx, callback);
+      return KyselyTransactionContext.run(narrowed, trx, callback);
     },
   };
   const instanceStore = new KyselyWorkflowInstanceStore(narrowed);

@@ -316,6 +316,7 @@ interface ProcessExpiredWorkflowsInput {
 interface ProcessExpiredWorkflowsResult {
   processed: number; // timeout fired and the instance transitioned
   rejected: number; // v1.1.0: timeout fired but a guard rejected — instance stays in place
+  businessFailed: Array<{ uuid: string; finalState: string }>; // subset of processed whose event commands or on-enter chain failed
   failed: Array<{ uuid: string; error: string }>;
 }
 ```
@@ -400,18 +401,18 @@ interface WorkflowPersistenceProvider {
 new WorkflowRuntime(options: WorkflowRuntimeOptions)
 ```
 
-| Option               | Type                          | Description                                                                          |
-| -------------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
-| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                     |
-| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                         |
-| `instanceStore`      | `WorkflowInstanceStore`       | Instance persistence                                                                 |
-| `historyStore`       | `WorkflowHistoryStore`        | History persistence                                                                  |
-| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                               |
-| `clock`              | `WorkflowClock`               | Clock for timestamps                                                                 |
-| `maxOnEnterDepth`    | `number`                      | Max onEnter chain depth (default: 10)                                                |
-| `observers`          | `readonly WorkflowObserver[]` | v1.0.0: lifecycle observers fired post-commit on every state entry                   |
-| `onObserverError`    | `ObserverErrorHandler`        | v1.0.0: handler invoked when an observer throws (default logs via `console.warn`)    |
-| `guardRegistry`      | `WorkflowGuardRegistry`       | v1.1.0: registry of guard implementations; required when any definition uses `guard` |
+| Option               | Type                          | Description                                                                                          |
+| -------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                                     |
+| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                                         |
+| `instanceStore`      | `WorkflowInstanceStore`       | Instance persistence                                                                                 |
+| `historyStore`       | `WorkflowHistoryStore`        | History persistence                                                                                  |
+| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                                               |
+| `clock`              | `WorkflowClock`               | Clock for timestamps                                                                                 |
+| `maxOnEnterDepth`    | `number`                      | Max onEnter chain depth (default: 10). Throws `InvalidArgumentError` if not a positive safe integer. |
+| `observers`          | `readonly WorkflowObserver[]` | v1.0.0: lifecycle observers fired post-commit on every state entry                                   |
+| `onObserverError`    | `ObserverErrorHandler`        | v1.0.0: handler invoked when an observer throws (default logs via `console.warn`)                    |
+| `guardRegistry`      | `WorkflowGuardRegistry`       | v1.1.0: registry of guard implementations; required when any definition uses `guard`                 |
 
 ### Methods
 
@@ -425,7 +426,7 @@ Within transaction: locks instance (FOR UPDATE), validates event, executes comma
 
 **`processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<ProcessExpiredWorkflowsResult>`**
 
-Finds expired instances (FOR UPDATE SKIP LOCKED), triggers their timeout events. Individual failures collected, not thrown. Default limit: 100.
+Scans for expired instances (FOR UPDATE SKIP LOCKED), then runs one transaction per instance to trigger its timeout event. `limit` is validated (throws `InvalidArgumentError` if not a positive safe integer) and defaults to 100. Per-instance technical failures are collected in `failed`, not thrown; per-instance business failures (timeout event or its onEnter chain routed to an `errorState`) are reported in `businessFailed`.
 
 **`getAvailableEvents(input: GetAvailableEventsInput): Promise<AvailableWorkflowEvent[]>`**
 
@@ -437,7 +438,7 @@ Returns instance by UUID or null.
 
 **`getHistory(uuid: string, options?: { limit?; offset? }): Promise<WorkflowHistoryRecord[]>`**
 
-Returns transition history with pagination.
+Returns transition history with pagination. `limit` (must be a positive safe integer) and `offset` (must be a non-negative safe integer) are validated when provided; either throws `InvalidArgumentError` if invalid.
 
 **`getHandle(uuid: string): WorkflowHandle`**
 
@@ -483,7 +484,11 @@ interface StateEnterEvent {
 ### ObserverErrorHandler
 
 ```ts
-type ObserverErrorHandler = (error: unknown, observer: { readonly name: string }, event: StateEnterEvent) => void;
+type ObserverErrorHandler = (
+  error: unknown,
+  observer: { readonly name: string },
+  event: StateEnterEvent,
+) => void | Promise<void>;
 ```
 
 ### Firing semantics
@@ -491,7 +496,10 @@ type ObserverErrorHandler = (error: unknown, observer: { readonly name: string }
 - **Post-commit** — observer runs only after the state-entering transaction has committed successfully. An observer never sees a state that was rolled back.
 - **At-most-once** — an observer that throws is not retried. Observer errors do **not** cause rollback or affect runtime correctness.
 - **Sequential** — observers run one after another in registration order.
-- **Error-contained** — a thrown error is routed to `onObserverError` (default: `console.warn`).
+- **Error-contained** — a thrown error is routed to `onObserverError`
+  (default: `console.warn`). The handler itself is also guarded: if it throws,
+  the runtime logs via the default handler and continues with the remaining
+  observers.
 - **Self-transitions count** — command-only events (no `targetState`) fire observers with `fromState === toState`. Filter on `event.fromState === event.toState` to distinguish.
 - **Snapshot guarantees** — `context`, `metadata`, and `triggerMetadata` are deep-cloned via `structuredClone` and deep-frozen at event time. Consumers may retain references indefinitely.
 
@@ -942,6 +950,16 @@ class WorkflowDefinitionError extends WorkflowError {
 ```
 
 Thrown for: duplicate registration, validation failure, unknown workflow lookup.
+
+### InvalidArgumentError
+
+```ts
+class InvalidArgumentError extends WorkflowError {
+  constructor(message: string);
+}
+```
+
+Thrown when: a caller passes an invalid numeric argument — `processExpiredWorkflows`'s `limit`, `getHistory`'s `limit`/`offset`, or the `WorkflowRuntime` constructor's `maxOnEnterDepth` — that isn't a positive (or, for `offset`, non-negative) safe integer.
 
 ### InvalidEventError
 

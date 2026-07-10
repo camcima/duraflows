@@ -235,6 +235,34 @@ describe("WorkflowValidator", () => {
     );
   });
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    "rejects non-finite timeout value %s",
+    (value) => {
+      const definition: WorkflowDefinition = {
+        name: "timeout-validation-wf",
+        initialState: "waiting",
+        states: {
+          waiting: {
+            events: {
+              expire: { targetState: "expired", timeout: { afterMinutes: value } },
+            },
+          },
+          expired: {},
+        },
+      };
+
+      const result = validator.validate(definition);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContainEqual(
+        expect.objectContaining({
+          path: expect.stringContaining("afterMinutes"),
+          message: expect.stringContaining("positive finite number"),
+        }),
+      );
+    },
+  );
+
   it("returns an error when a command name is not in knownCommandNames", () => {
     const def: WorkflowDefinition = {
       name: "order-workflow",

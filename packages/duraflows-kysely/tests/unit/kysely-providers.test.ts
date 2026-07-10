@@ -52,29 +52,34 @@ describe("kyselyWorkflowProvidersFromTransaction()", () => {
   it("transactionRunner.runInTransaction installs the trx into KyselyTransactionContext", async () => {
     const trx = createMockTransaction();
     const providers = kyselyWorkflowProvidersFromTransaction(trx);
+    const owner = trx as unknown as Kysely<WorkflowDatabase>;
 
     let observed: unknown;
     await providers.transactionRunner.runInTransaction(async () => {
-      observed = KyselyTransactionContext.getTransaction();
+      observed = KyselyTransactionContext.getTransaction(owner);
     });
 
     expect(observed).toBe(trx);
   });
 
-  it("transactionRunner.runInTransaction reuses an outer transaction context without re-installing", async () => {
+  it("transactionRunner.runInTransaction ignores an unrelated ambient transaction (AR-01)", async () => {
+    const outerDb = createMockDb();
     const outerTrx = createMockTransaction();
     const innerTrx = createMockTransaction();
     const providers = kyselyWorkflowProvidersFromTransaction(innerTrx);
+    const innerOwner = innerTrx as unknown as Kysely<WorkflowDatabase>;
 
-    const callback = vi.fn(async () => KyselyTransactionContext.getTransaction());
+    const callback = vi.fn(async () => KyselyTransactionContext.getTransaction(innerOwner));
 
-    // Simulate being called inside an existing outer transaction context.
-    const observed = await KyselyTransactionContext.run(outerTrx, () =>
+    // Simulate being called inside an unrelated ambient transaction context
+    // (e.g. an outer runner bound to a different Kysely instance).
+    const observed = await KyselyTransactionContext.run(outerDb, outerTrx, () =>
       providers.transactionRunner.runInTransaction(callback),
     );
 
     expect(callback).toHaveBeenCalledOnce();
-    // Outer context wins — the from-transaction runner short-circuits.
-    expect(observed).toBe(outerTrx);
+    // The pre-bound trx must remain the active context — the ambient
+    // outer transaction from another provider can never supersede it.
+    expect(observed).toBe(innerTrx);
   });
 });

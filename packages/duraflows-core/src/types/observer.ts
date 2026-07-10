@@ -21,4 +21,4 @@ export type ObserverErrorHandler = (
   error: unknown,
   observer: { readonly name: string },
   event: StateEnterEvent,
-) => void;
+) => void | Promise<void>;

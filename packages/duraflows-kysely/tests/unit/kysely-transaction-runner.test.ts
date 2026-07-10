@@ -11,9 +11,7 @@ function createMockDb() {
 
   const db = {
     transaction: vi.fn().mockReturnValue({
-      execute: vi.fn(async (callback: (trx: MockTransaction) => Promise<unknown>) => {
-        return KyselyTransactionContext.run(mockTrx, () => callback(mockTrx));
-      }),
+      execute: vi.fn(async (callback: (trx: MockTransaction) => Promise<unknown>) => callback(mockTrx)),
     }),
   } as unknown as Kysely<WorkflowDatabase>;
 
@@ -48,9 +46,9 @@ describe("KyselyTransactionRunner", () => {
 
     const existingTrx = {} as MockTransaction;
 
-    const result = await KyselyTransactionContext.run(existingTrx, () =>
+    const result = await KyselyTransactionContext.run(db, existingTrx, () =>
       runner.runInTransaction(async () => {
-        expect(KyselyTransactionContext.getTransaction()).toBe(existingTrx);
+        expect(KyselyTransactionContext.getTransaction(db)).toBe(existingTrx);
         return "nested";
       }),
     );
@@ -67,7 +65,7 @@ describe("KyselyTransactionRunner", () => {
     let capturedTrx: Transaction<WorkflowDatabase> | undefined;
 
     await runner.runInTransaction(async () => {
-      capturedTrx = KyselyTransactionContext.getTransaction();
+      capturedTrx = KyselyTransactionContext.getTransaction(db);
     });
 
     expect(capturedTrx).toBe(mockTrx);

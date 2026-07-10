@@ -30,7 +30,17 @@ export class ObserverRegistry {
       try {
         await observer.onEnter(event);
       } catch (error: unknown) {
-        this.onError(error, { name: observer.name }, event);
+        try {
+          // Promise.resolve adopts a promise returned by an async handler, so
+          // both synchronous throws and rejections stay contained here.
+          await Promise.resolve(this.onError(error, { name: observer.name }, event));
+        } catch (handlerError: unknown) {
+          // The error handler must never break the containment boundary:
+          // fall back to the default handler and keep firing observers.
+          defaultObserverErrorHandler(error, { name: observer.name }, event);
+          const message = handlerError instanceof Error ? handlerError.message : String(handlerError);
+          console.warn(`[duraflows] onObserverError handler threw while handling the error above: ${message}`);
+        }
       }
     }
   }

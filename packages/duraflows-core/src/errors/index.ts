@@ -17,6 +17,13 @@ export class WorkflowDefinitionError extends WorkflowError {
   }
 }
 
+export class InvalidArgumentError extends WorkflowError {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidArgumentError";
+  }
+}
+
 export class WorkflowInstanceNotFoundError extends WorkflowError {
   public readonly workflowInstanceUuid: string;
 

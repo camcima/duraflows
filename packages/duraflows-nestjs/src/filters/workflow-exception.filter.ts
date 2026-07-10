@@ -1,5 +1,5 @@
 import { Catch, HttpStatus, Logger, type ArgumentsHost, type ExceptionFilter } from "@nestjs/common";
-import { WorkflowError, WorkflowInstanceNotFoundError, InvalidEventError } from "@duraflows/core";
+import { WorkflowError, WorkflowInstanceNotFoundError, InvalidEventError, InvalidArgumentError } from "@duraflows/core";
 
 // `send()` (unlike `json()`) exists on both Express and Fastify replies, and
 // both serialize a plain object to JSON — keep this filter platform-agnostic.
@@ -33,6 +33,15 @@ export class WorkflowExceptionFilter implements ExceptionFilter {
       response.status(HttpStatus.CONFLICT).send({
         statusCode: HttpStatus.CONFLICT,
         error: "Conflict",
+        message: exception.message,
+      });
+      return;
+    }
+
+    if (exception instanceof InvalidArgumentError) {
+      response.status(HttpStatus.BAD_REQUEST).send({
+        statusCode: HttpStatus.BAD_REQUEST,
+        error: "Bad Request",
         message: exception.message,
       });
       return;

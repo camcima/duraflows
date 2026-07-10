@@ -7,7 +7,7 @@ export class PgTransactionRunner implements WorkflowTransactionRunner {
 
   async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
     // If already within a transaction, reuse the existing client
-    const existingClient = PgTransactionContext.getClient();
+    const existingClient = PgTransactionContext.getClient(this.pool);
     if (existingClient) {
       return callback();
     }
@@ -15,11 +15,17 @@ export class PgTransactionRunner implements WorkflowTransactionRunner {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const result = await PgTransactionContext.run(client, callback);
+      const result = await PgTransactionContext.run(this.pool, client, callback);
       await client.query("COMMIT");
       return result;
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        // Never mask the causative error with a rollback failure.
+        const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+        console.warn(`[duraflows] ROLLBACK failed after transaction error: ${message}`);
+      }
       throw error;
     } finally {
       client.release();

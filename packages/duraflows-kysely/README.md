@@ -51,7 +51,7 @@ import { KyselyTransactionContext } from "@duraflows/kysely";
 
 // Seed the transaction context so Duraflows participates in your transaction
 await db.transaction().execute(async (trx) => {
-  await KyselyTransactionContext.run(trx, async () => {
+  await KyselyTransactionContext.run(db, trx, async () => {
     // Your own writes -- uses trx
     await trx.insertInto("orders").values({ id: "ORD-1", status: "paid" }).execute();
 
@@ -117,8 +117,10 @@ Convenience factory for short-lived runtimes pre-bound to an existing transactio
 
 ### `KyselyTransactionContext`
 
-- `getTransaction()` -- Returns the active `Transaction<WorkflowDatabase>` or `undefined`
-- `run(trx, callback)` -- Executes `callback` with `trx` as the active transaction context
+The context is scoped per Kysely instance:
+
+- `getTransaction(db)` -- Returns the active `Transaction<WorkflowDatabase>` for the given `db` instance, or `undefined`
+- `run(db, trx, callback)` -- Executes `callback` with `trx` as the active transaction context for the given `db` instance
 
 ## Documentation
 

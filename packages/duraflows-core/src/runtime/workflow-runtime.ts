@@ -28,12 +28,24 @@ import { OnEnterExecutor } from "../execution/on-enter-executor.js";
 import { TimeoutResolver } from "../execution/timeout-resolver.js";
 import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
 import type { WorkflowGuardRegistry } from "../registry/guard-registry.js";
-import { WorkflowInstanceNotFoundError } from "../errors/index.js";
+import { WorkflowInstanceNotFoundError, InvalidArgumentError } from "../errors/index.js";
 import { WorkflowHandle } from "./workflow-handle.js";
 import type { WorkflowObserver, StateEnterEvent, ObserverErrorHandler } from "../types/observer.js";
 import { ObserverRegistry } from "./observer-registry.js";
 
 const DEFAULT_MAX_ON_ENTER_DEPTH = 10;
+
+function assertPositiveSafeInteger(value: number, name: string): void {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new InvalidArgumentError(`${name} must be a positive integer, got ${value}`);
+  }
+}
+
+function assertNonNegativeSafeInteger(value: number, name: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new InvalidArgumentError(`${name} must be a non-negative integer, got ${value}`);
+  }
+}
 
 export interface WorkflowRuntimeOptions {
   definitionRegistry: WorkflowDefinitionRegistry;
@@ -72,6 +84,9 @@ export class WorkflowRuntime {
     this.eventExecutor = new EventExecutor(commandExecutor, options.guardRegistry);
     this.onEnterExecutor = new OnEnterExecutor(commandExecutor);
     this.timeoutResolver = new TimeoutResolver();
+    if (options.maxOnEnterDepth !== undefined) {
+      assertPositiveSafeInteger(options.maxOnEnterDepth, "maxOnEnterDepth");
+    }
     this.maxOnEnterDepth = options.maxOnEnterDepth ?? DEFAULT_MAX_ON_ENTER_DEPTH;
     this.observerRegistry = new ObserverRegistry(options.observers ?? [], options.onObserverError);
   }
@@ -317,10 +332,12 @@ export class WorkflowRuntime {
 
   async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<ProcessExpiredWorkflowsResult> {
     const limit = input?.limit ?? 100;
+    assertPositiveSafeInteger(limit, "limit");
     const now = this.clock.now();
     const eventsToFire: StateEnterEvent[] = [];
     let processed = 0;
     let rejected = 0;
+    const businessFailed: Array<{ uuid: string; finalState: string }> = [];
     const failed: Array<{ uuid: string; error: string }> = [];
 
     // Step 1: find expired instances (short-lived txn; locks released immediately).
@@ -331,7 +348,8 @@ export class WorkflowRuntime {
     // Step 2: process each instance in its own transaction.
     for (const staleInstance of expired) {
       const startIdx = eventsToFire.length;
-      let outcome: "transitioned" | "rejected" | null = null;
+      let outcome: "transitioned" | "business-failed" | "rejected" | null = null;
+      let finalState: string | null = null;
       try {
         await this.transactionRunner.runInTransaction(async () => {
           // Re-lock the instance fresh inside this transaction (locks from Step 1 were released).
@@ -360,9 +378,13 @@ export class WorkflowRuntime {
           }
 
           outcome = await this.processTimeoutEvent(instance, definition, eventName, eventsToFire);
+          finalState = instance.currentState;
         });
-        if (outcome === "transitioned") processed++;
-        else if (outcome === "rejected") rejected++;
+        if (outcome === "transitioned" || outcome === "business-failed") processed++;
+        if (outcome === "business-failed" && finalState !== null) {
+          businessFailed.push({ uuid: staleInstance.uuid, finalState });
+        }
+        if (outcome === "rejected") rejected++;
       } catch (error: unknown) {
         // Per-instance transaction rolled back. Drop any events queued for this instance.
         eventsToFire.length = startIdx;
@@ -371,12 +393,12 @@ export class WorkflowRuntime {
       }
     }
 
-    // Step 3: fire observers post-commit (only for successful instances).
+    // Step 3: fire observers post-commit (only for instances whose transaction committed).
     for (const event of eventsToFire) {
       await this.observerRegistry.fireOnEnter(event);
     }
 
-    return { processed, rejected, failed };
+    return { processed, rejected, businessFailed, failed };
   }
 
   private async processTimeoutEvent(
@@ -384,7 +406,7 @@ export class WorkflowRuntime {
     definition: WorkflowDefinition,
     eventName: string,
     eventsToFire: StateEnterEvent[],
-  ): Promise<"transitioned" | "rejected"> {
+  ): Promise<"transitioned" | "business-failed" | "rejected"> {
     const compiled = this.compiler.compile(definition);
 
     const timeoutEventDef = definition.states[instance.currentState]?.events?.[eventName];
@@ -482,8 +504,16 @@ export class WorkflowRuntime {
 
     executionContext.context = { ...instance.context };
 
-    await this.processOnEnterChain(instance, definition, executionContext, undefined, eventsToFire);
-    return "transitioned";
+    const onEnterResult = await this.processOnEnterChain(
+      instance,
+      definition,
+      executionContext,
+      undefined,
+      eventsToFire,
+    );
+    return result.outcome === "failure" || onEnterResult.chainOutcome === "failure"
+      ? "business-failed"
+      : "transitioned";
   }
 
   private async processOnEnterChain(
@@ -603,6 +633,12 @@ export class WorkflowRuntime {
     workflowInstanceUuid: string,
     options?: { limit?: number; offset?: number },
   ): Promise<WorkflowHistoryRecord[]> {
+    if (options?.limit !== undefined) {
+      assertPositiveSafeInteger(options.limit, "limit");
+    }
+    if (options?.offset !== undefined) {
+      assertNonNegativeSafeInteger(options.offset, "offset");
+    }
     return this.historyStore.findByInstanceUuid(workflowInstanceUuid, options);
   }
 

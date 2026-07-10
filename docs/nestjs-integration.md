@@ -416,9 +416,9 @@ import { WorkflowTimeoutService } from "@duraflows/nestjs";
 
 **Methods:**
 
-| Method                            | Parameters          | Returns                                  | Description                                                          |
-| --------------------------------- | ------------------- | ---------------------------------------- | -------------------------------------------------------------------- |
-| `processExpiredWorkflows(limit?)` | `number` (optional) | `Promise<ProcessExpiredWorkflowsResult>` | Process expired instances. Returns `{ processed, rejected, failed }` |
+| Method                            | Parameters          | Returns                                  | Description                                                                          |
+| --------------------------------- | ------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------ |
+| `processExpiredWorkflows(limit?)` | `number` (optional) | `Promise<ProcessExpiredWorkflowsResult>` | Process expired instances. Returns `{ processed, rejected, businessFailed, failed }` |
 
 **Example with @nestjs/schedule:**
 
@@ -582,6 +582,17 @@ Response:
   "failed": []
 }
 ```
+
+### Error Responses
+
+All four controllers apply `@UseFilters(WorkflowExceptionFilter)`, which maps domain errors thrown by the runtime to HTTP status codes instead of leaking a generic 500:
+
+| Error class                     | HTTP status                                                                      |
+| ------------------------------- | -------------------------------------------------------------------------------- |
+| `WorkflowInstanceNotFoundError` | 404 Not Found                                                                    |
+| `InvalidEventError`             | 409 Conflict                                                                     |
+| `InvalidArgumentError`          | 400 Bad Request                                                                  |
+| Any other `WorkflowError`       | 500 Internal Server Error (sanitized message; original cause logged server-side) |
 
 ## Injection Tokens
 

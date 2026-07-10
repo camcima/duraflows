@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { Logger, type ArgumentsHost } from "@nestjs/common";
-import { WorkflowError, WorkflowInstanceNotFoundError, InvalidEventError } from "@duraflows/core";
+import { WorkflowError, WorkflowInstanceNotFoundError, InvalidEventError, InvalidArgumentError } from "@duraflows/core";
 import { WorkflowExceptionFilter } from "../../src/filters/workflow-exception.filter.js";
 
 // The filter must stay platform-agnostic: it may only call `.status(...).send(...)`,
@@ -31,6 +31,17 @@ describe("WorkflowExceptionFilter", () => {
     new WorkflowExceptionFilter().catch(new InvalidEventError("abc", "draft", "approve"), host);
     expect(status).toHaveBeenCalledWith(409);
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 409, error: "Conflict" }));
+  });
+
+  it("maps InvalidArgumentError to 400 Bad Request", () => {
+    const { host, status, send } = mockHost();
+    new WorkflowExceptionFilter().catch(new InvalidArgumentError("limit must be a positive integer, got 0"), host);
+    expect(status).toHaveBeenCalledWith(400);
+    expect(send).toHaveBeenCalledWith({
+      statusCode: 400,
+      error: "Bad Request",
+      message: "limit must be a positive integer, got 0",
+    });
   });
 
   it("maps any other WorkflowError to a generic 500 without leaking the message", () => {
