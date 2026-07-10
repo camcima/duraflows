@@ -1,5 +1,25 @@
 # Changelog
 
+## [4.0.0](https://github.com/camcima/duraflows/compare/v3.1.0...v4.0.0) (2026-07-10)
+
+### ⚠ BREAKING CHANGES
+
+* **core:** ProcessExpiredWorkflowsResult gains a required `businessFailed` field.
+* **core:** stricter input validation — `processExpiredWorkflows` `limit`, `getHistory` `limit`/`offset`, and the `WorkflowRuntime` `maxOnEnterDepth` option now throw `InvalidArgumentError` for non-positive or unsafe-integer values, and non-finite timeout durations now fail definition validation.
+* **kysely:** KyselyTransactionContext.getTransaction() and .run() now require the owning Kysely instance (or bound transaction) as their first argument.
+* **pg:** PgTransactionContext.getClient() and .run() now require the owning Pool as their first argument.
+
+### Bug Fixes
+
+* **core:** contain async onObserverError handler rejections ([5601550](https://github.com/camcima/duraflows/commit/5601550a75f7da8de522c3131135e2b4b84b6cde))
+* **core:** contain throwing onObserverError handlers (AR-02) ([32b302c](https://github.com/camcima/duraflows/commit/32b302c1e00d457406b37b9af59acd16ba9eb6a5))
+* **core:** reject NaN and infinite timeout durations (AR-04) ([431d3c5](https://github.com/camcima/duraflows/commit/431d3c5a5727ba1cf0f42bac8d08fdb535c35f95))
+* **core:** report timeout on-enter business failures in batch result (AR-03) ([5ef087d](https://github.com/camcima/duraflows/commit/5ef087dce2f7f83bd26073fdbc4b9311bc8402e6))
+* **core,nestjs:** validate limit/offset/maxOnEnterDepth at public boundaries (AR-05) ([4ac6690](https://github.com/camcima/duraflows/commit/4ac6690e3f631a2c8bf99c18c6a7ad6a81bcd779))
+* **kysely:** scope transaction context to its Kysely instance (AR-01) ([c79b10e](https://github.com/camcima/duraflows/commit/c79b10e6767d0e477b371af9f3d96d222214d876))
+* **pg:** do not mask transaction errors with ROLLBACK failures ([b2f058f](https://github.com/camcima/duraflows/commit/b2f058f3953f13d611c85808f14fb793a386187a))
+* **pg:** scope transaction context to its Pool instance (AR-01) ([88e6673](https://github.com/camcima/duraflows/commit/88e6673f7b96f2f9647f87a354cd9b98b50af587))
+
 ## [3.1.0](https://github.com/camcima/duraflows/compare/v3.0.0...v3.1.0) (2026-06-23)
 
 ### Bug Fixes
