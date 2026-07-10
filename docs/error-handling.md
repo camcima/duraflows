@@ -111,7 +111,7 @@ class InvalidArgumentError extends WorkflowError {
 **When thrown:**
 
 - `runtime.processExpiredWorkflows({ limit })` — `limit` must be a positive safe integer
-- `runtime.getHistory({ limit, offset })` — `limit` must be a positive safe integer; `offset` must be a non-negative safe integer
+- `runtime.getHistory(uuid, { limit, offset })` — `limit` must be a positive safe integer; `offset` must be a non-negative safe integer
 - `new WorkflowRuntime({ maxOnEnterDepth })` — `maxOnEnterDepth` must be a positive safe integer
 
 Message shape: `"<name> must be a positive integer, got <value>"` for positive-only arguments (`limit`, `maxOnEnterDepth`), or `"<name> must be a non-negative integer, got <value>"` for `offset`.
