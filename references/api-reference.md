@@ -484,7 +484,11 @@ interface StateEnterEvent {
 ### ObserverErrorHandler
 
 ```ts
-type ObserverErrorHandler = (error: unknown, observer: { readonly name: string }, event: StateEnterEvent) => void;
+type ObserverErrorHandler = (
+  error: unknown,
+  observer: { readonly name: string },
+  event: StateEnterEvent,
+) => void | Promise<void>;
 ```
 
 ### Firing semantics

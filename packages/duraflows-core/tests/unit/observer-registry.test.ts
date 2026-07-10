@@ -192,6 +192,34 @@ describe("ObserverRegistry", () => {
     warnSpy.mockRestore();
   });
 
+  it("contains an async onObserverError handler that rejects", async () => {
+    const secondObserver = vi.fn();
+    const registry = new ObserverRegistry(
+      [
+        {
+          name: "boom",
+          onEnter: () => {
+            throw new Error("observer failed");
+          },
+        },
+        { name: "after", onEnter: secondObserver },
+      ],
+      async () => {
+        throw new Error("async handler rejected");
+      },
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(registry.fireOnEnter(makeEvent())).resolves.toBeUndefined();
+
+    // The rejection is caught: fall back to the default handler for the
+    // original error and keep firing the remaining observers.
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("observer failed"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("async handler rejected"));
+    expect(secondObserver).toHaveBeenCalledOnce();
+    warnSpy.mockRestore();
+  });
+
   it("continues with remaining observers after the error handler throws", async () => {
     const secondObserver = vi.fn();
     const registry = new ObserverRegistry(
