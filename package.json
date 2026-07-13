@@ -18,21 +18,21 @@
     "security:audit": "pnpm audit"
   },
   "devDependencies": {
-    "@commitlint/cli": "^21.0.2",
-    "@commitlint/config-conventional": "^21.0.2",
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
     "@eslint/js": "^10.0.1",
     "@release-it/conventional-changelog": "^11.0.1",
-    "@types/node": "^25.9.1",
-    "@vitest/coverage-v8": "^4.1.7",
-    "eslint": "^10.4.1",
+    "@types/node": "^26.1.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
-    "lefthook": "^2.1.9",
-    "prettier": "^3.8.3",
-    "release-it": "^20.2.0",
+    "lefthook": "^2.1.10",
+    "prettier": "^3.9.5",
+    "release-it": "^20.2.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.60.0",
-    "vite": "~8.0.16",
-    "vitest": "^4.1.7"
+    "typescript-eslint": "^8.63.0",
+    "vite": "~8.1.4",
+    "vitest": "^4.1.10"
   },
   "pnpm": {
     "overrides": {
