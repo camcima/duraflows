@@ -25,12 +25,8 @@ const workflow: WorkflowDefinition = {
   name: "order",
   initialState: "new",
   states: {
-    new: {
-      /* ... */
-    },
-    processing: {
-      /* ... */
-    },
+    new: {/* ... */},
+    processing: {/* ... */},
     completed: {},
   },
 };

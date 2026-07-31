@@ -40,12 +40,8 @@ const workflow: WorkflowDefinition = {
   name: "order", // unique identifier
   initialState: "new", // must exist in states
   states: {
-    new: {
-      /* WorkflowStateDefinition */
-    },
-    processing: {
-      /* ... */
-    },
+    new: {/* WorkflowStateDefinition */},
+    processing: {/* ... */},
     completed: {}, // terminal state (no events)
   },
 };
