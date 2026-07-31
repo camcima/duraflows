@@ -17,6 +17,12 @@ export default defineConfig({
       { find: /^@duraflows\/kysely$/, replacement: fromHere("./packages/duraflows-kysely/src/index.ts") },
     ],
   },
+  oxc: {
+    decorator: {
+      legacy: true,
+      emitDecoratorMetadata: true,
+    },
+  },
   test: {
     globals: true,
     include: ["packages/*/tests/**/*.test.ts"],

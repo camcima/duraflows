@@ -280,9 +280,7 @@ Pass guard implementations via the `guards` option:
 
 ```ts
 WorkflowModule.forRoot({
-  workflows: [
-    /* ... */
-  ],
+  workflows: [/* ... */],
   guards: [
     {
       name: "submitterIsVerified",
