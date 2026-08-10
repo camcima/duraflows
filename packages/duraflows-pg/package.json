@@ -59,7 +59,7 @@
   },
   "devDependencies": {
     "@duraflows/core": "workspace:*",
-    "@types/pg": "^8.11.0",
+    "@types/pg": "^8.20.4",
     "pg": "^8.22.0"
   }
 }
