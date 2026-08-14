@@ -43,7 +43,7 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
   async lockByUuid(uuid: string): Promise<WorkflowInstance | null> {
     const client = PgTransactionContext.getClient(this.pool);
     if (!client) {
-      throw new Error("lockByUuid requires an active transaction");
+      throw new WorkflowError("lockByUuid requires an active transaction");
     }
     const result = await client.query("SELECT * FROM workflow_instances WHERE uuid = $1 FOR UPDATE", [uuid]);
     if (result.rows.length === 0) return null;
@@ -83,7 +83,7 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
   async findExpired(limit: number, now: Date): Promise<WorkflowInstance[]> {
     const client = PgTransactionContext.getClient(this.pool);
     if (!client) {
-      throw new Error("findExpired requires an active transaction");
+      throw new WorkflowError("findExpired requires an active transaction");
     }
     const result = await client.query(
       `SELECT * FROM workflow_instances

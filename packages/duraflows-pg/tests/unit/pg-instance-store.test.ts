@@ -110,6 +110,9 @@ describe("PgWorkflowInstanceStore", () => {
       const pool = createMockPool();
       const store = new PgWorkflowInstanceStore(pool);
 
+      // WorkflowExceptionFilter is @Catch(WorkflowError), so a bare Error here
+      // bypasses it entirely and surfaces as an unmapped 500 with no logging.
+      await expect(store.lockByUuid("uuid")).rejects.toThrow(WorkflowError);
       await expect(store.lockByUuid("uuid")).rejects.toThrow("lockByUuid requires an active transaction");
     });
 
@@ -177,6 +180,7 @@ describe("PgWorkflowInstanceStore", () => {
       const pool = createMockPool();
       const store = new PgWorkflowInstanceStore(pool);
 
+      await expect(store.findExpired(10, now)).rejects.toThrow(WorkflowError);
       await expect(store.findExpired(10, now)).rejects.toThrow("findExpired requires an active transaction");
     });
 
