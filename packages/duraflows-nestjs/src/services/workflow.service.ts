@@ -64,9 +64,9 @@ export class WorkflowService {
     definition: WorkflowDefinition<TState>,
     input: TriggerWorkflowEventInput,
   ): Promise<WorkflowExecutionResult<TState>> {
-    // `definition` is consumed at type-level only; the runtime resolves
-    // the instance by uuid and reads its workflowName from the live row.
-    void definition;
+    // `definition` is consumed at type level only -- it is what infers TState.
+    // The runtime resolves the instance by uuid and reads its workflowName from
+    // the live row, so there is nothing to do with the value at runtime.
     const result = await this.runtime.triggerEvent(input);
     return result as WorkflowExecutionResult<TState>;
   }
