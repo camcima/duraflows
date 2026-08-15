@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { PgWorkflowHistoryStore } from "../../src/pg-history-store.js";
 import { PgTransactionContext } from "../../src/pg-transaction-context.js";
 import type { Pool, PoolClient } from "pg";
-import type { WorkflowHistoryRecord } from "@duraflows/core";
+import { WorkflowError, type WorkflowHistoryRecord } from "@duraflows/core";
 
 function createMockPool(queryResult = { rows: [] as Record<string, unknown>[] }) {
   return {
@@ -115,6 +115,21 @@ describe("PgWorkflowHistoryStore", () => {
       const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1];
       expect(params[4]).toBe("success");
       expect(params[6]).toBeNull();
+    });
+
+    it("throws WorkflowError when the INSERT returns no row", async () => {
+      const pool = createMockPool({ rows: [] });
+      const store = new PgWorkflowHistoryStore(pool);
+
+      await expect(store.append(sampleEntry)).rejects.toThrow(WorkflowError);
+      await expect(store.append(sampleEntry)).rejects.toThrow(/RETURNING uuid returned no row/);
+    });
+
+    it("throws WorkflowError when the returned row carries no uuid", async () => {
+      const pool = createMockPool({ rows: [{}] });
+      const store = new PgWorkflowHistoryStore(pool);
+
+      await expect(store.append(sampleEntry)).rejects.toThrow(/RETURNING uuid returned no row/);
     });
   });
 

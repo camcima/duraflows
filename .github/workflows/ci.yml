@@ -59,6 +59,10 @@ jobs:
       - run: pnpm vitest run packages/duraflows-pg/tests/integration packages/duraflows-kysely/tests/integration
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/duraflows_test
+          # Turns a missing DATABASE_URL into a hard failure instead of a silent
+          # skip, so a broken service container or secret cannot leave this job
+          # green with zero real-SQL coverage.
+          REQUIRE_INTEGRATION_DB: "1"
 
   osv-scanner:
     runs-on: ubuntu-latest

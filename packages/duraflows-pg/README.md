@@ -90,13 +90,24 @@ Both options create two tables: `workflow_instances` and `workflow_history`.
 
 ## API
 
-### `pgWorkflowProviders(pool: Pool): WorkflowPersistenceProvider`
+### `pgWorkflowProviders(pool: Pool, options?): WorkflowPersistenceProvider`
 
 Factory function that creates all required persistence providers from a `pg` Pool. Returns an object with:
 
 - `instanceStore` -- `PgWorkflowInstanceStore`
 - `historyStore` -- `PgWorkflowHistoryStore`
 - `transactionRunner` -- `PgTransactionRunner`
+
+Options (all optional; omitting them keeps the previous behaviour):
+
+- `lockTimeoutMs` -- sets `lock_timeout` for the duration of each transaction. Bounds how long a statement **waits for a row lock**, so a stuck lock holder cannot hang `triggerEvent()` while it keeps a pooled connection checked out. **This is the recommended setting.**
+- `statementTimeoutMs` -- sets `statement_timeout` for the duration of each transaction. Bounds how long **any single statement** may run — including SQL your own commands issue inside the transaction, which is why it is left unset by default: a legitimately slow command statement would be aborted and take the whole transition with it.
+
+```ts
+const persistence = pgWorkflowProviders(pool, { lockTimeoutMs: 3000 });
+```
+
+Both are applied with `SET LOCAL` inside the transaction, so they are reverted on `COMMIT`/`ROLLBACK` and never leak to other users of the shared pool. Values must be non-negative integers in milliseconds (`0` means "no timeout"); anything else throws a `WorkflowError` at construction time.
 
 ### `generateMigrationSql(options?): { up: string; down: string }`
 

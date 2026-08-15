@@ -5,7 +5,6 @@ import { Injectable, Module } from "@nestjs/common";
 import {
   WorkflowModule,
   WorkflowService,
-  WorkflowTimeoutService,
   WORKFLOW_RUNTIME,
   WORKFLOW_COMMAND_REGISTRY,
   WORKFLOW_DEFINITION_REGISTRY,

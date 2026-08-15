@@ -3,7 +3,7 @@ import { KyselyWorkflowHistoryStore } from "../../src/kysely-history-store.js";
 import { KyselyTransactionContext } from "../../src/kysely-transaction-context.js";
 import type { Kysely, Transaction } from "kysely";
 import type { WorkflowDatabase } from "../../src/kysely-database.js";
-import type { WorkflowHistoryRecord } from "@duraflows/core";
+import { WorkflowError, type WorkflowHistoryRecord } from "@duraflows/core";
 
 const sampleEntry: WorkflowHistoryRecord = {
   workflowInstanceUuid: "inst-uuid",
@@ -134,6 +134,20 @@ describe("KyselyWorkflowHistoryStore", () => {
 
       const uuid = await KyselyTransactionContext.run(db, trx, () => store.append(sampleEntry));
       expect(uuid).toBe("tx-uuid");
+    });
+
+    it("supplies a WorkflowError factory for the no-row case", async () => {
+      const { db, executeTakeFirstOrThrowMock } = createMockDb();
+      executeTakeFirstOrThrowMock.mockResolvedValue({ uuid: "uuid" });
+      const store = new KyselyWorkflowHistoryStore(db);
+
+      await store.append(sampleEntry);
+
+      const createError = executeTakeFirstOrThrowMock.mock.calls[0][0] as () => Error;
+      expect(createError).toBeTypeOf("function");
+      const error = createError();
+      expect(error).toBeInstanceOf(WorkflowError);
+      expect(error.message).toMatch(/RETURNING uuid returned no row/);
     });
   });
 

@@ -2,13 +2,14 @@ import "reflect-metadata";
 import { describe, it, expect, vi } from "vitest";
 import { WorkflowTimeoutController } from "../../src/controllers/workflow-timeout.controller.js";
 import { TimeoutProcessQueryDto } from "../../src/controllers/dto/index.js";
+import type { WorkflowTimeoutService } from "../../src/services/workflow-timeout.service.js";
 
 function createMocks() {
   const timeoutService = {
     processExpiredWorkflows: vi.fn().mockResolvedValue({ processed: 3, rejected: 0, businessFailed: [], failed: [] }),
   };
 
-  const controller = new WorkflowTimeoutController(timeoutService as any);
+  const controller = new WorkflowTimeoutController(timeoutService as unknown as WorkflowTimeoutService);
 
   return { controller, timeoutService };
 }
@@ -17,7 +18,7 @@ describe("WorkflowTimeoutController", () => {
   it("processExpired() delegates with parsed limit", async () => {
     const { controller, timeoutService } = createMocks();
 
-    const result = await controller.processExpired({ limit: 50 } as any);
+    const result = await controller.processExpired({ limit: 50 } as TimeoutProcessQueryDto);
 
     expect(timeoutService.processExpiredWorkflows).toHaveBeenCalledWith(50);
     expect(result.processed).toBe(3);
@@ -26,7 +27,7 @@ describe("WorkflowTimeoutController", () => {
   it("processExpired() passes undefined when limit not provided", async () => {
     const { controller, timeoutService } = createMocks();
 
-    await controller.processExpired({} as any);
+    await controller.processExpired({} as TimeoutProcessQueryDto);
 
     expect(timeoutService.processExpiredWorkflows).toHaveBeenCalledWith(undefined);
   });

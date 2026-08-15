@@ -5,58 +5,7 @@
  * stays in sync with the interface.
  */
 import { runInstanceStoreConformance } from "../../src/testing/index.js";
-import type { WorkflowInstanceStore, WorkflowTransactionRunner } from "../../src/types/persistence.js";
-import type { WorkflowInstance } from "../../src/types/runtime.js";
-
-// ---------------------------------------------------------------------------
-// Minimal in-memory implementations (same pattern as the other integration
-// tests — kept local so the conformance helper itself has no production deps).
-// ---------------------------------------------------------------------------
-
-class InMemoryInstanceStore implements WorkflowInstanceStore {
-  private readonly instances = new Map<string, WorkflowInstance>();
-
-  async create(instance: WorkflowInstance): Promise<void> {
-    this.instances.set(instance.uuid, structuredClone(instance));
-  }
-
-  async findByUuid(uuid: string): Promise<WorkflowInstance | null> {
-    const inst = this.instances.get(uuid);
-    return inst ? structuredClone(inst) : null;
-  }
-
-  async lockByUuid(uuid: string): Promise<WorkflowInstance | null> {
-    return this.findByUuid(uuid);
-  }
-
-  async update(instance: WorkflowInstance): Promise<void> {
-    const existing = this.instances.get(instance.uuid);
-    // Optimistic locking: the runtime pre-increments `version`, so the stored
-    // row must be at `instance.version - 1` for the update to apply.
-    if (!existing || existing.version !== instance.version - 1) {
-      throw new Error(`Optimistic locking failure: workflow instance "${instance.uuid}" was modified concurrently`);
-    }
-    // Metadata is immutable — restore it from the stored record
-    this.instances.set(instance.uuid, structuredClone({ ...instance, metadata: existing.metadata }));
-  }
-
-  async findExpired(limit: number, now: Date): Promise<WorkflowInstance[]> {
-    const results: WorkflowInstance[] = [];
-    for (const inst of this.instances.values()) {
-      if (inst.expiresAt && inst.expiresAt < now) {
-        results.push(structuredClone(inst));
-        if (results.length >= limit) break;
-      }
-    }
-    return results;
-  }
-}
-
-class InMemoryTransactionRunner implements WorkflowTransactionRunner {
-  async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
-    return callback();
-  }
-}
+import { createInMemoryPersistence } from "../helpers/in-memory-persistence.js";
 
 // ---------------------------------------------------------------------------
 // Run the shared conformance suite
@@ -64,10 +13,9 @@ class InMemoryTransactionRunner implements WorkflowTransactionRunner {
 
 runInstanceStoreConformance("InMemoryInstanceStore (core self-test)", {
   setup: async () => {
-    const store = new InMemoryInstanceStore();
-    const transactionRunner = new InMemoryTransactionRunner();
+    const { instanceStore, transactionRunner } = createInMemoryPersistence();
     return {
-      store,
+      store: instanceStore,
       transactionRunner,
       teardown: async () => {
         // In-memory: nothing to tear down

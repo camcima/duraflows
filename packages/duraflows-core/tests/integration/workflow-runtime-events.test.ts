@@ -6,77 +6,10 @@ import { InMemoryCommandRegistry } from "../../src/registry/command-registry.js"
 import { WorkflowValidator } from "../../src/validation/workflow-validator.js";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
 import { WorkflowError } from "../../src/errors/index.js";
+import { createInMemoryPersistence, type InMemoryInstanceStore } from "../helpers/in-memory-persistence.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
-import type { WorkflowInstance, WorkflowExecutionContext } from "../../src/types/runtime.js";
-import type {
-  WorkflowInstanceStore,
-  WorkflowHistoryStore,
-  WorkflowHistoryRecord,
-  WorkflowTransactionRunner,
-  WorkflowClock,
-} from "../../src/types/persistence.js";
-
-// ---------------------------------------------------------------------------
-// In-memory test helpers
-// ---------------------------------------------------------------------------
-
-class InMemoryInstanceStore implements WorkflowInstanceStore {
-  private readonly instances = new Map<string, WorkflowInstance>();
-
-  async create(instance: WorkflowInstance): Promise<void> {
-    this.instances.set(instance.uuid, structuredClone(instance));
-  }
-
-  async findByUuid(uuid: string): Promise<WorkflowInstance | null> {
-    const inst = this.instances.get(uuid);
-    return inst ? structuredClone(inst) : null;
-  }
-
-  async lockByUuid(uuid: string): Promise<WorkflowInstance | null> {
-    return this.findByUuid(uuid);
-  }
-
-  async update(instance: WorkflowInstance): Promise<void> {
-    this.instances.set(instance.uuid, structuredClone(instance));
-  }
-
-  async findExpired(limit: number, now: Date): Promise<WorkflowInstance[]> {
-    const results: WorkflowInstance[] = [];
-    for (const inst of this.instances.values()) {
-      if (inst.expiresAt && inst.expiresAt <= now) {
-        results.push(structuredClone(inst));
-        if (results.length >= limit) break;
-      }
-    }
-    return results;
-  }
-}
-
-class InMemoryHistoryStore implements WorkflowHistoryStore {
-  private readonly records: Array<WorkflowHistoryRecord & { uuid: string }> = [];
-
-  async append(entry: WorkflowHistoryRecord): Promise<string> {
-    const uuid = randomUUID();
-    this.records.push({ ...entry, uuid });
-    return uuid;
-  }
-
-  async findByInstanceUuid(
-    workflowInstanceUuid: string,
-    options?: { limit?: number; offset?: number },
-  ): Promise<WorkflowHistoryRecord[]> {
-    const matching = this.records.filter((r) => r.workflowInstanceUuid === workflowInstanceUuid);
-    const offset = options?.offset ?? 0;
-    const limit = options?.limit ?? matching.length;
-    return matching.slice(offset, offset + limit);
-  }
-}
-
-class InMemoryTransactionRunner implements WorkflowTransactionRunner {
-  async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
-    return callback();
-  }
-}
+import type { WorkflowExecutionContext } from "../../src/types/runtime.js";
+import type { WorkflowClock } from "../../src/types/persistence.js";
 
 // ---------------------------------------------------------------------------
 // Workflow definition used across the suite
@@ -152,14 +85,13 @@ describe("WorkflowRuntime.getAvailableEvents", () => {
       execute: async () => ({ ok: true }),
     });
 
-    instanceStore = new InMemoryInstanceStore();
+    const persistence = createInMemoryPersistence();
+    instanceStore = persistence.instanceStore;
 
     runtime = new WorkflowRuntime({
       definitionRegistry,
       commandRegistry,
-      instanceStore,
-      historyStore: new InMemoryHistoryStore(),
-      transactionRunner: new InMemoryTransactionRunner(),
+      ...persistence,
       clock,
     });
 
@@ -322,9 +254,11 @@ describe("WorkflowRuntime.getAvailableEvents", () => {
 
     const instance = await runtime.createInstance({ workflowName: "ctx-fields-timeout" });
 
-    // Force expiration in the past
+    // Force expiration in the past. The version bump satisfies the store's
+    // optimistic-locking contract, same as any other writer would have to.
     const stored = await instanceStore.findByUuid(instance.uuid);
     stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    stored!.version++;
     await instanceStore.update(stored!);
 
     await runtime.processExpiredWorkflows();

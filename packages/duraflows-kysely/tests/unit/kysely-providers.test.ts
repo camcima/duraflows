@@ -15,6 +15,45 @@ function createMockTransaction(): Transaction<WorkflowDatabase> {
   return {} as unknown as Transaction<WorkflowDatabase>;
 }
 
+/** A `set_config(...)` call captured off the fake expression builder. */
+interface SetConfigCall {
+  name: string;
+  args: readonly unknown[];
+}
+
+/**
+ * A mock db whose `transaction()` runs the callback against a transaction that
+ * records the `set_config(...)` calls the runner builds.
+ */
+function createTransactableDb() {
+  const setConfigCalls: SetConfigCall[] = [];
+
+  const expressionBuilder = {
+    fn: (name: string, args: readonly unknown[]) => ({
+      as: (_alias: string) => {
+        setConfigCalls.push({ name, args });
+        return {};
+      },
+    }),
+    val: (value: unknown) => value,
+  };
+
+  const mockTrx = {
+    selectNoFrom: vi.fn((callback: (eb: typeof expressionBuilder) => unknown) => {
+      callback(expressionBuilder);
+      return { executeTakeFirst: vi.fn().mockResolvedValue(undefined) };
+    }),
+  } as unknown as Transaction<WorkflowDatabase>;
+
+  const db = {
+    transaction: vi.fn().mockReturnValue({
+      execute: vi.fn(async (callback: (trx: Transaction<WorkflowDatabase>) => Promise<unknown>) => callback(mockTrx)),
+    }),
+  } as unknown as Kysely<WorkflowDatabase>;
+
+  return { db, mockTrx, setConfigCalls };
+}
+
 describe("kyselyWorkflowProviders()", () => {
   it("returns a provider bundle wired to a shared db handle", () => {
     const db = createMockDb();
@@ -35,6 +74,36 @@ describe("kyselyWorkflowProviders()", () => {
     expect(a.transactionRunner).not.toBe(b.transactionRunner);
     expect(a.instanceStore).not.toBe(b.instanceStore);
     expect(a.historyStore).not.toBe(b.historyStore);
+  });
+
+  it("emits no timeout statement when called without options (default behaviour)", async () => {
+    const { db, mockTrx } = createTransactableDb();
+
+    await kyselyWorkflowProviders(db).transactionRunner.runInTransaction(async () => undefined);
+
+    expect(mockTrx.selectNoFrom).not.toHaveBeenCalled();
+  });
+
+  it("forwards timeout options to the transaction runner", async () => {
+    const { db, setConfigCalls } = createTransactableDb();
+
+    await kyselyWorkflowProviders(db, {
+      lockTimeoutMs: 3000,
+      statementTimeoutMs: 30000,
+    }).transactionRunner.runInTransaction(async () => undefined);
+
+    expect(setConfigCalls).toEqual([
+      { name: "set_config", args: ["lock_timeout", "3000", true] },
+      { name: "set_config", args: ["statement_timeout", "30000", true] },
+    ]);
+  });
+
+  it("rejects an invalid timeout at construction time", () => {
+    const db = createMockDb();
+
+    expect(() => kyselyWorkflowProviders(db, { lockTimeoutMs: -1 })).toThrow(
+      /lockTimeoutMs must be a non-negative integer/,
+    );
   });
 });
 

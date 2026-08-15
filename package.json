@@ -10,7 +10,7 @@
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "vitest --typecheck.enabled --run",
-    "lint": "eslint packages/*/src/",
+    "lint": "eslint packages/*/src/ packages/*/tests/ --max-warnings=0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "release": "release-it",

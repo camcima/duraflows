@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import { describe, it, expect, vi } from "vitest";
+import type { WorkflowRuntime } from "@duraflows/core";
 import { WorkflowTimeoutService } from "../../src/services/workflow-timeout.service.js";
 
 function createMocks() {
@@ -7,7 +8,7 @@ function createMocks() {
     processExpiredWorkflows: vi.fn().mockResolvedValue({ processed: 5, rejected: 0, businessFailed: [], failed: [] }),
   };
 
-  const service = new WorkflowTimeoutService(runtime as any);
+  const service = new WorkflowTimeoutService(runtime as unknown as WorkflowRuntime);
 
   return { service, runtime };
 }

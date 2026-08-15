@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { describe, it, expect } from "vitest";
+import type { DiscoveryService } from "@nestjs/core";
 import { discoverDecoratedCommands, mergeCommandRegistrations } from "../../src/providers/command-discovery.js";
-import { WORKFLOW_COMMAND_METADATA_KEY } from "../../src/decorators/workflow-command.decorator.js";
 import { WorkflowError } from "@duraflows/core";
 
 class CommandA {
@@ -26,14 +26,14 @@ class CommandC {
 // discoverDecoratedCommands
 // ---------------------------------------------------------------------------
 
-function createMockDiscoveryService(providers: Array<{ metadata: unknown; metatype: unknown }>) {
+function createMockDiscoveryService(providers: Array<{ metadata: unknown; metatype: unknown }>): DiscoveryService {
   return {
     getProviders: () => providers.map((p) => ({ metatype: p.metatype })),
-    getMetadataByDecorator: (_decorator: unknown, wrapper: any) => {
+    getMetadataByDecorator: (_decorator: unknown, wrapper: { metatype: unknown }) => {
       const match = providers.find((p) => p.metatype === wrapper.metatype);
       return match?.metadata;
     },
-  };
+  } as unknown as DiscoveryService;
 }
 
 describe("discoverDecoratedCommands", () => {
@@ -42,7 +42,7 @@ describe("discoverDecoratedCommands", () => {
       createMockDiscoveryService([
         { metadata: "cmd-a", metatype: CommandA },
         { metadata: "cmd-b", metatype: CommandB },
-      ]) as any,
+      ]),
     );
 
     expect(result).toHaveLength(2);
@@ -52,7 +52,7 @@ describe("discoverDecoratedCommands", () => {
 
   it("handles array metadata by extracting first element", () => {
     const result = discoverDecoratedCommands(
-      createMockDiscoveryService([{ metadata: ["array-cmd"], metatype: CommandA }]) as any,
+      createMockDiscoveryService([{ metadata: ["array-cmd"], metatype: CommandA }]),
     );
 
     expect(result).toHaveLength(1);
@@ -64,22 +64,20 @@ describe("discoverDecoratedCommands", () => {
       createMockDiscoveryService([
         { metadata: undefined, metatype: CommandA },
         { metadata: 42, metatype: CommandB },
-      ]) as any,
+      ]),
     );
 
     expect(result).toHaveLength(0);
   });
 
   it("skips providers with null metatype", () => {
-    const result = discoverDecoratedCommands(
-      createMockDiscoveryService([{ metadata: "cmd-a", metatype: null }]) as any,
-    );
+    const result = discoverDecoratedCommands(createMockDiscoveryService([{ metadata: "cmd-a", metatype: null }]));
 
     expect(result).toHaveLength(0);
   });
 
   it("returns empty array when no providers match", () => {
-    const result = discoverDecoratedCommands(createMockDiscoveryService([]) as any);
+    const result = discoverDecoratedCommands(createMockDiscoveryService([]));
 
     expect(result).toHaveLength(0);
   });

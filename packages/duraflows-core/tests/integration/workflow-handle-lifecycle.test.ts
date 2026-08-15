@@ -1,82 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { randomUUID } from "node:crypto";
 import { WorkflowRuntime } from "../../src/runtime/workflow-runtime.js";
 import { WorkflowHandle } from "../../src/runtime/workflow-handle.js";
 import { InMemoryDefinitionRegistry } from "../../src/registry/definition-registry.js";
 import { InMemoryCommandRegistry } from "../../src/registry/command-registry.js";
 import { WorkflowValidator } from "../../src/validation/workflow-validator.js";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
+import { createInMemoryPersistence } from "../helpers/in-memory-persistence.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
-import type { WorkflowInstance } from "../../src/types/runtime.js";
-import type {
-  WorkflowInstanceStore,
-  WorkflowHistoryStore,
-  WorkflowHistoryRecord,
-  WorkflowTransactionRunner,
-  WorkflowClock,
-} from "../../src/types/persistence.js";
-
-// ---------------------------------------------------------------------------
-// In-memory test helpers
-// ---------------------------------------------------------------------------
-
-class InMemoryInstanceStore implements WorkflowInstanceStore {
-  private readonly instances = new Map<string, WorkflowInstance>();
-
-  async create(instance: WorkflowInstance): Promise<void> {
-    this.instances.set(instance.uuid, structuredClone(instance));
-  }
-
-  async findByUuid(uuid: string): Promise<WorkflowInstance | null> {
-    const inst = this.instances.get(uuid);
-    return inst ? structuredClone(inst) : null;
-  }
-
-  async lockByUuid(uuid: string): Promise<WorkflowInstance | null> {
-    return this.findByUuid(uuid);
-  }
-
-  async update(instance: WorkflowInstance): Promise<void> {
-    this.instances.set(instance.uuid, structuredClone(instance));
-  }
-
-  async findExpired(limit: number, now: Date): Promise<WorkflowInstance[]> {
-    const results: WorkflowInstance[] = [];
-    for (const inst of this.instances.values()) {
-      if (inst.expiresAt && inst.expiresAt <= now) {
-        results.push(structuredClone(inst));
-        if (results.length >= limit) break;
-      }
-    }
-    return results;
-  }
-}
-
-class InMemoryHistoryStore implements WorkflowHistoryStore {
-  private readonly records: Array<WorkflowHistoryRecord & { uuid: string }> = [];
-
-  async append(entry: WorkflowHistoryRecord): Promise<string> {
-    const uuid = randomUUID();
-    this.records.push({ ...entry, uuid });
-    return uuid;
-  }
-
-  async findByInstanceUuid(
-    workflowInstanceUuid: string,
-    options?: { limit?: number; offset?: number },
-  ): Promise<WorkflowHistoryRecord[]> {
-    const matching = this.records.filter((r) => r.workflowInstanceUuid === workflowInstanceUuid);
-    const offset = options?.offset ?? 0;
-    const limit = options?.limit ?? matching.length;
-    return matching.slice(offset, offset + limit);
-  }
-}
-
-class InMemoryTransactionRunner implements WorkflowTransactionRunner {
-  async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
-    return callback();
-  }
-}
+import type { WorkflowClock } from "../../src/types/persistence.js";
 
 // ---------------------------------------------------------------------------
 // Workflow definition
@@ -140,9 +71,7 @@ describe("WorkflowHandle lifecycle", () => {
     runtime = new WorkflowRuntime({
       definitionRegistry,
       commandRegistry,
-      instanceStore: new InMemoryInstanceStore(),
-      historyStore: new InMemoryHistoryStore(),
-      transactionRunner: new InMemoryTransactionRunner(),
+      ...createInMemoryPersistence(),
       clock,
     });
   });

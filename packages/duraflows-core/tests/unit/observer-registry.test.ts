@@ -156,7 +156,7 @@ describe("ObserverRegistry", () => {
     registry.add({
       name: "throws-string",
       onEnter: () => {
-        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        // Deliberately not an Error: exercises the String(error) fallback.
         throw "raw-string-not-an-error";
       },
     });

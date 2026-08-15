@@ -1,71 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { randomUUID } from "node:crypto";
 import { WorkflowRuntime } from "../../src/runtime/workflow-runtime.js";
 import { InMemoryDefinitionRegistry } from "../../src/registry/definition-registry.js";
 import { InMemoryCommandRegistry } from "../../src/registry/command-registry.js";
 import { WorkflowValidator } from "../../src/validation/workflow-validator.js";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
+import {
+  createInMemoryPersistence,
+  type InMemoryHistoryStore,
+  type InMemoryInstanceStore,
+  type InMemoryTransactionRunner,
+} from "../helpers/in-memory-persistence.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
-import type { WorkflowInstance } from "../../src/types/runtime.js";
 import type { StateEnterEvent } from "../../src/types/observer.js";
-import type {
-  WorkflowInstanceStore,
-  WorkflowHistoryStore,
-  WorkflowHistoryRecord,
-  WorkflowTransactionRunner,
-  WorkflowClock,
-} from "../../src/types/persistence.js";
-
-class InMemoryInstanceStore implements WorkflowInstanceStore {
-  private readonly instances = new Map<string, WorkflowInstance>();
-  async create(instance: WorkflowInstance): Promise<void> {
-    this.instances.set(instance.uuid, structuredClone(instance));
-  }
-  async findByUuid(uuid: string): Promise<WorkflowInstance | null> {
-    const inst = this.instances.get(uuid);
-    return inst ? structuredClone(inst) : null;
-  }
-  async lockByUuid(uuid: string): Promise<WorkflowInstance | null> {
-    return this.findByUuid(uuid);
-  }
-  async update(instance: WorkflowInstance): Promise<void> {
-    this.instances.set(instance.uuid, structuredClone(instance));
-  }
-  async findExpired(limit: number, now: Date): Promise<WorkflowInstance[]> {
-    const results: WorkflowInstance[] = [];
-    for (const inst of this.instances.values()) {
-      if (inst.expiresAt && inst.expiresAt <= now) {
-        results.push(structuredClone(inst));
-        if (results.length >= limit) break;
-      }
-    }
-    return results;
-  }
-}
-
-class InMemoryHistoryStore implements WorkflowHistoryStore {
-  private readonly records: Array<WorkflowHistoryRecord & { uuid: string }> = [];
-  async append(entry: WorkflowHistoryRecord): Promise<string> {
-    const uuid = randomUUID();
-    this.records.push({ ...entry, uuid });
-    return uuid;
-  }
-  async findByInstanceUuid(
-    workflowInstanceUuid: string,
-    options?: { limit?: number; offset?: number },
-  ): Promise<WorkflowHistoryRecord[]> {
-    const matching = this.records.filter((r) => r.workflowInstanceUuid === workflowInstanceUuid);
-    const offset = options?.offset ?? 0;
-    const limit = options?.limit ?? matching.length;
-    return matching.slice(offset, offset + limit);
-  }
-}
-
-class InMemoryTransactionRunner implements WorkflowTransactionRunner {
-  async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
-    return callback();
-  }
-}
+import type { WorkflowClock } from "../../src/types/persistence.js";
 
 describe("WorkflowRuntime observers", () => {
   const fixedDate = new Date("2026-04-23T12:00:00.000Z");
@@ -75,6 +22,7 @@ describe("WorkflowRuntime observers", () => {
   let commandRegistry: InMemoryCommandRegistry;
   let instanceStore: InMemoryInstanceStore;
   let historyStore: InMemoryHistoryStore;
+  let transactionRunner: InMemoryTransactionRunner;
   let definitionRegistry: InMemoryDefinitionRegistry;
 
   beforeEach(() => {
@@ -83,15 +31,14 @@ describe("WorkflowRuntime observers", () => {
       compiler: new WorkflowCompiler(),
     });
     commandRegistry = new InMemoryCommandRegistry();
-    instanceStore = new InMemoryInstanceStore();
-    historyStore = new InMemoryHistoryStore();
+    ({ instanceStore, historyStore, transactionRunner } = createInMemoryPersistence());
 
     runtime = new WorkflowRuntime({
       definitionRegistry,
       commandRegistry,
       instanceStore,
       historyStore,
-      transactionRunner: new InMemoryTransactionRunner(),
+      transactionRunner,
       clock,
     });
   });
@@ -218,7 +165,7 @@ describe("WorkflowRuntime observers", () => {
       commandRegistry,
       instanceStore,
       historyStore,
-      transactionRunner: new InMemoryTransactionRunner(),
+      transactionRunner,
       clock,
       observers: [
         {
@@ -426,7 +373,7 @@ describe("WorkflowRuntime observers", () => {
       commandRegistry,
       instanceStore,
       historyStore,
-      transactionRunner: new InMemoryTransactionRunner(),
+      transactionRunner,
       clock,
       onObserverError: handler,
     });
