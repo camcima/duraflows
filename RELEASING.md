@@ -7,9 +7,10 @@ they always share the same version number.
 The release is split in two phases because `main` is protected (see below):
 
 1. **Phase 1 (local + PR):** prepare the version bump + CHANGELOG and merge it.
-2. **Phase 2 (local):** from `main`, run release-it to tag + publish all four
-   packages, then push the tag. Publishing uses **your local npm credentials**
-   (`~/.npmrc`) — there is intentionally **no CI publish workflow**.
+2. **Phase 2 (local):** from `main`, run release-it to tag, push the tag, publish
+   all four packages, and create the GitHub release. Publishing uses **your local
+   npm credentials** (`~/.npmrc`) — there is intentionally **no CI publish
+   workflow**.
 
 ## Tooling
 
@@ -21,10 +22,13 @@ Both phases use [release-it](https://github.com/release-it/release-it) +
   generates the `CHANGELOG.md` section, and commits — but does **not** tag, push,
   or publish. Run it on a `chore/release-*` branch and merge via PR.
 - **Phase 2** uses [`.release-it.publish.json`](./.release-it.publish.json) with
-  `--no-increment` (no bump): from the merged `main` it tags `v<version>` and runs
-  `pnpm -r publish` using your local npm credentials. You then push the tag. No
-  GitHub release is created — the tag is the source of truth; the CHANGELOG holds
-  the notes.
+  `--no-increment` (no bump): from the merged `main` it tags `v<version>`, pushes
+  the tag, runs `pnpm -r publish` using your local npm credentials, and finally
+  creates the **GitHub release** for the tag. The release body is the matching
+  `CHANGELOG.md` section, printed by
+  [`scripts/extract-release-notes.mjs`](./scripts/extract-release-notes.mjs) — so
+  the release page and the CHANGELOG never drift. `main` itself is never pushed,
+  which is what keeps the flow compatible with the ruleset below.
 
 ## ⚠️ `main` is protected by a ruleset
 
@@ -44,6 +48,12 @@ locally from `main` once the bump has merged.
 - You have publish rights to the `@duraflows` npm scope and are logged in:
   `npm whoami` prints your username (auth lives in `~/.npmrc`).
 - The GitHub CLI is authenticated (`gh auth status`).
+- `GITHUB_TOKEN` is exported with a token that has `repo` scope — release-it needs
+  it to create the GitHub release: `export GITHUB_TOKEN=$(gh auth token)`. Without
+  it release-it does **not** fail: it warns and falls back to a "web-based release"
+  that only prints a prefilled form URL, so the run looks green while no release is
+  created. A `before:init` hook in `.release-it.publish.json` therefore aborts up
+  front when the variable is missing — before anything is tagged or published.
 - `main` is green and you are up to date: `git checkout main && git pull`.
 
 ## Choosing the version
@@ -111,7 +121,7 @@ gh pr create --base main --title "chore: release v$VERSION" --body "Release v$VE
 **The PR contains only the version bump + CHANGELOG. Nothing is tagged or
 published yet.** Wait for CI to pass, then merge (squash is fine for this PR).
 
-## Phase 2 — tag & publish (from `main`, after merge)
+## Phase 2 — tag, publish & release (from `main`, after merge)
 
 ```bash
 VERSION=3.2.0
@@ -120,28 +130,28 @@ git fetch origin && git reset --hard origin/main   # pick up the squashed releas
 pnpm install --frozen-lockfile
 pnpm run build && pnpm test                          # final sanity
 
-# Tag v$VERSION locally and publish all four packages with your local npm
-# credentials. --no-increment means "don't bump" — the version is already on
-# main from Phase 1.
+# Tag v$VERSION, push the tag, publish all four packages with your local npm
+# credentials, and create the GitHub release. --no-increment means "don't bump" —
+# the version is already on main from Phase 1.
+export GITHUB_TOKEN=$(gh auth token)
 pnpm exec release-it --no-increment --ci --config .release-it.publish.json
-
-# Push the tag to record the release. No workflow runs on the tag.
-git push origin v$VERSION
 ```
 
 Verify:
 
 ```bash
 for p in core pg kysely nestjs; do printf "@duraflows/%s: " "$p"; npm view "@duraflows/$p" version; done
+gh release view v$VERSION                                     # notes match the CHANGELOG section
 git push origin --delete chore/release-$VERSION 2>/dev/null   # if not auto-deleted on merge
 ```
 
 ## Footguns
 
-- **`release-it --dry-run` still executes the lifecycle hooks** (`before:bump`
-  runs `npm version`, which **mutates** every package.json). It is **not**
-  side-effect-free — don't rely on it for a clean preview; run it on a throwaway
-  branch you can discard.
+- **`release-it --dry-run` still executes the lifecycle hooks.** In Phase 1
+  `before:bump` runs `npm version`, which **mutates** every package.json; in
+  Phase 2 the hooks `git push` the tag and `pnpm -r publish` **for real**. It is
+  **not** side-effect-free — never dry-run Phase 2 against the real remote, and
+  run a Phase 1 dry-run on a throwaway branch you can discard.
 - **Don't run `pnpm run release -- … --ci`.** pnpm forwards the literal `--`,
   which yargs treats as "end of options", so `--ci` is parsed as a positional and
   release-it stays **interactive** (then hangs/aborts in a non-TTY shell). Use
@@ -154,6 +164,16 @@ git push origin --delete chore/release-$VERSION 2>/dev/null   # if not auto-dele
   while; don't kill them early. (Tag-only pushes are fast.)
 
 ## Troubleshooting
+
+**Phase 2 failed after the tag was pushed.** Re-running release-it aborts because
+the tag already exists. Finish the remaining steps by hand — both are safe to
+re-run (`pnpm -r publish` skips versions already on the registry):
+
+```bash
+pnpm -r publish --no-git-checks
+gh release create v$VERSION --verify-tag --title "v$VERSION" \
+  --notes-file <(node scripts/extract-release-notes.mjs $VERSION)
+```
 
 **npm has a version that `main` never tagged.** This happens if a release
 published to npm but the tag was never pushed. Because Phase 2 publishes from

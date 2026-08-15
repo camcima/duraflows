@@ -7,9 +7,15 @@
     "requireUpstream": false,
     "requireCleanWorkingDir": true
   },
-  "github": { "release": false },
+  "github": {
+    "release": true,
+    "releaseName": "v${version}",
+    "releaseNotes": "node scripts/extract-release-notes.mjs ${version}"
+  },
   "npm": { "publish": false },
   "hooks": {
-    "after:release": "pnpm -r publish --no-git-checks"
+    "before:init": "test -n \"$GITHUB_TOKEN\" || { echo 'GITHUB_TOKEN is not set: release-it would silently fall back to a web-based release and create nothing. See RELEASING.md.' >&2; exit 1; }",
+    "after:git:release": "git push origin v${version}",
+    "before:github:release": "pnpm -r publish --no-git-checks"
   }
 }
