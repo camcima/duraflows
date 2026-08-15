@@ -1,6 +1,6 @@
 {
   "name": "@duraflows/pg",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "description": "PostgreSQL persistence adapter for duraflows using `pg`. Provides transaction runner, workflow instance store, and history store with row-level locking for safe concurrent access.",
   "keywords": [
     "duraflows",
@@ -54,7 +54,7 @@
     "build": "tsc --build"
   },
   "peerDependencies": {
-    "@duraflows/core": "^4.0.0",
+    "@duraflows/core": "^4.0.1",
     "pg": "^8.13.0"
   },
   "devDependencies": {
