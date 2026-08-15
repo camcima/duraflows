@@ -47,6 +47,56 @@ function assertNonNegativeSafeInteger(value: number, name: string): void {
   }
 }
 
+/**
+ * Pulls the operator-facing message out of a failed transition. Only the last
+ * command result matters — the executor stops at the first failure, so every
+ * earlier result succeeded.
+ */
+function extractErrorMessage(
+  outcome: "success" | "failure" | "guard-rejected",
+  commandResults: readonly CommandResult[],
+): string | undefined {
+  if (outcome !== "failure" || commandResults.length === 0) {
+    return undefined;
+  }
+  const lastResult = commandResults[commandResults.length - 1];
+  // `ok` here is defensive: the executor stops at the first failure, so a
+  // "failure" outcome always ends on a failed result.
+  return lastResult.ok ? undefined : (lastResult.message ?? lastResult.code ?? "Command failed");
+}
+
+/**
+ * Builds the post-commit observer payload for a state entry. Context and
+ * metadata are cloned and frozen so an observer cannot reach back into the live
+ * instance. `triggerMetadata` is frozen in place, so callers must pass an object
+ * they own — a fresh literal or a clone, never the caller's input directly.
+ */
+function buildStateEnterEvent(
+  instance: WorkflowInstance,
+  params: {
+    fromState: string | null;
+    toState: string;
+    transitionUuid: string;
+    triggerEvent: string | null;
+    triggerMetadata: Record<string, unknown>;
+    occurredAt: Date;
+  },
+): StateEnterEvent {
+  return {
+    workflowName: instance.workflowName,
+    instanceUuid: instance.uuid,
+    state: params.toState,
+    fromState: params.fromState,
+    toState: params.toState,
+    transitionUuid: params.transitionUuid,
+    triggerEvent: params.triggerEvent,
+    context: deepFreeze(structuredClone(instance.context)),
+    metadata: deepFreeze(structuredClone(instance.metadata)),
+    triggerMetadata: deepFreeze(params.triggerMetadata),
+    occurredAt: params.occurredAt,
+  };
+}
+
 export interface WorkflowRuntimeOptions {
   definitionRegistry: WorkflowDefinitionRegistry;
   commandRegistry: WorkflowCommandRegistry;
@@ -138,19 +188,16 @@ export class WorkflowRuntime {
           transitionUuid: randomUUID(),
         };
 
-        eventsToFire.push({
-          workflowName: instance.workflowName,
-          instanceUuid: instance.uuid,
-          state: definition.initialState,
-          fromState: null,
-          toState: definition.initialState,
-          transitionUuid: executionContext.transitionUuid,
-          triggerEvent: null,
-          context: deepFreeze(structuredClone(instance.context)),
-          metadata: deepFreeze(structuredClone(instance.metadata)),
-          triggerMetadata: deepFreeze(structuredClone(input.triggerMetadata ?? {})),
-          occurredAt: now,
-        });
+        eventsToFire.push(
+          buildStateEnterEvent(instance, {
+            fromState: null,
+            toState: definition.initialState,
+            transitionUuid: executionContext.transitionUuid,
+            triggerEvent: null,
+            triggerMetadata: structuredClone(input.triggerMetadata ?? {}),
+            occurredAt: now,
+          }),
+        );
 
         await this.processOnEnterChain(instance, definition, executionContext, undefined, eventsToFire);
 
@@ -168,19 +215,16 @@ export class WorkflowRuntime {
       await this.instanceStore.create(instance);
     });
 
-    eventsToFire.push({
-      workflowName: instance.workflowName,
-      instanceUuid: instance.uuid,
-      state: definition.initialState,
-      fromState: null,
-      toState: definition.initialState,
-      transitionUuid: randomUUID(),
-      triggerEvent: null,
-      context: deepFreeze(structuredClone(instance.context)),
-      metadata: deepFreeze(structuredClone(instance.metadata)),
-      triggerMetadata: deepFreeze(structuredClone(input.triggerMetadata ?? {})),
-      occurredAt: now,
-    });
+    eventsToFire.push(
+      buildStateEnterEvent(instance, {
+        fromState: null,
+        toState: definition.initialState,
+        transitionUuid: randomUUID(),
+        triggerEvent: null,
+        triggerMetadata: structuredClone(input.triggerMetadata ?? {}),
+        occurredAt: now,
+      }),
+    );
 
     for (const event of eventsToFire) {
       await this.observerRegistry.fireOnEnter(event);
@@ -248,28 +292,11 @@ export class WorkflowRuntime {
         };
       }
 
-      instance.currentState = eventResult.toState;
-      instance.version++;
-      instance.lastTransitionAt = now;
-      instance.updatedAt = now;
-
-      const newStateDef = definition.states[eventResult.toState];
-      instance.context = {
-        ...executionContext.context,
-        ...structuredClone(newStateDef?.context ?? {}),
-      };
-
-      instance.expiresAt = this.timeoutResolver.computeDeadline(definition, eventResult.toState, now);
+      this.applyTransition(instance, definition, eventResult.toState, now, executionContext);
 
       await this.instanceStore.update(instance);
 
-      let errorMessage: string | undefined;
-      if (eventResult.outcome === "failure" && eventResult.commandResults.length > 0) {
-        const lastResult = eventResult.commandResults[eventResult.commandResults.length - 1];
-        if (!lastResult.ok) {
-          errorMessage = lastResult.message ?? lastResult.code ?? "Command failed";
-        }
-      }
+      const errorMessage = extractErrorMessage(eventResult.outcome, eventResult.commandResults);
 
       let lastHistoryUuid = await this.historyStore.append({
         workflowInstanceUuid: instance.uuid,
@@ -282,21 +309,16 @@ export class WorkflowRuntime {
         triggerMetadata: structuredClone(input.triggerMetadata ?? {}),
       });
 
-      eventsToFire.push({
-        workflowName: instance.workflowName,
-        instanceUuid: instance.uuid,
-        state: eventResult.toState,
-        fromState: eventResult.fromState,
-        toState: eventResult.toState,
-        transitionUuid: executionContext.transitionUuid,
-        triggerEvent: input.eventName,
-        context: deepFreeze(structuredClone(instance.context)),
-        metadata: deepFreeze(structuredClone(instance.metadata)),
-        triggerMetadata: deepFreeze(structuredClone(input.triggerMetadata ?? {})),
-        occurredAt: now,
-      });
-
-      executionContext.context = { ...instance.context };
+      eventsToFire.push(
+        buildStateEnterEvent(instance, {
+          fromState: eventResult.fromState,
+          toState: eventResult.toState,
+          transitionUuid: executionContext.transitionUuid,
+          triggerEvent: input.eventName,
+          triggerMetadata: structuredClone(input.triggerMetadata ?? {}),
+          occurredAt: now,
+        }),
+      );
 
       const onEnterResult = await this.processOnEnterChain(
         instance,
@@ -454,28 +476,11 @@ export class WorkflowRuntime {
     }
 
     const now = this.clock.now();
-    instance.currentState = result.toState;
-    instance.version++;
-    instance.lastTransitionAt = now;
-    instance.updatedAt = now;
-
-    const newStateDef = definition.states[result.toState];
-    instance.context = {
-      ...executionContext.context,
-      ...structuredClone(newStateDef?.context ?? {}),
-    };
-
-    instance.expiresAt = this.timeoutResolver.computeDeadline(definition, result.toState, now);
+    this.applyTransition(instance, definition, result.toState, now, executionContext);
 
     await this.instanceStore.update(instance);
 
-    let errorMessage: string | undefined;
-    if (result.outcome === "failure" && result.commandResults.length > 0) {
-      const lastResult = result.commandResults[result.commandResults.length - 1];
-      if (!lastResult.ok) {
-        errorMessage = lastResult.message ?? lastResult.code ?? "Command failed";
-      }
-    }
+    const errorMessage = extractErrorMessage(result.outcome, result.commandResults);
 
     await this.historyStore.append({
       workflowInstanceUuid: instance.uuid,
@@ -488,21 +493,16 @@ export class WorkflowRuntime {
       triggerMetadata: { source: "timeout" },
     });
 
-    eventsToFire.push({
-      workflowName: instance.workflowName,
-      instanceUuid: instance.uuid,
-      state: result.toState,
-      fromState: result.fromState,
-      toState: result.toState,
-      transitionUuid: executionContext.transitionUuid,
-      triggerEvent: eventName,
-      context: deepFreeze(structuredClone(instance.context)),
-      metadata: deepFreeze(structuredClone(instance.metadata)),
-      triggerMetadata: deepFreeze({ source: "timeout" }),
-      occurredAt: now,
-    });
-
-    executionContext.context = { ...instance.context };
+    eventsToFire.push(
+      buildStateEnterEvent(instance, {
+        fromState: result.fromState,
+        toState: result.toState,
+        transitionUuid: executionContext.transitionUuid,
+        triggerEvent: eventName,
+        triggerMetadata: { source: "timeout" },
+        occurredAt: now,
+      }),
+    );
 
     const onEnterResult = await this.processOnEnterChain(
       instance,
@@ -514,6 +514,35 @@ export class WorkflowRuntime {
     return result.outcome === "failure" || onEnterResult.chainOutcome === "failure"
       ? "business-failed"
       : "transitioned";
+  }
+
+  /**
+   * Advances the in-memory instance onto `toState`: bumps version and
+   * timestamps, overlays the target state's declared context on top of whatever
+   * the commands mutated, and recomputes the timeout deadline. `executionContext`
+   * is kept in step so a following onEnter hop's commands observe the merged
+   * context. Persisting the result is the caller's job — this touches memory only.
+   */
+  private applyTransition(
+    instance: WorkflowInstance,
+    definition: WorkflowDefinition,
+    toState: string,
+    now: Date,
+    executionContext: WorkflowExecutionContext,
+  ): void {
+    instance.currentState = toState;
+    instance.version++;
+    instance.lastTransitionAt = now;
+    instance.updatedAt = now;
+
+    const stateDef = definition.states[toState];
+    instance.context = {
+      ...executionContext.context,
+      ...structuredClone(stateDef?.context ?? {}),
+    };
+    executionContext.context = { ...instance.context };
+
+    instance.expiresAt = this.timeoutResolver.computeDeadline(definition, toState, now);
   }
 
   private async processOnEnterChain(
@@ -536,36 +565,12 @@ export class WorkflowRuntime {
     let lastHistoryUuid: string | null = null;
 
     for (const hop of chainResult.hops) {
-      // Update instance for this hop
       const now = this.clock.now();
-      instance.currentState = hop.toState;
-      instance.version++;
-      instance.lastTransitionAt = now;
-      instance.updatedAt = now;
-
-      // Merge context: command mutations are already in executionContext.context,
-      // then overlay the new state's context on top
-      const hopStateDef = definition.states[hop.toState];
-      instance.context = {
-        ...executionContext.context,
-        ...structuredClone(hopStateDef?.context ?? {}),
-      };
-      // Update execution context so next hop's commands see merged state context
-      executionContext.context = { ...instance.context };
-
-      // Compute timeout deadline for this hop's state
-      instance.expiresAt = this.timeoutResolver.computeDeadline(definition, hop.toState, now);
+      this.applyTransition(instance, definition, hop.toState, now, executionContext);
 
       await this.instanceStore.update(instance);
 
-      // Extract error message for this hop
-      let errorMessage: string | undefined;
-      if (hop.outcome === "failure" && hop.commandResults.length > 0) {
-        const lastResult = hop.commandResults[hop.commandResults.length - 1];
-        if (!lastResult.ok) {
-          errorMessage = lastResult.message ?? lastResult.code ?? "Command failed";
-        }
-      }
+      const errorMessage = extractErrorMessage(hop.outcome, hop.commandResults);
 
       // Append history for this hop
       lastHistoryUuid = await this.historyStore.append({
@@ -579,19 +584,16 @@ export class WorkflowRuntime {
         triggerMetadata: { source: "onEnter" },
       });
 
-      eventsToFire.push({
-        workflowName: instance.workflowName,
-        instanceUuid: instance.uuid,
-        state: hop.toState,
-        fromState: hop.fromState,
-        toState: hop.toState,
-        transitionUuid: hop.transitionUuid,
-        triggerEvent: "onEnter",
-        context: deepFreeze(structuredClone(instance.context)),
-        metadata: deepFreeze(structuredClone(instance.metadata)),
-        triggerMetadata: deepFreeze({ source: "onEnter" }),
-        occurredAt: now,
-      });
+      eventsToFire.push(
+        buildStateEnterEvent(instance, {
+          fromState: hop.fromState,
+          toState: hop.toState,
+          transitionUuid: hop.transitionUuid,
+          triggerEvent: "onEnter",
+          triggerMetadata: { source: "onEnter" },
+          occurredAt: now,
+        }),
+      );
 
       allCommandResults.push(...hop.commandResults);
     }

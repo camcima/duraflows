@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
 import { WorkflowDefinitionError } from "../../src/errors/index.js";
@@ -312,5 +312,32 @@ describe("WorkflowCompiler", () => {
     const transitions = Array.from(pending.getTransitions()).filter((t) => t.getEventName() === "finalise");
     expect(transitions).toHaveLength(1);
     expect(transitions[0].getTargetState().getName()).toBe("done");
+  });
+
+  it("does not re-serialize the definition when compiling the same object again", () => {
+    // compile() runs on every triggerEvent. Definitions are frozen at
+    // registration, so repeat calls arrive with a stable object identity —
+    // hashing them again on each event is pure overhead on the hot path.
+    const definition = simpleDefinition();
+    compiler.compile(definition);
+
+    const stringifySpy = vi.spyOn(JSON, "stringify");
+    try {
+      const second = compiler.compile(definition);
+      expect(second).toBe(compiler.compile(definition));
+      expect(stringifySpy).not.toHaveBeenCalled();
+    } finally {
+      stringifySpy.mockRestore();
+    }
+  });
+
+  it("reuses the cached process for an equal definition with a different identity", () => {
+    // WorkflowCompiler is public API: a caller outside the registry may hand
+    // it a fresh-but-equal object each call. Identity caching alone would
+    // recompile every time, so the name+hash cache stays as the fallback.
+    const first = compiler.compile(simpleDefinition());
+    const second = compiler.compile(simpleDefinition());
+
+    expect(second).toBe(first);
   });
 });

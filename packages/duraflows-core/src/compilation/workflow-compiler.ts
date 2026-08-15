@@ -9,17 +9,34 @@ export interface CompiledWorkflow {
 }
 
 export class WorkflowCompiler {
-  private readonly cache = new Map<string, { hash: string; compiled: CompiledWorkflow }>();
+  // Identity cache. The registry freezes each definition once at registration,
+  // so the runtime's per-event compile() calls always arrive with the same
+  // object and skip hashing entirely. WeakMap keeps definitions that were never
+  // registered collectable.
+  private readonly byIdentity = new WeakMap<WorkflowDefinition, CompiledWorkflow>();
+
+  // Content cache. WorkflowCompiler is public API, so a caller outside the
+  // registry may hand it a fresh-but-equal object on every call; identity
+  // caching alone would recompile each time. Keyed by name so that a changed
+  // definition reusing a name still invalidates.
+  private readonly byName = new Map<string, { hash: string; compiled: CompiledWorkflow }>();
 
   compile(definition: WorkflowDefinition): CompiledWorkflow {
+    const known = this.byIdentity.get(definition);
+    if (known) {
+      return known;
+    }
+
     const hash = JSON.stringify(definition);
-    const cached = this.cache.get(definition.name);
+    const cached = this.byName.get(definition.name);
     if (cached && cached.hash === hash) {
+      this.byIdentity.set(definition, cached.compiled);
       return cached.compiled;
     }
 
     const compiled = this.buildProcess(definition);
-    this.cache.set(definition.name, { hash, compiled });
+    this.byIdentity.set(definition, compiled);
+    this.byName.set(definition.name, { hash, compiled });
     return compiled;
   }
 
