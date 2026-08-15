@@ -7,9 +7,14 @@
     "requireUpstream": false,
     "requireCleanWorkingDir": true
   },
-  "github": { "release": false },
+  "github": {
+    "release": true,
+    "releaseName": "v${version}",
+    "releaseNotes": "node scripts/extract-release-notes.mjs ${version}"
+  },
   "npm": { "publish": false },
   "hooks": {
-    "after:release": "pnpm -r publish --no-git-checks"
+    "after:git:release": "git push origin v${version}",
+    "before:github:release": "pnpm -r publish --no-git-checks"
   }
 }
