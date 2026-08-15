@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.1.0](https://github.com/camcima/duraflows/compare/v4.0.1...v4.1.0) (2026-08-15)
+
+### Features
+
+* **adapters:** add transaction timeout options and close audit findings ([#78](https://github.com/camcima/duraflows/issues/78)) ([7e58524](https://github.com/camcima/duraflows/commit/7e585240d463e8d211cfd657ef468beed4769048))
+
 ## [4.0.1](https://github.com/camcima/duraflows/compare/v4.0.0...v4.0.1) (2026-08-15)
 
 ### Bug Fixes
