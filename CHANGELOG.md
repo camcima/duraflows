@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.0.1](https://github.com/camcima/duraflows/compare/v4.0.0...v4.0.1) (2026-08-15)
+
+### Bug Fixes
+
+* **adapters:** throw WorkflowError from transaction-scoped store methods ([#73](https://github.com/camcima/duraflows/issues/73)) ([0b43ad2](https://github.com/camcima/duraflows/commit/0b43ad2a59ee3b42738cb9f4ffade655615dbdcd))
+
 ## [4.0.0](https://github.com/camcima/duraflows/compare/v3.1.0...v4.0.0) (2026-07-10)
 
 ### ⚠ BREAKING CHANGES
