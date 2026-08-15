@@ -49,9 +49,11 @@ locally from `main` once the bump has merged.
   `npm whoami` prints your username (auth lives in `~/.npmrc`).
 - The GitHub CLI is authenticated (`gh auth status`).
 - `GITHUB_TOKEN` is exported with a token that has `repo` scope — release-it needs
-  it to create the GitHub release: `export GITHUB_TOKEN=$(gh auth token)`. The
-  token is checked while release-it initialises, so a missing or unscoped token
-  fails **before** anything is tagged or published.
+  it to create the GitHub release: `export GITHUB_TOKEN=$(gh auth token)`. Without
+  it release-it does **not** fail: it warns and falls back to a "web-based release"
+  that only prints a prefilled form URL, so the run looks green while no release is
+  created. A `before:init` hook in `.release-it.publish.json` therefore aborts up
+  front when the variable is missing — before anything is tagged or published.
 - `main` is green and you are up to date: `git checkout main && git pull`.
 
 ## Choosing the version
