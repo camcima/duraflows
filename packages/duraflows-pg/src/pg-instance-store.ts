@@ -36,8 +36,9 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
   async findByUuid(uuid: string): Promise<WorkflowInstance | null> {
     const client = this.getClient();
     const result = await client.query("SELECT * FROM workflow_instances WHERE uuid = $1", [uuid]);
-    if (result.rows.length === 0) return null;
-    return this.mapRow(result.rows[0]);
+    const row = result.rows[0] as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return this.mapRow(row);
   }
 
   async lockByUuid(uuid: string): Promise<WorkflowInstance | null> {
@@ -46,8 +47,9 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
       throw new WorkflowError("lockByUuid requires an active transaction");
     }
     const result = await client.query("SELECT * FROM workflow_instances WHERE uuid = $1 FOR UPDATE", [uuid]);
-    if (result.rows.length === 0) return null;
-    return this.mapRow(result.rows[0]);
+    const row = result.rows[0] as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return this.mapRow(row);
   }
 
   async update(instance: WorkflowInstance): Promise<void> {

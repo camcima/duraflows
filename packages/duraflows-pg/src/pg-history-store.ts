@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 import type { WorkflowHistoryStore, WorkflowHistoryRecord } from "@duraflows/core";
+import { WorkflowError } from "@duraflows/core";
 import { PgTransactionContext } from "./pg-transaction-context.js";
 
 export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
@@ -30,7 +31,15 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
         JSON.stringify(entry.triggerMetadata ?? {}),
       ],
     );
-    return result.rows[0].uuid as string;
+    // `INSERT ... RETURNING` always yields a row, so an empty result means the
+    // statement did not do what the adapter assumes (a rewriting rule, a proxy
+    // that swallows RETURNING, a stubbed client). Fail loudly instead of
+    // dereferencing undefined.
+    const row = result.rows[0] as { uuid?: string } | undefined;
+    if (!row?.uuid) {
+      throw new WorkflowError("Failed to append workflow history: INSERT ... RETURNING uuid returned no row");
+    }
+    return row.uuid;
   }
 
   async findByInstanceUuid(

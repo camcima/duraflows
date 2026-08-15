@@ -1,5 +1,6 @@
 import type { Kysely } from "kysely";
 import type { WorkflowHistoryStore, WorkflowHistoryRecord } from "@duraflows/core";
+import { WorkflowError } from "@duraflows/core";
 import type { WorkflowDatabase } from "./kysely-database.js";
 import { KyselyTransactionContext } from "./kysely-transaction-context.js";
 
@@ -26,7 +27,12 @@ export class KyselyWorkflowHistoryStore implements WorkflowHistoryStore {
         trigger_metadata_json: JSON.stringify(entry.triggerMetadata ?? {}),
       })
       .returning("uuid")
-      .executeTakeFirstOrThrow();
+      // `INSERT ... RETURNING` always yields a row, so an empty result means the
+      // statement did not do what the adapter assumes. Surface that as the
+      // library's own error type rather than kysely's `NoResultError`.
+      .executeTakeFirstOrThrow(
+        () => new WorkflowError("Failed to append workflow history: INSERT ... RETURNING uuid returned no row"),
+      );
 
     return row.uuid;
   }

@@ -7,12 +7,27 @@ import {
   PgWorkflowInstanceStore,
   PgWorkflowHistoryStore,
   PgTransactionRunner,
+  PgTransactionContext,
   generateMigrationSql,
 } from "@duraflows/pg";
 
 const databaseUrl = process.env.DATABASE_URL;
 
-if (!databaseUrl) {
+if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
+  // CI sets REQUIRE_INTEGRATION_DB=1. There, a missing DATABASE_URL means the
+  // service container or the secret broke — and silently skipping every
+  // real-SQL test would hand back a green badge with zero integration
+  // coverage. Fail loudly instead. Locally the flag is unset, so a developer
+  // without a database still gets the skip below.
+  describe("pg adapter integration", () => {
+    it("fails because REQUIRE_INTEGRATION_DB is set but DATABASE_URL is not", () => {
+      throw new Error(
+        "REQUIRE_INTEGRATION_DB=1 but DATABASE_URL is not set: the integration database is unavailable, " +
+          "so the pg adapter integration suite cannot run.",
+      );
+    });
+  });
+} else if (!databaseUrl) {
   describe.skip("pg adapter integration (set DATABASE_URL to run)", () => {
     it.skip("skipped", () => {});
   });
@@ -147,6 +162,57 @@ if (!databaseUrl) {
       expect(guardRow.errorMessage).toBeUndefined(); // NULL must map to undefined, not null
       const successRow = records.find((r) => r.outcome === "success")!;
       expect(successRow.rejectedBy).toBeUndefined();
+    });
+  });
+
+  describe("pg transaction timeouts", () => {
+    afterEach(async () => {
+      await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
+    });
+
+    const showSetting = async (runner: PgTransactionRunner, setting: string): Promise<string> =>
+      runner.runInTransaction(async () => {
+        const client = PgTransactionContext.getClient(pool)!;
+        const result = await client.query(`SHOW ${setting}`);
+        return result.rows[0][setting] as string;
+      });
+
+    it("applies both timeouts inside the transaction and reverts them on commit", async () => {
+      const bounded = new PgTransactionRunner(pool, { lockTimeoutMs: 3000, statementTimeoutMs: 30000 });
+
+      expect(await showSetting(bounded, "lock_timeout")).toBe("3s");
+      expect(await showSetting(bounded, "statement_timeout")).toBe("30s");
+
+      // SET LOCAL is undone at COMMIT, so an unconfigured runner sharing the same
+      // pool must still see the server defaults.
+      expect(await showSetting(transactionRunner, "lock_timeout")).toBe("0");
+      expect(await showSetting(transactionRunner, "statement_timeout")).toBe("0");
+    });
+
+    it("emits nothing when no timeouts are configured", async () => {
+      expect(await showSetting(transactionRunner, "lock_timeout")).toBe("0");
+    });
+
+    it("lock_timeout aborts a FOR UPDATE that another transaction is blocking", async () => {
+      const instance = makeInstance();
+      await transactionRunner.runInTransaction(() => instanceStore.create(instance));
+
+      // Hold the row from a second connection so lockByUuid has to wait.
+      const blocker = await pool.connect();
+      try {
+        await blocker.query("BEGIN");
+        await blocker.query("SELECT * FROM workflow_instances WHERE uuid = $1 FOR UPDATE", [instance.uuid]);
+
+        const bounded = new PgTransactionRunner(pool, { lockTimeoutMs: 250 });
+        // Without lock_timeout this call would wait for the blocker forever while
+        // holding a pooled connection; with it, the wait is bounded.
+        await expect(bounded.runInTransaction(() => instanceStore.lockByUuid(instance.uuid))).rejects.toThrow(
+          /lock timeout/i,
+        );
+      } finally {
+        await blocker.query("ROLLBACK");
+        blocker.release();
+      }
     });
   });
 }

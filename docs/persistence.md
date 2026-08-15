@@ -138,6 +138,40 @@ const persistence = pgWorkflowProviders(pool);
 // persistence.transactionRunner -> PgTransactionRunner
 ```
 
+An optional second argument configures [transaction timeouts](#transaction-timeouts):
+
+```ts
+const persistence = pgWorkflowProviders(pool, { lockTimeoutMs: 3000 });
+```
+
+### Transaction Timeouts
+
+Both adapters accept two optional, transaction-scoped PostgreSQL timeouts. They are applied with `SET LOCAL` (the Kysely adapter uses the equivalent `set_config(..., is_local => true)`) immediately after the transaction opens, so they are reverted on `COMMIT`/`ROLLBACK` and never leak to other users of the shared pool.
+
+| Option               | PostgreSQL setting  | What it bounds                                                  | Default |
+| -------------------- | ------------------- | --------------------------------------------------------------- | ------- |
+| `lockTimeoutMs`      | `lock_timeout`      | How long a statement **waits for a row lock** before it aborts. | unset   |
+| `statementTimeoutMs` | `statement_timeout` | How long **any single statement** may run before it aborts.     | unset   |
+
+```ts
+import { pgWorkflowProviders } from "@duraflows/pg";
+import { kyselyWorkflowProviders } from "@duraflows/kysely";
+
+// @duraflows/pg
+const pgPersistence = pgWorkflowProviders(pool, { lockTimeoutMs: 3000 });
+
+// @duraflows/kysely
+const kyselyPersistence = kyselyWorkflowProviders(db, { lockTimeoutMs: 3000 });
+```
+
+**`lockTimeoutMs` is the setting to reach for.** `triggerEvent()` opens a transaction and calls `lockByUuid()`, which issues a blocking `SELECT ... FOR UPDATE`. Without `lock_timeout` that statement waits indefinitely: if another transaction is holding the row (a stuck worker, a long-running peer transition), the call hangs _and_ keeps a pooled connection checked out for the whole wait. Under load, that is how a pool gets exhausted by a single stuck row. A few seconds is usually right — long enough to ride out normal contention, short enough that a caller gets a clear `canceling statement due to lock timeout` error instead of hanging.
+
+**`statementTimeoutMs` is deliberately not enabled by default**, and you should think before turning it on. It bounds _every_ statement on the transaction's connection, including SQL your own commands issue inside the same transaction. A command that legitimately runs a slow query — a bulk write, a heavy aggregate, a report — gets aborted and takes the whole transition down with it. Set it only when you know the ceiling for the slowest statement your workflows can produce, and set it comfortably above that.
+
+Note that neither setting bounds time spent _between_ statements. A command performing slow external I/O (an HTTP call to a payment provider, say) holds the transaction open for as long as it takes, and no PostgreSQL timeout will interrupt it. Keep slow external I/O out of the transaction, or bound it in your own command code.
+
+Both values must be non-negative integers (milliseconds); `0` is PostgreSQL's own "no timeout". Anything else — a negative number, a fraction, `NaN`, `Infinity` — throws a `WorkflowError` at construction time, long before any SQL is built.
+
 ### Individual Classes
 
 If you need more control, use the classes directly:
@@ -155,12 +189,12 @@ import {
 
 ```ts
 class PgTransactionRunner implements WorkflowTransactionRunner {
-  constructor(pool: Pool);
+  constructor(pool: Pool, options?: { lockTimeoutMs?: number; statementTimeoutMs?: number });
   async runInTransaction<T>(callback: () => Promise<T>): Promise<T>;
 }
 ```
 
-Acquires a `PoolClient`, runs `BEGIN`, stores the client in `PgTransactionContext` (via `AsyncLocalStorage`), executes the callback, then `COMMIT` or `ROLLBACK`. If already within an active transaction (detected via `PgTransactionContext`), the existing client is reused and the callback runs without opening a nested transaction.
+Acquires a `PoolClient`, runs `BEGIN`, emits any configured [`SET LOCAL` timeouts](#transaction-timeouts), stores the client in `PgTransactionContext` (via `AsyncLocalStorage`), executes the callback, then `COMMIT` or `ROLLBACK`. If already within an active transaction (detected via `PgTransactionContext`), the existing client is reused and the callback runs without opening a nested transaction — the outer transaction's timeouts stay in force and are not re-applied.
 
 **PgWorkflowInstanceStore**
 

@@ -7,7 +7,7 @@
  * by `npm run typecheck` (vitest typecheck), which validates these
  * type-level assertions without stripping types.
  */
-import { describe, it, expect, expectTypeOf } from "vitest";
+import { describe, it, expectTypeOf } from "vitest";
 import type { Kysely, Transaction } from "kysely";
 import type { WorkflowPersistenceProvider } from "@duraflows/core";
 import {

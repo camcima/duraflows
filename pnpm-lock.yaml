@@ -98,12 +98,6 @@ importers:
       class-validator:
         specifier: ^0.15.1
         version: 0.15.1
-      reflect-metadata:
-        specifier: ^0.2.0
-        version: 0.2.2
-      rxjs:
-        specifier: ^7.0.0
-        version: 7.8.2
     devDependencies:
       '@duraflows/core':
         specifier: workspace:*
@@ -117,6 +111,9 @@ importers:
       '@nestjs/testing':
         specifier: ^11.1.28
         version: 11.1.28(@nestjs/common@11.1.28(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28(@nestjs/common@11.1.28(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
 
   packages/duraflows-pg:
     devDependencies:

@@ -103,13 +103,26 @@ See the [`@duraflows/pg` README](https://github.com/camcima/duraflows/tree/main/
 
 ## API
 
-### `kyselyWorkflowProviders(db): WorkflowPersistenceProvider`
+### `kyselyWorkflowProviders(db, options?): WorkflowPersistenceProvider`
 
 Factory function that creates all required persistence providers from a `Kysely<WorkflowDatabase>` instance. Returns:
 
 - `instanceStore` -- `KyselyWorkflowInstanceStore`
 - `historyStore` -- `KyselyWorkflowHistoryStore`
 - `transactionRunner` -- `KyselyTransactionRunner`
+
+Options (all optional; omitting them keeps the previous behaviour):
+
+- `lockTimeoutMs` -- sets `lock_timeout` for the duration of each transaction. Bounds how long a statement **waits for a row lock**, so a stuck lock holder cannot hang `triggerEvent()` while it keeps a pooled connection checked out. **This is the recommended setting.**
+- `statementTimeoutMs` -- sets `statement_timeout` for the duration of each transaction. Bounds how long **any single statement** may run — including SQL your own commands issue inside the transaction, which is why it is left unset by default: a legitimately slow command statement would be aborted and take the whole transition with it.
+
+```ts
+const persistence = kyselyWorkflowProviders(db, { lockTimeoutMs: 3000 });
+```
+
+Both are applied transaction-locally via `set_config(name, value, true)` — the function form of `SET LOCAL` — so they are reverted on `COMMIT`/`ROLLBACK` and never leak to other users of the shared pool. Values must be non-negative integers in milliseconds (`0` means "no timeout"); anything else throws a `WorkflowError` at construction time.
+
+`kyselyWorkflowProvidersFromTransaction()` takes no timeout options: the transaction is owned by the caller, so its settings are the caller's to configure.
 
 ### `kyselyWorkflowProvidersFromTransaction(trx): WorkflowPersistenceProvider`
 

@@ -807,9 +807,14 @@ const providers = pgWorkflowProviders(pool);
 // providers.instanceStore: PgWorkflowInstanceStore
 // providers.historyStore: PgWorkflowHistoryStore
 // providers.transactionRunner: PgTransactionRunner
+
+// Optional transaction-scoped timeouts (both default to unset):
+const bounded = pgWorkflowProviders(pool, { lockTimeoutMs: 3000, statementTimeoutMs: 30_000 });
 ```
 
 Uses `AsyncLocalStorage` for transaction context propagation. Supports nested transactions (inner reuses outer's client).
+
+`lockTimeoutMs` and `statementTimeoutMs` are applied with `SET LOCAL` inside each transaction. `lockTimeoutMs` bounds how long a statement waits for a row lock and is the recommended setting; `statementTimeoutMs` bounds total per-statement time and can abort legitimately slow command SQL, which is why neither is enabled by default. See [Transaction Timeouts](../docs/persistence.md#transaction-timeouts).
 
 **v1.0.0:** instance `metadata` is **write-once** — `metadata_json` was removed from the `UPDATE` statement. The runtime never overwrites metadata after `create()`. Custom adapters must enforce this same contract.
 
@@ -824,9 +829,12 @@ const providers = kyselyWorkflowProviders(db);
 // providers.instanceStore: KyselyWorkflowInstanceStore
 // providers.historyStore: KyselyWorkflowHistoryStore
 // providers.transactionRunner: KyselyTransactionRunner
+
+// Optional transaction-scoped timeouts (both default to unset):
+const bounded = kyselyWorkflowProviders(db, { lockTimeoutMs: 3000 });
 ```
 
-Same shape as `pgWorkflowProviders`. Uses `AsyncLocalStorage` for transaction context propagation, same nested-transaction support as the pg adapter.
+Same shape and same timeout options as `pgWorkflowProviders` (applied via `set_config(..., true)` rather than a raw `SET LOCAL`). Uses `AsyncLocalStorage` for transaction context propagation, same nested-transaction support as the pg adapter.
 
 Pick `@duraflows/kysely` when the project already uses Kysely; pick `@duraflows/pg` when the project uses raw `pg`. Both implement the same interfaces and the conformance suite proves it.
 

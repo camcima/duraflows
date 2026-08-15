@@ -2,6 +2,8 @@ import "reflect-metadata";
 import { describe, it, expect, vi } from "vitest";
 import { NotFoundException } from "@nestjs/common";
 import { WorkflowInstanceController } from "../../src/controllers/workflow-instance.controller.js";
+import type { CreateInstanceDto } from "../../src/controllers/dto/index.js";
+import type { WorkflowService } from "../../src/services/workflow.service.js";
 
 function createMocks() {
   const workflowService = {
@@ -17,7 +19,7 @@ function createMocks() {
     }),
   };
 
-  const controller = new WorkflowInstanceController(workflowService as any);
+  const controller = new WorkflowInstanceController(workflowService as unknown as WorkflowService);
 
   return { controller, workflowService };
 }
@@ -32,7 +34,7 @@ describe("WorkflowInstanceController", () => {
       triggerMetadata: { actor: "user-1" },
     };
 
-    const result = await controller.createInstance(body as any);
+    const result = await controller.createInstance(body as CreateInstanceDto);
 
     expect(workflowService.createInstance).toHaveBeenCalledWith({
       workflowName: "order",
@@ -47,7 +49,7 @@ describe("WorkflowInstanceController", () => {
     const { controller, workflowService } = createMocks();
     const body = { workflowName: "order" };
 
-    await controller.createInstance(body as any);
+    await controller.createInstance(body as CreateInstanceDto);
 
     expect(workflowService.createInstance).toHaveBeenCalledWith({
       workflowName: "order",

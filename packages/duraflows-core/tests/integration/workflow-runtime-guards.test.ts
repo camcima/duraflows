@@ -1,65 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { randomUUID } from "node:crypto";
 import { WorkflowRuntime } from "../../src/runtime/workflow-runtime.js";
 import { InMemoryDefinitionRegistry } from "../../src/registry/definition-registry.js";
 import { InMemoryCommandRegistry } from "../../src/registry/command-registry.js";
 import { InMemoryGuardRegistry } from "../../src/registry/guard-registry.js";
 import { WorkflowValidator } from "../../src/validation/workflow-validator.js";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
+import { createInMemoryPersistence } from "../helpers/in-memory-persistence.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
-import type { WorkflowInstance } from "../../src/types/runtime.js";
-import type {
-  WorkflowInstanceStore,
-  WorkflowHistoryStore,
-  WorkflowHistoryRecord,
-  WorkflowTransactionRunner,
-} from "../../src/types/persistence.js";
-
-class InMemoryInstanceStore implements WorkflowInstanceStore {
-  private readonly instances = new Map<string, WorkflowInstance>();
-  async create(instance: WorkflowInstance): Promise<void> {
-    this.instances.set(instance.uuid, structuredClone(instance));
-  }
-  async findByUuid(uuid: string): Promise<WorkflowInstance | null> {
-    const i = this.instances.get(uuid);
-    return i ? structuredClone(i) : null;
-  }
-  async lockByUuid(uuid: string): Promise<WorkflowInstance | null> {
-    return this.findByUuid(uuid);
-  }
-  async update(instance: WorkflowInstance): Promise<void> {
-    this.instances.set(instance.uuid, structuredClone(instance));
-  }
-  async findExpired(_limit: number, now: Date): Promise<WorkflowInstance[]> {
-    return [...this.instances.values()].filter(
-      (i) => i.expiresAt !== null && i.expiresAt !== undefined && i.expiresAt <= now,
-    );
-  }
-}
-
-class InMemoryHistoryStore implements WorkflowHistoryStore {
-  private readonly records: Array<WorkflowHistoryRecord & { uuid: string }> = [];
-  async append(entry: WorkflowHistoryRecord): Promise<string> {
-    const uuid = randomUUID();
-    this.records.push({ ...entry, uuid });
-    return uuid;
-  }
-  async findByInstanceUuid(
-    workflowInstanceUuid: string,
-    options?: { limit?: number; offset?: number },
-  ): Promise<WorkflowHistoryRecord[]> {
-    const matching = this.records.filter((r) => r.workflowInstanceUuid === workflowInstanceUuid);
-    const offset = options?.offset ?? 0;
-    const limit = options?.limit ?? matching.length;
-    return matching.slice(offset, offset + limit);
-  }
-}
-
-class InMemoryTransactionRunner implements WorkflowTransactionRunner {
-  async runInTransaction<T>(cb: () => Promise<T>): Promise<T> {
-    return cb();
-  }
-}
 
 const DEFINITION: WorkflowDefinition = {
   name: "guarded-wf",
@@ -107,9 +54,7 @@ function buildRuntime(guardOutcome: boolean) {
   });
   definitionRegistry.register(DEFINITION);
 
-  const instanceStore = new InMemoryInstanceStore();
-  const historyStore = new InMemoryHistoryStore();
-  const transactionRunner = new InMemoryTransactionRunner();
+  const { instanceStore, historyStore, transactionRunner } = createInMemoryPersistence();
 
   const runtime = new WorkflowRuntime({
     definitionRegistry,
@@ -220,9 +165,7 @@ describe("WorkflowRuntime guards", () => {
       definitionRegistry,
       commandRegistry: cmdRegistry,
       guardRegistry,
-      instanceStore: new InMemoryInstanceStore(),
-      historyStore: new InMemoryHistoryStore(),
-      transactionRunner: new InMemoryTransactionRunner(),
+      ...createInMemoryPersistence(),
       clock: { now: () => new Date("2026-04-27T00:00:00Z") },
     });
 
@@ -276,9 +219,7 @@ describe("WorkflowRuntime guards", () => {
     });
     definitionRegistry.register(timeoutDefinition);
 
-    const instanceStore = new InMemoryInstanceStore();
-    const historyStore = new InMemoryHistoryStore();
-    const transactionRunner = new InMemoryTransactionRunner();
+    const { instanceStore, historyStore, transactionRunner } = createInMemoryPersistence();
 
     const runtime = new WorkflowRuntime({
       definitionRegistry,
@@ -361,9 +302,7 @@ describe("WorkflowRuntime guards", () => {
     });
     definitionRegistry.register(mixedDefinition);
 
-    const instanceStore = new InMemoryInstanceStore();
-    const historyStore = new InMemoryHistoryStore();
-    const transactionRunner = new InMemoryTransactionRunner();
+    const { instanceStore, historyStore, transactionRunner } = createInMemoryPersistence();
 
     const runtime = new WorkflowRuntime({
       definitionRegistry,
@@ -450,9 +389,7 @@ describe("WorkflowRuntime guards", () => {
       definitionRegistry,
       commandRegistry: cmdRegistry,
       guardRegistry,
-      instanceStore: new InMemoryInstanceStore(),
-      historyStore: new InMemoryHistoryStore(),
-      transactionRunner: new InMemoryTransactionRunner(),
+      ...createInMemoryPersistence(),
       clock: { now: () => new Date("2026-04-27T00:00:00Z") },
     });
 

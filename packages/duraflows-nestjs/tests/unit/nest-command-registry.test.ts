@@ -1,7 +1,8 @@
 import "reflect-metadata";
 import { describe, it, expect, vi } from "vitest";
 import { NestCommandRegistry } from "../../src/providers/nest-command-registry.js";
-import { WorkflowError } from "@duraflows/core";
+import { WorkflowError, type WorkflowCommand } from "@duraflows/core";
+import type { Type } from "@nestjs/common";
 import type { ModuleRef } from "@nestjs/core";
 
 class StubCommandA {
@@ -18,7 +19,7 @@ class StubCommandB {
 
 function createMockModuleRef(): ModuleRef {
   return {
-    get: vi.fn().mockImplementation((cls: any) => new cls()),
+    get: vi.fn().mockImplementation((cls: new () => unknown) => new cls()),
   } as unknown as ModuleRef;
 }
 
@@ -91,7 +92,9 @@ describe("NestCommandRegistry", () => {
       }),
     } as unknown as ModuleRef;
     class ScopedCommand {}
-    const registry = new NestCommandRegistry(moduleRef, [{ name: "scoped", useClass: ScopedCommand as any }]);
+    const registry = new NestCommandRegistry(moduleRef, [
+      { name: "scoped", useClass: ScopedCommand as Type<WorkflowCommand> },
+    ]);
     expect(() => registry.get("scoped")).toThrow(/singleton-scoped/);
   });
 
@@ -105,7 +108,9 @@ describe("NestCommandRegistry", () => {
       }),
     } as unknown as ModuleRef;
     class ScopedCommand {}
-    const registry = new NestCommandRegistry(moduleRef, [{ name: "scoped", useClass: ScopedCommand as any }]);
+    const registry = new NestCommandRegistry(moduleRef, [
+      { name: "scoped", useClass: ScopedCommand as Type<WorkflowCommand> },
+    ]);
     expect(() => registry.get("scoped")).toThrow(/singleton-scoped/);
   });
 

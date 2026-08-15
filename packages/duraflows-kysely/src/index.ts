@@ -3,14 +3,21 @@ import type { WorkflowPersistenceProvider } from "@duraflows/core";
 import type { WorkflowDatabase } from "./kysely-database.js";
 import { KyselyWorkflowInstanceStore } from "./kysely-instance-store.js";
 import { KyselyWorkflowHistoryStore } from "./kysely-history-store.js";
-import { KyselyTransactionRunner } from "./kysely-transaction-runner.js";
+import { KyselyTransactionRunner, type KyselyTransactionRunnerOptions } from "./kysely-transaction-runner.js";
 import { KyselyTransactionContext } from "./kysely-transaction-context.js";
 
 export { KyselyTransactionContext } from "./kysely-transaction-context.js";
 export { KyselyTransactionRunner } from "./kysely-transaction-runner.js";
+export type { KyselyTransactionRunnerOptions } from "./kysely-transaction-runner.js";
 export { KyselyWorkflowInstanceStore } from "./kysely-instance-store.js";
 export { KyselyWorkflowHistoryStore } from "./kysely-history-store.js";
 export type { WorkflowDatabase, WorkflowInstancesTable, WorkflowHistoryTable } from "./kysely-database.js";
+
+/**
+ * Options accepted by {@link kyselyWorkflowProviders}. Every field is optional
+ * and omitting the argument entirely reproduces the pre-existing behaviour.
+ */
+export type KyselyWorkflowProvidersOptions = KyselyTransactionRunnerOptions;
 
 /**
  * Creates long-lived persistence providers from a Kysely instance.
@@ -20,9 +27,12 @@ export type { WorkflowDatabase, WorkflowInstancesTable, WorkflowHistoryTable } f
  * only access workflow tables; the `unknown` cast is needed because
  * Kysely is invariant in its DB type parameter).
  */
-export function kyselyWorkflowProviders<DB extends WorkflowDatabase>(db: Kysely<DB>): WorkflowPersistenceProvider {
+export function kyselyWorkflowProviders<DB extends WorkflowDatabase>(
+  db: Kysely<DB>,
+  options: KyselyWorkflowProvidersOptions = {},
+): WorkflowPersistenceProvider {
   const narrowed = db as unknown as Kysely<WorkflowDatabase>;
-  const transactionRunner = new KyselyTransactionRunner(narrowed);
+  const transactionRunner = new KyselyTransactionRunner(narrowed, options);
   const instanceStore = new KyselyWorkflowInstanceStore(narrowed);
   const historyStore = new KyselyWorkflowHistoryStore(narrowed);
   return { instanceStore, historyStore, transactionRunner };

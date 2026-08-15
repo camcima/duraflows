@@ -9,12 +9,27 @@ import {
   KyselyWorkflowInstanceStore,
   KyselyWorkflowHistoryStore,
   KyselyTransactionRunner,
+  KyselyTransactionContext,
   type WorkflowDatabase,
 } from "@duraflows/kysely";
 
 const databaseUrl = process.env.DATABASE_URL;
 
-if (!databaseUrl) {
+if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
+  // CI sets REQUIRE_INTEGRATION_DB=1. There, a missing DATABASE_URL means the
+  // service container or the secret broke — and silently skipping every
+  // real-SQL test would hand back a green badge with zero integration
+  // coverage. Fail loudly instead. Locally the flag is unset, so a developer
+  // without a database still gets the skip below.
+  describe("kysely adapter integration", () => {
+    it("fails because REQUIRE_INTEGRATION_DB is set but DATABASE_URL is not", () => {
+      throw new Error(
+        "REQUIRE_INTEGRATION_DB=1 but DATABASE_URL is not set: the integration database is unavailable, " +
+          "so the kysely adapter integration suite cannot run.",
+      );
+    });
+  });
+} else if (!databaseUrl) {
   describe.skip("kysely adapter integration (set DATABASE_URL to run)", () => {
     it.skip("skipped", () => {});
   });
@@ -120,6 +135,48 @@ if (!databaseUrl) {
       const [record] = await historyStore.findByInstanceUuid(instance.uuid);
       expect(record.rejectedBy).toBeUndefined();
       expect(record.errorMessage).toBeUndefined();
+    });
+  });
+
+  describe("kysely transaction timeouts", () => {
+    afterEach(async () => {
+      await sql`TRUNCATE workflow_history, workflow_instances CASCADE`.execute(db);
+    });
+
+    const showLockTimeout = async (runner: KyselyTransactionRunner): Promise<string> =>
+      runner.runInTransaction(async () => {
+        const trx = KyselyTransactionContext.getTransaction(db)!;
+        const result = await sql<{ lock_timeout: string }>`SHOW lock_timeout`.execute(trx);
+        return result.rows[0].lock_timeout;
+      });
+
+    it("applies the timeout inside the transaction and reverts it on commit", async () => {
+      const bounded = new KyselyTransactionRunner(db, { lockTimeoutMs: 3000 });
+
+      expect(await showLockTimeout(bounded)).toBe("3s");
+      // set_config(..., is_local => true) is undone at COMMIT, so an unconfigured
+      // runner sharing the same pool must still see the server default.
+      expect(await showLockTimeout(transactionRunner)).toBe("0");
+    });
+
+    it("lock_timeout aborts a FOR UPDATE that another transaction is blocking", async () => {
+      const instance = makeInstance();
+      await transactionRunner.runInTransaction(() => instanceStore.create(instance));
+
+      // Hold the row from a second connection so lockByUuid has to wait.
+      const blocker = await pool.connect();
+      try {
+        await blocker.query("BEGIN");
+        await blocker.query("SELECT * FROM workflow_instances WHERE uuid = $1 FOR UPDATE", [instance.uuid]);
+
+        const bounded = new KyselyTransactionRunner(db, { lockTimeoutMs: 250 });
+        await expect(bounded.runInTransaction(() => instanceStore.lockByUuid(instance.uuid))).rejects.toThrow(
+          /lock timeout/i,
+        );
+      } finally {
+        await blocker.query("ROLLBACK");
+        blocker.release();
+      }
     });
   });
 }

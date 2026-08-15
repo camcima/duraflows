@@ -1,116 +1,19 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { randomUUID } from "node:crypto";
 import { WorkflowRuntime } from "../../src/runtime/workflow-runtime.js";
 import { InMemoryDefinitionRegistry } from "../../src/registry/definition-registry.js";
 import { InMemoryCommandRegistry } from "../../src/registry/command-registry.js";
 import { WorkflowValidator } from "../../src/validation/workflow-validator.js";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
 import { OnEnterDepthExceededError } from "../../src/errors/index.js";
+import {
+  createInMemoryPersistence,
+  type InMemoryHistoryStore,
+  type InMemoryInstanceStore,
+  type InMemoryTransactionRunner,
+} from "../helpers/in-memory-persistence.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
-import type { WorkflowInstance, WorkflowCommand, WorkflowExecutionContext } from "../../src/types/runtime.js";
-import type {
-  WorkflowInstanceStore,
-  WorkflowHistoryStore,
-  WorkflowHistoryRecord,
-  WorkflowTransactionRunner,
-  WorkflowClock,
-} from "../../src/types/persistence.js";
-
-// ---------------------------------------------------------------------------
-// In-memory test helpers
-// ---------------------------------------------------------------------------
-
-interface Snapshotable {
-  snapshot(): unknown;
-  restore(snap: unknown): void;
-}
-
-class InMemoryInstanceStore implements WorkflowInstanceStore, Snapshotable {
-  private instances = new Map<string, WorkflowInstance>();
-
-  async create(instance: WorkflowInstance): Promise<void> {
-    this.instances.set(instance.uuid, structuredClone(instance));
-  }
-
-  async findByUuid(uuid: string): Promise<WorkflowInstance | null> {
-    const inst = this.instances.get(uuid);
-    return inst ? structuredClone(inst) : null;
-  }
-
-  async lockByUuid(uuid: string): Promise<WorkflowInstance | null> {
-    return this.findByUuid(uuid);
-  }
-
-  async update(instance: WorkflowInstance): Promise<void> {
-    this.instances.set(instance.uuid, structuredClone(instance));
-  }
-
-  async findExpired(limit: number, now: Date): Promise<WorkflowInstance[]> {
-    const results: WorkflowInstance[] = [];
-    for (const inst of this.instances.values()) {
-      if (inst.expiresAt && inst.expiresAt <= now) {
-        results.push(structuredClone(inst));
-        if (results.length >= limit) break;
-      }
-    }
-    return results;
-  }
-
-  snapshot(): unknown {
-    return new Map([...this.instances.entries()].map(([k, v]) => [k, structuredClone(v)]));
-  }
-
-  restore(snap: unknown): void {
-    this.instances = snap as Map<string, WorkflowInstance>;
-  }
-}
-
-class InMemoryHistoryStore implements WorkflowHistoryStore, Snapshotable {
-  private records: Array<WorkflowHistoryRecord & { uuid: string }> = [];
-
-  async append(entry: WorkflowHistoryRecord): Promise<string> {
-    const uuid = randomUUID();
-    this.records.push({ ...entry, uuid });
-    return uuid;
-  }
-
-  async findByInstanceUuid(
-    workflowInstanceUuid: string,
-    options?: { limit?: number; offset?: number },
-  ): Promise<WorkflowHistoryRecord[]> {
-    const matching = this.records.filter((r) => r.workflowInstanceUuid === workflowInstanceUuid);
-    const offset = options?.offset ?? 0;
-    const limit = options?.limit ?? matching.length;
-    return matching.slice(offset, offset + limit);
-  }
-
-  snapshot(): unknown {
-    return [...this.records];
-  }
-
-  restore(snap: unknown): void {
-    this.records = snap as Array<WorkflowHistoryRecord & { uuid: string }>;
-  }
-}
-
-class InMemoryTransactionRunner implements WorkflowTransactionRunner {
-  constructor(private readonly stores: Snapshotable[] = []) {}
-
-  async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
-    if (this.stores.length === 0) {
-      return callback();
-    }
-    const snapshots = this.stores.map((s) => s.snapshot());
-    try {
-      return await callback();
-    } catch (err) {
-      for (let i = 0; i < this.stores.length; i++) {
-        this.stores[i].restore(snapshots[i]);
-      }
-      throw err;
-    }
-  }
-}
+import type { WorkflowCommand, WorkflowExecutionContext } from "../../src/types/runtime.js";
+import type { WorkflowClock } from "../../src/types/persistence.js";
 
 // ---------------------------------------------------------------------------
 // Test suite
@@ -124,6 +27,7 @@ describe("WorkflowRuntime onEnter integration", () => {
   let commandRegistry: InMemoryCommandRegistry;
   let instanceStore: InMemoryInstanceStore;
   let historyStore: InMemoryHistoryStore;
+  let transactionRunner: InMemoryTransactionRunner;
   let definitionRegistry: InMemoryDefinitionRegistry;
 
   beforeEach(() => {
@@ -133,15 +37,15 @@ describe("WorkflowRuntime onEnter integration", () => {
     });
 
     commandRegistry = new InMemoryCommandRegistry();
-    instanceStore = new InMemoryInstanceStore();
-    historyStore = new InMemoryHistoryStore();
+    const persistence = createInMemoryPersistence();
+    instanceStore = persistence.instanceStore;
+    historyStore = persistence.historyStore;
+    transactionRunner = persistence.transactionRunner;
 
     runtime = new WorkflowRuntime({
       definitionRegistry,
       commandRegistry,
-      instanceStore,
-      historyStore,
-      transactionRunner: new InMemoryTransactionRunner(),
+      ...persistence,
       clock,
     });
   });
@@ -398,6 +302,7 @@ describe("WorkflowRuntime onEnter integration", () => {
     const pastDate = new Date("2025-06-15T11:00:00.000Z");
     const storedInstance = await instanceStore.findByUuid(instance.uuid);
     storedInstance!.expiresAt = pastDate;
+    storedInstance!.version++;
     await instanceStore.update(storedInstance!);
 
     const expiredResult = await runtime.processExpiredWorkflows();
@@ -644,7 +549,7 @@ describe("WorkflowRuntime onEnter integration", () => {
       commandRegistry,
       instanceStore,
       historyStore,
-      transactionRunner: new InMemoryTransactionRunner(),
+      transactionRunner,
       clock,
       maxOnEnterDepth: 2,
     });
@@ -723,14 +628,17 @@ describe("WorkflowRuntime onEnter integration", () => {
       compiler: new WorkflowCompiler(),
     });
     const commandRegistry2 = new InMemoryCommandRegistry();
-    const instanceStore2 = new InMemoryInstanceStore();
-    const historyStore2 = new InMemoryHistoryStore();
+    const {
+      instanceStore: instanceStore2,
+      historyStore: historyStore2,
+      transactionRunner: transactionRunner2,
+    } = createInMemoryPersistence();
     const runtime2 = new WorkflowRuntime({
       definitionRegistry: definitionRegistry2,
       commandRegistry: commandRegistry2,
       instanceStore: instanceStore2,
       historyStore: historyStore2,
-      transactionRunner: new InMemoryTransactionRunner([instanceStore2, historyStore2]),
+      transactionRunner: transactionRunner2,
       clock,
     });
 
@@ -756,6 +664,7 @@ describe("WorkflowRuntime onEnter integration", () => {
     for (const uuid of [okA.uuid, badB.uuid, okC.uuid]) {
       const stored = await instanceStore2.findByUuid(uuid);
       stored!.expiresAt = past;
+      stored!.version++;
       await instanceStore2.update(stored!);
     }
 
@@ -862,14 +771,17 @@ describe("WorkflowRuntime onEnter integration", () => {
       compiler: new WorkflowCompiler(),
     });
     const commandRegistry2 = new InMemoryCommandRegistry();
-    const instanceStore2 = new InMemoryInstanceStore();
-    const historyStore2 = new InMemoryHistoryStore();
+    const {
+      instanceStore: instanceStore2,
+      historyStore: historyStore2,
+      transactionRunner: transactionRunner2,
+    } = createInMemoryPersistence();
     const runtime2 = new WorkflowRuntime({
       definitionRegistry: definitionRegistry2,
       commandRegistry: commandRegistry2,
       instanceStore: instanceStore2,
       historyStore: historyStore2,
-      transactionRunner: new InMemoryTransactionRunner(),
+      transactionRunner: transactionRunner2,
       clock,
     });
     definitionRegistry2.register(definition);
@@ -879,6 +791,7 @@ describe("WorkflowRuntime onEnter integration", () => {
     // Mark expired.
     const stored = await instanceStore2.findByUuid(instance.uuid);
     stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    stored!.version++;
     await instanceStore2.update(stored!);
 
     // Simulate: between findExpired and lockByUuid, another worker cleared expiresAt.
@@ -888,6 +801,7 @@ describe("WorkflowRuntime onEnter integration", () => {
       const row = await originalLock(uuid);
       if (row) {
         row.expiresAt = null;
+        row.version++;
         await instanceStore2.update(row);
         return originalLock(uuid);
       }
@@ -920,14 +834,17 @@ describe("WorkflowRuntime onEnter integration", () => {
       compiler: new WorkflowCompiler(),
     });
     const commandRegistry2 = new InMemoryCommandRegistry();
-    const instanceStore2 = new InMemoryInstanceStore();
-    const historyStore2 = new InMemoryHistoryStore();
+    const {
+      instanceStore: instanceStore2,
+      historyStore: historyStore2,
+      transactionRunner: transactionRunner2,
+    } = createInMemoryPersistence();
     const runtime2 = new WorkflowRuntime({
       definitionRegistry: definitionRegistry2,
       commandRegistry: commandRegistry2,
       instanceStore: instanceStore2,
       historyStore: historyStore2,
-      transactionRunner: new InMemoryTransactionRunner(),
+      transactionRunner: transactionRunner2,
       clock,
     });
     definitionRegistry2.register(definition);
@@ -937,6 +854,7 @@ describe("WorkflowRuntime onEnter integration", () => {
     // Force a stale expiresAt on a state with no timeout event.
     const stored = await instanceStore2.findByUuid(instance.uuid);
     stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    stored!.version++;
     await instanceStore2.update(stored!);
 
     const result = await runtime2.processExpiredWorkflows();
@@ -1034,14 +952,17 @@ describe("WorkflowRuntime onEnter integration", () => {
       compiler: new WorkflowCompiler(),
     });
     const commandRegistry2 = new InMemoryCommandRegistry();
-    const instanceStore2 = new InMemoryInstanceStore();
-    const historyStore2 = new InMemoryHistoryStore();
+    const {
+      instanceStore: instanceStore2,
+      historyStore: historyStore2,
+      transactionRunner: transactionRunner2,
+    } = createInMemoryPersistence();
     const runtime2 = new WorkflowRuntime({
       definitionRegistry: definitionRegistry2,
       commandRegistry: commandRegistry2,
       instanceStore: instanceStore2,
       historyStore: historyStore2,
-      transactionRunner: new InMemoryTransactionRunner(),
+      transactionRunner: transactionRunner2,
       clock,
     });
 
@@ -1052,6 +973,7 @@ describe("WorkflowRuntime onEnter integration", () => {
     // Simulate: instance is in "waiting" with an expired deadline.
     const stored = await instanceStore2.findByUuid(instance.uuid);
     stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    stored!.version++;
     await instanceStore2.update(stored!);
 
     // Race: immediately before the per-instance txn, another worker transitions to "racing" and refreshes the deadline but leaves it past.
@@ -1065,6 +987,7 @@ describe("WorkflowRuntime onEnter integration", () => {
         row.currentState = "racing";
         // Keep it expired, still past deadline.
         row.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+        row.version++;
         await instanceStore2.update(row);
         // Return the fresh lock AFTER the mutation — this is what processExpiredWorkflows should see.
         return originalLock(uuid);
@@ -1216,6 +1139,7 @@ describe("WorkflowRuntime onEnter integration", () => {
     // Force expiration in the past.
     const stored = await instanceStore.findByUuid(instance.uuid);
     stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    stored!.version++;
     await instanceStore.update(stored!);
 
     const result = await runtime.processExpiredWorkflows();
@@ -1258,6 +1182,7 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const stored = await instanceStore.findByUuid(instance.uuid);
     stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    stored!.version++;
     await instanceStore.update(stored!);
 
     // Simulate: instance deleted by another worker between findExpired and lockByUuid.
@@ -1297,6 +1222,7 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const stored = await instanceStore.findByUuid(instance.uuid);
     stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    stored!.version++;
     await instanceStore.update(stored!);
 
     // Simulate: another worker pushed the deadline into the future between scan and re-lock.
@@ -1347,6 +1273,7 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const stored = await instanceStore.findByUuid(instance.uuid);
     stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    stored!.version++;
     await instanceStore.update(stored!);
 
     // Re-lock throws a plain string (not an Error instance).
@@ -1391,6 +1318,7 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const stored = await instanceStore.findByUuid(instance.uuid);
     stored!.expiresAt = new Date("2025-06-15T11:00:00.000Z");
+    stored!.version++;
     await instanceStore.update(stored!);
 
     const result = await runtime.processExpiredWorkflows();

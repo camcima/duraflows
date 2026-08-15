@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { describe, it, expect, vi } from "vitest";
 import { WorkflowService } from "../../src/services/workflow.service.js";
-import { WorkflowHandle, type WorkflowDefinition } from "@duraflows/core";
+import { WorkflowHandle, type WorkflowDefinition, type WorkflowRuntime } from "@duraflows/core";
 
 function createMocks() {
   const runtime = {
@@ -12,7 +12,7 @@ function createMocks() {
     getHistory: vi.fn().mockResolvedValue([{ eventName: "Created" }]),
   };
 
-  const service = new WorkflowService(runtime as any);
+  const service = new WorkflowService(runtime as unknown as WorkflowRuntime);
 
   return { service, runtime };
 }
