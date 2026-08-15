@@ -37,6 +37,17 @@ export default defineConfig({
       ],
       reporter: ["text", "text-summary", "html", "json"],
       reportsDirectory: "coverage",
+      // Set just under the actuals at the time of writing (99.38 / 97.17 / 100
+      // / 99.62) so real regressions fail the run while ordinary churn does
+      // not. Codecov's project target is the loose backstop; this is the tight
+      // local gate. Global, not per-file: per-file thresholds turn a single
+      // small uncovered branch into a build failure in an unrelated package.
+      thresholds: {
+        statements: 99,
+        branches: 96,
+        functions: 100,
+        lines: 99,
+      },
     },
   },
 });
