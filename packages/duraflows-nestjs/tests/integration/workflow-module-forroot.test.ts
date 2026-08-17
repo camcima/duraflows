@@ -424,6 +424,82 @@ describe("WorkflowModule.forRoot()", () => {
     await mod.close();
   });
 
+  it("calls runtime.initialize() during module init, syncing definitions into the store", async () => {
+    const ensured: Array<{ workflowName: string; version: number }> = [];
+    const definitionStore = {
+      ensure: async (record: {
+        workflowName: string;
+        version: number;
+        contentHash: string;
+        definitionJson: unknown;
+      }) => {
+        ensured.push({ workflowName: record.workflowName, version: record.version });
+        return {
+          workflowName: record.workflowName,
+          version: record.version,
+          contentHash: record.contentHash,
+          definitionJson: record.definitionJson as WorkflowDefinition,
+          registeredAt: new Date(),
+        };
+      },
+      findByNameAndVersion: async () => null,
+    };
+    const mod = await Test.createTestingModule({
+      imports: [
+        WorkflowModule.forRoot({
+          workflows: [testWorkflow],
+          commands: [{ name: "test-approve", useClass: TestApproveCommand }],
+          persistence: { ...stubPersistence, definitionStore },
+        }),
+      ],
+    }).compile();
+    await mod.init();
+    expect(ensured).toEqual([{ workflowName: testWorkflow.name, version: 1 }]);
+    await mod.close();
+  });
+
+  it("fails module init when the definition store reports a hash mismatch", async () => {
+    const definitionStore = {
+      ensure: async (record: {
+        workflowName: string;
+        version: number;
+        contentHash: string;
+        definitionJson: unknown;
+      }) => ({
+        workflowName: record.workflowName,
+        version: record.version,
+        contentHash: "sha256:different",
+        definitionJson: record.definitionJson as WorkflowDefinition,
+        registeredAt: new Date(),
+      }),
+      findByNameAndVersion: async () => null,
+    };
+    const mod = await Test.createTestingModule({
+      imports: [
+        WorkflowModule.forRoot({
+          workflows: [testWorkflow],
+          commands: [{ name: "test-approve", useClass: TestApproveCommand }],
+          persistence: { ...stubPersistence, definitionStore },
+        }),
+      ],
+    }).compile();
+    await expect(mod.init()).rejects.toThrow(/version 1 was not bumped/);
+  });
+
+  it("module init succeeds when persistence has no definition store", async () => {
+    const mod = await Test.createTestingModule({
+      imports: [
+        WorkflowModule.forRoot({
+          workflows: [testWorkflow],
+          commands: [{ name: "test-approve", useClass: TestApproveCommand }],
+          persistence: stubPersistence,
+        }),
+      ],
+    }).compile();
+    await expect(mod.init()).resolves.toBeDefined();
+    await mod.close();
+  });
+
   it("forwards observers from WorkflowModule.forRoot to WorkflowRuntime", async () => {
     const captured: { state: string }[] = [];
 

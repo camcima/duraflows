@@ -6,6 +6,7 @@ export const WORKFLOW_DEFINITION_REGISTRY = Symbol("WORKFLOW_DEFINITION_REGISTRY
 export const WORKFLOW_TRANSACTION_RUNNER = Symbol("WORKFLOW_TRANSACTION_RUNNER");
 export const WORKFLOW_CLOCK = Symbol("WORKFLOW_CLOCK");
 export const WORKFLOW_GUARD_REGISTRY = Symbol("WORKFLOW_GUARD_REGISTRY");
+export const WORKFLOW_DEFINITION_STORE = Symbol("WORKFLOW_DEFINITION_STORE");
 
 /**
  * The resolved module configuration. Deliberately not re-exported from the

@@ -16,6 +16,7 @@ import type {
   WorkflowHistoryStore,
   WorkflowTransactionRunner,
   WorkflowDefinitionRegistry,
+  WorkflowDefinitionStore,
   WorkflowObserver,
   ObserverErrorHandler,
   WorkflowGuard,
@@ -39,8 +40,10 @@ import {
   WORKFLOW_TRANSACTION_RUNNER,
   WORKFLOW_CLOCK,
   WORKFLOW_GUARD_REGISTRY,
+  WORKFLOW_DEFINITION_STORE,
   WORKFLOW_MODULE_OPTIONS,
 } from "./providers/injection-tokens.js";
+import { WorkflowRuntimeInitializer } from "./providers/workflow-runtime-initializer.js";
 import { WorkflowService } from "./services/workflow.service.js";
 import { WorkflowTimeoutService } from "./services/workflow-timeout.service.js";
 import { WorkflowEventController } from "./controllers/workflow-event.controller.js";
@@ -199,6 +202,11 @@ function buildWorkflowProviders(explicitCommands: WorkflowCommandRegistration[])
       inject: [WORKFLOW_MODULE_OPTIONS],
     },
     {
+      provide: WORKFLOW_DEFINITION_STORE,
+      useFactory: (config: WorkflowModuleFactoryConfig) => config.persistence.definitionStore ?? null,
+      inject: [WORKFLOW_MODULE_OPTIONS],
+    },
+    {
       provide: WORKFLOW_CLOCK,
       useFactory: (config: WorkflowModuleFactoryConfig): WorkflowClock => config.clock ?? { now: () => new Date() },
       inject: [WORKFLOW_MODULE_OPTIONS],
@@ -214,6 +222,7 @@ function buildWorkflowProviders(explicitCommands: WorkflowCommandRegistration[])
         historyStore: WorkflowHistoryStore,
         transactionRunner: WorkflowTransactionRunner,
         clock: WorkflowClock,
+        definitionStore: WorkflowDefinitionStore | null,
       ) =>
         new WorkflowRuntime({
           definitionRegistry,
@@ -223,6 +232,7 @@ function buildWorkflowProviders(explicitCommands: WorkflowCommandRegistration[])
           historyStore,
           transactionRunner,
           clock,
+          definitionStore: definitionStore ?? undefined,
           observers: config.observers,
           onObserverError: config.onObserverError,
         }),
@@ -235,10 +245,12 @@ function buildWorkflowProviders(explicitCommands: WorkflowCommandRegistration[])
         WORKFLOW_HISTORY_STORE,
         WORKFLOW_TRANSACTION_RUNNER,
         WORKFLOW_CLOCK,
+        WORKFLOW_DEFINITION_STORE,
       ],
     },
     WorkflowService,
     WorkflowTimeoutService,
+    WorkflowRuntimeInitializer,
   ];
 }
 
