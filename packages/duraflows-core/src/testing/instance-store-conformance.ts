@@ -40,6 +40,7 @@ export function runInstanceStoreConformance(label: string, harness: InstanceStor
       workflowName: "test-workflow",
       currentState: "initial",
       version: 0,
+      definitionVersion: null,
       expiresAt: null,
       lastTransitionAt: new Date("2026-01-01T00:00:00Z"),
       context: {},

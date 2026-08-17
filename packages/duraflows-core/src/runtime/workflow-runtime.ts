@@ -163,6 +163,7 @@ export class WorkflowRuntime {
       workflowName: definition.name,
       currentState: definition.initialState,
       version: 0,
+      definitionVersion: null,
       expiresAt,
       lastTransitionAt: now,
       context,

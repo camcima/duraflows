@@ -49,6 +49,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     workflowName: "integration-test",
     currentState: "initial",
     version: 0,
+    definitionVersion: null,
     expiresAt: null,
     lastTransitionAt: new Date("2026-01-01T00:00:00Z"),
     context: {},

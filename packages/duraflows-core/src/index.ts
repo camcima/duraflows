@@ -33,6 +33,8 @@ export type {
   WorkflowTransactionRunner,
   WorkflowClock,
   WorkflowPersistenceProvider,
+  StoredWorkflowDefinition,
+  WorkflowDefinitionStore,
 } from "./types/persistence.js";
 
 // Errors

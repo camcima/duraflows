@@ -1,4 +1,5 @@
 import type { CommandResult, WorkflowInstance } from "./runtime.js";
+import type { WorkflowDefinition } from "./definition.js";
 
 export interface WorkflowInstanceStore {
   /**
@@ -91,6 +92,8 @@ export interface WorkflowHistoryRecord {
   rejectedBy?: string;
   commandResultsJson: CommandResult[];
   triggerMetadata?: Record<string, unknown>;
+  /** The definition version that governed this transition. Absent/null on legacy rows. */
+  definitionVersion?: number | null;
 }
 
 export interface WorkflowTransactionRunner {
@@ -115,8 +118,47 @@ export interface WorkflowClock {
   now(): Date;
 }
 
+export interface StoredWorkflowDefinition {
+  workflowName: string;
+  version: number;
+  contentHash: string;
+  definitionJson: WorkflowDefinition;
+  registeredAt: Date;
+}
+
+export interface WorkflowDefinitionStore {
+  /**
+   * Insert the definition snapshot if `(workflowName, version)` is absent,
+   * then return the stored row — the pre-existing one or the newly created
+   * one. Must be atomic under concurrent callers (e.g. `INSERT ... ON
+   * CONFLICT DO NOTHING` followed by a re-select) and must NEVER overwrite
+   * an existing row.
+   *
+   * Transactional: not required.
+   */
+  ensure(record: {
+    workflowName: string;
+    version: number;
+    contentHash: string;
+    definitionJson: WorkflowDefinition;
+  }): Promise<StoredWorkflowDefinition>;
+
+  /**
+   * Fetch a stored definition snapshot.
+   *
+   * Transactional: not required (read-only).
+   */
+  findByNameAndVersion(workflowName: string, version: number): Promise<StoredWorkflowDefinition | null>;
+}
+
 export interface WorkflowPersistenceProvider {
   instanceStore: WorkflowInstanceStore;
   historyStore: WorkflowHistoryStore;
   transactionRunner: WorkflowTransactionRunner;
+  /**
+   * Optional so existing custom providers keep compiling; the bundled pg and
+   * kysely providers always supply it. Definition-versioning features are
+   * inert without it.
+   */
+  definitionStore?: WorkflowDefinitionStore;
 }

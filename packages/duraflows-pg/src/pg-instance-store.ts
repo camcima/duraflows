@@ -104,6 +104,7 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
       workflowName: row.workflow_name as string,
       currentState: row.current_state as string,
       version: row.version as number,
+      definitionVersion: (row.definition_version as number | null | undefined) ?? null,
       expiresAt: row.expires_at ? new Date(row.expires_at as string) : null,
       lastTransitionAt: new Date(row.last_transition_at as string),
       context: row.context_json as Record<string, unknown>,

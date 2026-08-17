@@ -25,6 +25,7 @@ const sampleInstance: WorkflowInstance = {
   workflowName: "order",
   currentState: "pending",
   version: 0,
+  definitionVersion: null,
   expiresAt: null,
   lastTransitionAt: now,
   context: { status: "new" },

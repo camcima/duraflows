@@ -256,6 +256,19 @@ describe("InMemoryDefinitionRegistry", () => {
     expect(Object.isFrozen(stored)).toBe(true);
     expect(Object.isFrozen(stored.states.ready.context!.nested)).toBe(true);
   });
+
+  it("accepts a positive integer version", () => {
+    const registry = new InMemoryDefinitionRegistry();
+    registry.register({ name: "versioned", version: 3, initialState: "a", states: { a: {} } });
+    expect(registry.get("versioned").version).toBe(3);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])("rejects invalid version %p", (version) => {
+    const registry = new InMemoryDefinitionRegistry();
+    expect(() => registry.register({ name: "bad", version, initialState: "a", states: { a: {} } })).toThrow(
+      WorkflowDefinitionError,
+    );
+  });
 });
 
 describe("InMemoryDefinitionRegistry onValidationWarning", () => {

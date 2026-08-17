@@ -20,6 +20,7 @@ export interface WorkflowInstancesTable {
   workflow_name: string;
   current_state: string;
   version: number;
+  definition_version: number | null;
   expires_at: Date | null;
   last_transition_at: Date;
   context_json: JsonObjectColumn;
@@ -39,6 +40,7 @@ export interface WorkflowHistoryTable {
   rejected_by: string | null;
   command_results_json: JsonArrayColumn;
   trigger_metadata_json: JsonObjectColumn;
+  definition_version: number | null;
   created_at: Generated<Date>;
 }
 

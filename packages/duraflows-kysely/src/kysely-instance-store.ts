@@ -104,6 +104,7 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
       workflowName: row.workflow_name,
       currentState: row.current_state,
       version: row.version,
+      definitionVersion: row.definition_version ?? null,
       expiresAt: row.expires_at,
       lastTransitionAt: row.last_transition_at,
       context: row.context_json,
