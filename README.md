@@ -342,15 +342,15 @@ The output is valid Mermaid `flowchart` syntax. Paste it into any Mermaid render
 
 The `@duraflows/pg` package provides two ways to set up the database schema:
 
-### Option 1: Copy the reference migration
+### Option 1: Copy the reference migrations
 
-A ready-made dbmate migration is shipped at:
+Ready-made dbmate migrations are shipped at:
 
 ```
-node_modules/@duraflows/pg/sql/dbmate/001_workflow_core.sql
+node_modules/@duraflows/pg/sql/dbmate/
 ```
 
-Copy it into your migration directory. It uses `gen_random_uuid()` (PostgreSQL 13+) for history record UUIDs.
+Copy **all** files in that directory (`001_workflow_core.sql`, `002_replace_trigger_with_metadata.sql`, `003_event_guards.sql`, `004_definition_versions.sql`) into your migration directory and apply them in order, **before** deploying code that includes `004` — the runtime writes the `definition_version` columns and the `workflow_definitions` table on every operation. Applying only `001` produces a schema the current runtime cannot write to — `002`/`003` add the `metadata_json` handling and the `rejected_by` column / `guard-rejected` outcome that the history store requires, and `004` adds the `workflow_definitions` table and `definition_version` columns that the definition store and every instance/history write require. The migrations use `gen_random_uuid()` (PostgreSQL 13+) for history record UUIDs.
 
 ### Option 2: Generate a migration with `generateMigrationSql()`
 
@@ -368,7 +368,7 @@ const { up, down } = generateMigrationSql();
 
 Paste the `up` and `down` SQL into your migration file.
 
-Both options create two tables: `workflow_instances` and `workflow_history`.
+Both options create three tables: `workflow_instances`, `workflow_history`, and `workflow_definitions`.
 
 ## Custom Persistence Adapters
 
