@@ -531,3 +531,43 @@ The suite covers:
 | `update` metadata immutability    | Mutating `metadata` on the locked object has no effect on the stored row |
 | `findExpired` filtering           | Past `expiresAt` → included; future / null → excluded                    |
 | `findExpired` limit               | Result length respects the `limit` parameter                             |
+| `definitionVersion` roundtrip     | `create` → `findByUuid` → `update` → `findByUuid` all preserve it        |
+
+A second, sibling suite covers `WorkflowDefinitionStore` -- the store that backs [definition versions](#definition-versions). It's exported the same way, from the same subpath:
+
+```ts
+import { runDefinitionStoreConformance } from "@duraflows/core/testing";
+
+runDefinitionStoreConformance("my-adapter", {
+  setup: async () => {
+    const store = new MyDefinitionStore();
+    return {
+      store,
+      teardown: async () => {
+        // close connections, flush state, etc.
+      },
+    };
+  },
+});
+```
+
+Its harness (`DefinitionStoreConformanceHarness`) is smaller than the instance-store one -- no `transactionRunner`, since `ensure()`/`findByNameAndVersion()` don't require a transaction:
+
+```ts
+interface DefinitionStoreConformanceHarness {
+  setup(): Promise<{
+    store: WorkflowDefinitionStore;
+    teardown: () => Promise<void>;
+  }>;
+}
+```
+
+The suite covers:
+
+| Test                                | What it verifies                                                                                                                   |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `ensure` inserts                    | A new `(workflowName, version)` snapshot is inserted and the stored row is returned                                                |
+| `ensure` is insert-if-absent        | Calling `ensure` again for the same `(workflowName, version)` returns the pre-existing row unchanged, not the caller's new content |
+| `findByNameAndVersion` roundtrip    | Retrieves a stored snapshot with a structurally equal `definitionJson`                                                             |
+| `findByNameAndVersion` unknown pair | Returns `null` for an unknown version or an unknown workflow name                                                                  |
+| Independent versions                | Two versions of the same workflow are stored and retrieved as independent rows                                                     |

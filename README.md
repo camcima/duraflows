@@ -378,6 +378,8 @@ The NestJS module and the core runtime are fully decoupled from `pg`. To use Pri
 - `WorkflowHistoryStore`
 - `WorkflowTransactionRunner`
 
+Optionally implement the fourth, `WorkflowDefinitionStore`, to support definition versioning -- it's an optional field on `WorkflowPersistenceProvider`, so an adapter that omits it still compiles and runs, it just leaves definition versioning inert.
+
 See the [Persistence Guide](docs/persistence.md) for details and examples.
 
 ## Documentation
