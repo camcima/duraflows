@@ -163,7 +163,7 @@ export class WorkflowRuntime {
       workflowName: definition.name,
       currentState: definition.initialState,
       version: 0,
-      definitionVersion: null,
+      definitionVersion: this.definitionVersionOf(definition),
       expiresAt,
       lastTransitionAt: now,
       context,
@@ -281,6 +281,7 @@ export class WorkflowRuntime {
           rejectedBy: eventResult.rejectedBy,
           commandResultsJson: [],
           triggerMetadata: structuredClone(input.triggerMetadata ?? {}),
+          definitionVersion: this.definitionVersionOf(definition),
         });
 
         return {
@@ -308,6 +309,7 @@ export class WorkflowRuntime {
         errorMessage,
         commandResultsJson: eventResult.commandResults,
         triggerMetadata: structuredClone(input.triggerMetadata ?? {}),
+        definitionVersion: this.definitionVersionOf(definition),
       });
 
       eventsToFire.push(
@@ -396,6 +398,7 @@ export class WorkflowRuntime {
             instance.expiresAt = null;
             instance.version++;
             instance.updatedAt = this.clock.now();
+            instance.definitionVersion = this.definitionVersionOf(definition);
             await this.instanceStore.update(instance);
             return;
           }
@@ -461,6 +464,7 @@ export class WorkflowRuntime {
       instance.version++;
       instance.lastTransitionAt = now;
       instance.updatedAt = now;
+      instance.definitionVersion = this.definitionVersionOf(definition);
       await this.instanceStore.update(instance);
 
       await this.historyStore.append({
@@ -472,6 +476,7 @@ export class WorkflowRuntime {
         rejectedBy: result.rejectedBy,
         commandResultsJson: [],
         triggerMetadata: { source: "timeout" },
+        definitionVersion: this.definitionVersionOf(definition),
       });
       return "rejected";
     }
@@ -492,6 +497,7 @@ export class WorkflowRuntime {
       errorMessage,
       commandResultsJson: result.commandResults,
       triggerMetadata: { source: "timeout" },
+      definitionVersion: this.definitionVersionOf(definition),
     });
 
     eventsToFire.push(
@@ -535,6 +541,7 @@ export class WorkflowRuntime {
     instance.version++;
     instance.lastTransitionAt = now;
     instance.updatedAt = now;
+    instance.definitionVersion = this.definitionVersionOf(definition);
 
     const stateDef = definition.states[toState];
     instance.context = {
@@ -544,6 +551,11 @@ export class WorkflowRuntime {
     executionContext.context = { ...instance.context };
 
     instance.expiresAt = this.timeoutResolver.computeDeadline(definition, toState, now);
+  }
+
+  /** The version label of a registered definition; omitted means 1. */
+  private definitionVersionOf(definition: WorkflowDefinition): number {
+    return definition.version ?? 1;
   }
 
   private async processOnEnterChain(
@@ -583,6 +595,7 @@ export class WorkflowRuntime {
         errorMessage,
         commandResultsJson: hop.commandResults,
         triggerMetadata: { source: "onEnter" },
+        definitionVersion: this.definitionVersionOf(definition),
       });
 
       eventsToFire.push(
