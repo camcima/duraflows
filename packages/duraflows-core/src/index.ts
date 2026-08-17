@@ -62,6 +62,9 @@ export type { ValidationResult, ValidationError, WorkflowValidationOptions } fro
 export { WorkflowCompiler } from "./compilation/workflow-compiler.js";
 export type { CompiledWorkflow } from "./compilation/workflow-compiler.js";
 
+// Utilities
+export { computeDefinitionHash } from "./util/definition-hash.js";
+
 // Execution
 export { CommandExecutor } from "./execution/command-executor.js";
 export type { CommandExecutionResult } from "./execution/command-executor.js";
