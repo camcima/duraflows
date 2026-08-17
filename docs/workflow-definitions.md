@@ -7,16 +7,18 @@ A workflow definition is a plain TypeScript object that describes the states, ev
 ```ts
 interface WorkflowDefinition {
   name: string;
+  version?: number;
   initialState: string;
   states: Record<string, WorkflowStateDefinition>;
 }
 ```
 
-| Property       | Type                                      | Required | Description                                                           |
-| -------------- | ----------------------------------------- | -------- | --------------------------------------------------------------------- |
-| `name`         | `string`                                  | Yes      | Unique identifier for the workflow. Must be non-empty.                |
-| `initialState` | `string`                                  | Yes      | Name of the starting state. Must exist in `states`.                   |
-| `states`       | `Record<string, WorkflowStateDefinition>` | Yes      | Map of state names to state definitions. At least one state required. |
+| Property       | Type                                      | Required | Description                                                                                                                                    |
+| -------------- | ----------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`         | `string`                                  | Yes      | Unique identifier for the workflow. Must be non-empty.                                                                                         |
+| `version`      | `number`                                  | No       | Explicit definition version, defaulting to `1` when omitted. Must be a positive safe integer. See [Definition versions](#definition-versions). |
+| `initialState` | `string`                                  | Yes      | Name of the starting state. Must exist in `states`.                                                                                            |
+| `states`       | `Record<string, WorkflowStateDefinition>` | Yes      | Map of state names to state definitions. At least one state required.                                                                          |
 
 ### Example
 
@@ -31,6 +33,38 @@ const workflow: WorkflowDefinition = {
   },
 };
 ```
+
+## Definition versions
+
+Every definition carries an explicit `version` (a positive integer, defaulting
+to `1` when omitted):
+
+```ts
+const orderWorkflow: WorkflowDefinition = {
+  name: "order",
+  version: 2,
+  initialState: "new",
+  states: {/* ... */},
+};
+```
+
+Bump `version` whenever the definition's content changes. At startup,
+`WorkflowRuntime.initialize()` (invoked automatically by the NestJS module,
+and lazily by the first operation otherwise) snapshots each registered
+definition into the `workflow_definitions` table and compares content hashes:
+re-registering a known version with changed content fails fast with
+`WorkflowDefinitionError` instead of silently running drifted definitions.
+The content hash deliberately excludes `version` itself, so relabeling a
+version without changing anything else never trips the guard.
+
+Instances record the definition version that governs them
+(`WorkflowInstance.definitionVersion`), and every history row records the
+version that governed that transition. Instances created before versioning
+existed have `definitionVersion: null` and are stamped on their next
+transition. **In the current release, resolution behavior is unchanged: all
+instances still execute the currently registered definition regardless of
+the version they were stamped with.** The version stamp is provenance only
+-- version-pinned execution is planned for a later release.
 
 ## WorkflowStateDefinition
 

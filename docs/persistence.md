@@ -1,16 +1,17 @@
 # Persistence
 
-The workflow runtime is decoupled from any specific database library. The core package defines three persistence interfaces. The `@duraflows/pg` package provides a built-in PostgreSQL adapter using `pg`, but you can implement these interfaces with Prisma, Drizzle, TypeORM, or any other library.
+The workflow runtime is decoupled from any specific database library. The core package defines four persistence interfaces. The `@duraflows/pg` package provides a built-in PostgreSQL adapter using `pg`, but you can implement these interfaces with Prisma, Drizzle, TypeORM, or any other library.
 
 ## Persistence Interfaces
 
-All three interfaces are defined in `@duraflows/core`:
+All four interfaces are defined in `@duraflows/core`:
 
 ```ts
 import type {
   WorkflowInstanceStore,
   WorkflowHistoryStore,
   WorkflowTransactionRunner,
+  WorkflowDefinitionStore,
   WorkflowPersistenceProvider,
 } from "@duraflows/core";
 ```
@@ -29,13 +30,13 @@ interface WorkflowInstanceStore {
 }
 ```
 
-| Method                    | Tx required? | Description                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `create(instance)`        | Recommended  | Insert a new workflow instance record. Typically called inside the same transaction as the initial history record append and any onEnter chain writes.                                                                                                                                                                                                          |
-| `findByUuid(uuid)`        | Not required | Find an instance by UUID (no locking). Safe to call outside a transaction (read-only). Returns `null` if not found.                                                                                                                                                                                                                                             |
-| `lockByUuid(uuid)`        | **Required** | Find and lock an instance for update (`SELECT ... FOR UPDATE`). **Adapters must throw if called outside an active transaction** — a lock without a transaction releases immediately and defeats its purpose. Returns `null` if not found.                                                                                                                       |
-| `update(instance)`        | Recommended  | Update mutable fields: `currentState`, `version`, `expiresAt`, `lastTransitionAt`, `context`, `updatedAt`. Uses optimistic locking: the WHERE clause must include `AND version = $expectedVersion` (i.e., `instance.version - 1`). If no row is matched, throw `WorkflowError` to signal a concurrent modification. `metadata` is immutable and is NOT updated. |
-| `findExpired(limit, now)` | **Required** | Find instances where `expiresAt < now` (the `now` parameter — not the database clock), locked for update with skip-locked semantics (`FOR UPDATE SKIP LOCKED`). **Adapters must throw if called outside an active transaction.** Multiple workers can call this concurrently without processing the same instance twice because uncontested rows are skipped.   |
+| Method                    | Tx required? | Description                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `create(instance)`        | Recommended  | Insert a new workflow instance record. Typically called inside the same transaction as the initial history record append and any onEnter chain writes.                                                                                                                                                                                                                               |
+| `findByUuid(uuid)`        | Not required | Find an instance by UUID (no locking). Safe to call outside a transaction (read-only). Returns `null` if not found.                                                                                                                                                                                                                                                                  |
+| `lockByUuid(uuid)`        | **Required** | Find and lock an instance for update (`SELECT ... FOR UPDATE`). **Adapters must throw if called outside an active transaction** — a lock without a transaction releases immediately and defeats its purpose. Returns `null` if not found.                                                                                                                                            |
+| `update(instance)`        | Recommended  | Update mutable fields: `currentState`, `version`, `definitionVersion`, `expiresAt`, `lastTransitionAt`, `context`, `updatedAt`. Uses optimistic locking: the WHERE clause must include `AND version = $expectedVersion` (i.e., `instance.version - 1`). If no row is matched, throw `WorkflowError` to signal a concurrent modification. `metadata` is immutable and is NOT updated. |
+| `findExpired(limit, now)` | **Required** | Find instances where `expiresAt < now` (the `now` parameter — not the database clock), locked for update with skip-locked semantics (`FOR UPDATE SKIP LOCKED`). **Adapters must throw if called outside an active transaction.** Multiple workers can call this concurrently without processing the same instance twice because uncontested rows are skipped.                        |
 
 ### WorkflowHistoryStore
 
@@ -68,6 +69,7 @@ interface WorkflowHistoryRecord {
   errorMessage?: string; // extracted from last failed command's message/code
   commandResultsJson: CommandResult[];
   triggerMetadata?: Record<string, unknown>;
+  definitionVersion?: number | null; // the definition version that governed this transition
 }
 ```
 
@@ -89,17 +91,43 @@ The key contract: when `runInTransaction` is active, `lockByUuid()` and `findExp
 
 **Nesting is flat, not nested.** Because a nested `runInTransaction` reuses the outer connection instead of opening a savepoint, there is no inner scope to roll back independently: a failure anywhere inside the callback aborts the **whole** transaction. Catching that error does not recover it — PostgreSQL puts the connection in a failed state and rejects every subsequent statement with `current transaction is aborted` until the outermost transaction rolls back. Do not write code that catches an error from an inner `runInTransaction` and carries on issuing queries; let the error propagate to the outermost caller.
 
+### WorkflowDefinitionStore
+
+Stores one immutable snapshot per `(workflow_name, version)`:
+
+```ts
+interface WorkflowDefinitionStore {
+  ensure(record: {
+    workflowName: string;
+    version: number;
+    contentHash: string;
+    definitionJson: WorkflowDefinition;
+  }): Promise<StoredWorkflowDefinition>;
+  findByNameAndVersion(workflowName: string, version: number): Promise<StoredWorkflowDefinition | null>;
+}
+```
+
+| Method                                        | Tx required? | Description                                                                                                                                                                                                                                                |
+| --------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ensure(record)`                              | Not required | Insert-if-absent and return the stored row -- **never overwrites** an existing row. Must be atomic under concurrent callers. Both bundled adapters implement this as `INSERT ... ON CONFLICT (workflow_name, version) DO NOTHING` followed by a re-select. |
+| `findByNameAndVersion(workflowName, version)` | Not required | Fetch a snapshot. Returns `null` if that `(workflowName, version)` pair has never been synced.                                                                                                                                                             |
+
+`ensure()` is what `WorkflowRuntime.initialize()` calls for every registered definition, and its "insert-if-absent, never overwrite" contract is what makes the version-bump guard meaningful: once a `(workflowName, version)` pair is stored, its snapshot is fixed forever, so a later registration with the same version but different content is detected as drift rather than silently accepted.
+
 ### WorkflowPersistenceProvider
 
-A convenience type that groups all three interfaces:
+A convenience type that groups all four interfaces:
 
 ```ts
 interface WorkflowPersistenceProvider {
   instanceStore: WorkflowInstanceStore;
   historyStore: WorkflowHistoryStore;
   transactionRunner: WorkflowTransactionRunner;
+  definitionStore?: WorkflowDefinitionStore;
 }
 ```
+
+`definitionStore` is optional so existing custom providers keep compiling without changes; without it, definition-versioning features (the version-bump guard, the `workflow_definitions` snapshot table) are simply inert. The bundled `pgWorkflowProviders()` and `kyselyWorkflowProviders()` always supply it.
 
 This is what `WorkflowModuleOptions.persistence` expects and what `pgWorkflowProviders()` returns.
 
@@ -122,6 +150,15 @@ Ready-made dbmate migrations using `gen_random_uuid()` are also shipped under `s
 
 `workflow_history.outcome` admits a third value `'guard-rejected'`, and a nullable `rejected_by text` column carries the name of the guard that blocked the event. Migration `003_event_guards.sql` (dbmate) extends the CHECK constraint and adds the column. Fresh installs via `generateMigrationSql()` already include both.
 
+### Definition versions
+
+Migration `004_definition_versions.sql` (dbmate) adds the schema that backs [`WorkflowDefinitionStore`](#workflowdefinitionstore) and definition-version stamping:
+
+- a new `workflow_definitions` table (`workflow_name`, `version`, `content_hash`, `definition_json`, `registered_at`, primary key `(workflow_name, version)`), and
+- a nullable `definition_version integer` column on both `workflow_instances` and `workflow_history`.
+
+Existing deployments apply this migration like any other -- all pre-existing rows get `definition_version IS NULL`, which maps to `definitionVersion: null` on `WorkflowInstance` and `definitionVersion: undefined` on `WorkflowHistoryRecord`. Instances pick up a real version stamp on their next transition. Fresh installs via `generateMigrationSql()` already include all of it.
+
 ### pgWorkflowProviders()
 
 The simplest way to use the pg adapter:
@@ -133,9 +170,10 @@ import { Pool } from "pg";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const persistence = pgWorkflowProviders(pool);
 
-// persistence.instanceStore  -> PgWorkflowInstanceStore
-// persistence.historyStore   -> PgWorkflowHistoryStore
+// persistence.instanceStore   -> PgWorkflowInstanceStore
+// persistence.historyStore    -> PgWorkflowHistoryStore
 // persistence.transactionRunner -> PgTransactionRunner
+// persistence.definitionStore -> PgWorkflowDefinitionStore
 ```
 
 An optional second argument configures [transaction timeouts](#transaction-timeouts):
@@ -180,6 +218,7 @@ If you need more control, use the classes directly:
 import {
   PgWorkflowInstanceStore,
   PgWorkflowHistoryStore,
+  PgWorkflowDefinitionStore,
   PgTransactionRunner,
   PgTransactionContext,
 } from "@duraflows/pg";
@@ -219,6 +258,17 @@ class PgWorkflowHistoryStore implements WorkflowHistoryStore {
 
 - `append()` uses `INSERT ... RETURNING uuid`
 - `findByInstanceUuid()` uses `SELECT ... ORDER BY created_at DESC LIMIT $2 OFFSET $3`
+
+**PgWorkflowDefinitionStore**
+
+```ts
+class PgWorkflowDefinitionStore implements WorkflowDefinitionStore {
+  constructor(pool: Pool);
+}
+```
+
+- `ensure()` uses `INSERT ... ON CONFLICT (workflow_name, version) DO NOTHING`, then re-selects the row -- so it always returns the pre-existing snapshot if one was already stored, and never overwrites it
+- `findByNameAndVersion()` uses `SELECT ... WHERE workflow_name = $1 AND version = $2`
 
 **PgTransactionContext**
 
