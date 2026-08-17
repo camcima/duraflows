@@ -18,17 +18,46 @@ new WorkflowRuntime(options: WorkflowRuntimeOptions)
 
 **WorkflowRuntimeOptions:**
 
-| Property             | Type                          | Description                                                                                            |
-| -------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                                       |
-| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                                           |
-| `instanceStore`      | `WorkflowInstanceStore`       | Persistence for workflow instances                                                                     |
-| `historyStore`       | `WorkflowHistoryStore`        | Persistence for history records                                                                        |
-| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                                                 |
-| `clock`              | `WorkflowClock`               | Clock for timestamps (injectable for testing)                                                          |
-| `maxOnEnterDepth`    | `number`                      | Maximum depth for onEnter auto-transition chains (default: 10)                                         |
-| `observers`          | `readonly WorkflowObserver[]` | Optional observers notified post-commit on every state entry                                           |
-| `guardRegistry`      | `WorkflowGuardRegistry`       | Optional registry of guard implementations; required when any workflow definition references a `guard` |
+| Property             | Type                          | Description                                                                                                                                                                                |
+| -------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                                                                                                                           |
+| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                                                                                                                               |
+| `instanceStore`      | `WorkflowInstanceStore`       | Persistence for workflow instances                                                                                                                                                         |
+| `historyStore`       | `WorkflowHistoryStore`        | Persistence for history records                                                                                                                                                            |
+| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                                                                                                                                     |
+| `clock`              | `WorkflowClock`               | Clock for timestamps (injectable for testing)                                                                                                                                              |
+| `maxOnEnterDepth`    | `number`                      | Maximum depth for onEnter auto-transition chains (default: 10)                                                                                                                             |
+| `observers`          | `readonly WorkflowObserver[]` | Optional observers notified post-commit on every state entry                                                                                                                               |
+| `guardRegistry`      | `WorkflowGuardRegistry`       | Optional registry of guard implementations; required when any workflow definition references a `guard`                                                                                     |
+| `definitionStore`    | `WorkflowDefinitionStore`     | Optional store for definition snapshots; when present, `initialize()` syncs registered definitions into it and enforces the version-bump guard. Omit to leave definition versioning inert. |
+
+### initialize()
+
+Syncs registered workflow definitions into the configured `definitionStore` and enforces the version-bump guard.
+
+```ts
+async initialize(): Promise<void>
+```
+
+**Behavior:**
+
+1. For each definition in the `definitionRegistry`, computes its content hash and calls `definitionStore.ensure()`, which inserts a snapshot for that `(workflowName, version)` if one doesn't already exist, or returns the existing one untouched.
+2. Compares the returned snapshot's stored content hash against the freshly computed one. A mismatch means a known version was re-registered with different content.
+3. No-ops entirely when the runtime was constructed without a `definitionStore` — definition versioning is inert in that case.
+
+Idempotent and safe to call repeatedly or concurrently: the first call starts the sync and every caller — concurrent or later — shares that same in-flight (or already-settled) result, so definitions are synced once. A **failed** sync is not cached — the next call to `initialize()` retries from scratch rather than replaying the failure.
+
+Calling it explicitly is optional: `createInstance()`, `triggerEvent()`, and `processExpiredWorkflows()` each call `initialize()` first, so the sync also happens lazily on whichever mutating operation runs first. Calling it explicitly at boot is still recommended — the NestJS module does this automatically (see [Startup Validation](./nestjs-integration.md#startup-validation)) — because it makes a version-bump violation fail application startup instead of surfacing unpredictably on the first workflow operation.
+
+**Throws:**
+
+- `WorkflowDefinitionError` — a known `(workflowName, version)` pair's stored content hash differs from the registered definition's, meaning the definition's content changed without its `version` being bumped.
+
+**Example:**
+
+```ts
+await runtime.initialize(); // recommended at boot, before serving traffic
+```
 
 ### createInstance()
 

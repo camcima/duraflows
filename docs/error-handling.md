@@ -64,9 +64,10 @@ class WorkflowDefinitionError extends WorkflowError {
 **When thrown:**
 
 - Registering a duplicate workflow name via `InMemoryDefinitionRegistry.register()`
-- Validation failure during `register()` (e.g., invalid state references, missing target states, unknown command names)
+- Validation failure during `register()` (e.g., invalid state references, missing target states, unknown command names, a `version` that isn't a positive safe integer)
 - Compilation failure during `register()` (e.g., non-existent target/error state in finita process)
 - Looking up a workflow that doesn't exist in the registry (via `get()`)
+- `initialize()` finding that a known `(workflowName, version)` pair's stored content hash differs from the registered definition's — i.e., the definition's content changed without its `version` being bumped
 - Startup validation in NestJS: a command name referenced in a workflow definition has no registered implementation (neither via `@WorkflowCommand` decorator nor explicit `commands` array)
 
 ```ts
