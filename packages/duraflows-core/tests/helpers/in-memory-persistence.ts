@@ -14,11 +14,14 @@
 import { randomUUID } from "node:crypto";
 import { WorkflowError } from "../../src/errors/index.js";
 import type { WorkflowInstance } from "../../src/types/runtime.js";
+import type { WorkflowDefinition } from "../../src/types/definition.js";
 import type {
   WorkflowHistoryRecord,
   WorkflowHistoryStore,
   WorkflowInstanceStore,
   WorkflowTransactionRunner,
+  StoredWorkflowDefinition,
+  WorkflowDefinitionStore,
 } from "../../src/types/persistence.js";
 
 /** A store whose entire state can be captured and put back by the transaction runner. */
@@ -156,4 +159,39 @@ export function createInMemoryPersistence(): {
   const historyStore = new InMemoryHistoryStore();
   const transactionRunner = new InMemoryTransactionRunner([instanceStore, historyStore]);
   return { instanceStore, historyStore, transactionRunner };
+}
+
+/**
+ * A definition-snapshot store double. `ensure()` is insert-if-absent — a
+ * second call for the same `(workflowName, version)` returns the original row
+ * untouched, which is what lets the runtime's bump guard detect a content
+ * mismatch by comparing hashes.
+ */
+export class InMemoryDefinitionStore implements WorkflowDefinitionStore {
+  private readonly rows = new Map<string, StoredWorkflowDefinition>();
+
+  async ensure(record: {
+    workflowName: string;
+    version: number;
+    contentHash: string;
+    definitionJson: WorkflowDefinition;
+  }): Promise<StoredWorkflowDefinition> {
+    const key = `${record.workflowName}@${record.version}`;
+    const existing = this.rows.get(key);
+    if (existing) return structuredClone(existing);
+    const stored: StoredWorkflowDefinition = {
+      workflowName: record.workflowName,
+      version: record.version,
+      contentHash: record.contentHash,
+      definitionJson: structuredClone(record.definitionJson),
+      registeredAt: new Date(),
+    };
+    this.rows.set(key, stored);
+    return structuredClone(stored);
+  }
+
+  async findByNameAndVersion(workflowName: string, version: number): Promise<StoredWorkflowDefinition | null> {
+    const row = this.rows.get(`${workflowName}@${version}`);
+    return row ? structuredClone(row) : null;
+  }
 }
