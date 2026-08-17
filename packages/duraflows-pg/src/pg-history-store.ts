@@ -16,8 +16,8 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
       `INSERT INTO workflow_history (
         workflow_instance_uuid, from_state, event_name, to_state,
         outcome, error_message, rejected_by, command_results_json,
-        trigger_metadata_json
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        trigger_metadata_json, definition_version
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING uuid`,
       [
         entry.workflowInstanceUuid,
@@ -29,6 +29,7 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
         entry.rejectedBy ?? null,
         JSON.stringify(entry.commandResultsJson),
         JSON.stringify(entry.triggerMetadata ?? {}),
+        entry.definitionVersion ?? null,
       ],
     );
     // `INSERT ... RETURNING` always yields a row, so an empty result means the
@@ -66,6 +67,7 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
       errorMessage: (row.error_message as string | null) ?? undefined,
       commandResultsJson: row.command_results_json as WorkflowHistoryRecord["commandResultsJson"],
       triggerMetadata: row.trigger_metadata_json as Record<string, unknown> | undefined,
+      definitionVersion: (row.definition_version as number | null) ?? undefined,
     }));
   }
 }

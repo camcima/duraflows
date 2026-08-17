@@ -40,6 +40,23 @@ describe("generateMigrationSql", () => {
     expect(up).toContain("command_results_json");
   });
 
+  it("creates workflow_definitions table", () => {
+    const { up } = generateMigrationSql();
+    expect(up).toContain("CREATE TABLE workflow_definitions");
+    expect(up).toMatch(/workflow_name\s+text\s+NOT NULL/);
+    expect(up).toContain("content_hash");
+    expect(up).toContain("definition_json");
+    expect(up).toContain("registered_at");
+    expect(up).toContain("PRIMARY KEY (workflow_name, version)");
+  });
+
+  it("adds a nullable definition_version column to workflow_instances and workflow_history", () => {
+    const { up } = generateMigrationSql();
+    expect(up).toMatch(/definition_version\s+integer NULL/);
+    // Both tables get the column; the pattern above must match twice.
+    expect(up.match(/definition_version\s+integer NULL/g)).toHaveLength(2);
+  });
+
   it("creates indexes", () => {
     const { up } = generateMigrationSql();
     expect(up).toContain("workflow_instances_workflow_name_idx");
@@ -47,10 +64,12 @@ describe("generateMigrationSql", () => {
     expect(up).toContain("workflow_history_instance_created_idx");
   });
 
-  it("down migration drops both tables", () => {
+  it("down migration drops all three tables, definitions first", () => {
     const { down } = generateMigrationSql();
+    expect(down).toContain("DROP TABLE IF EXISTS workflow_definitions");
     expect(down).toContain("DROP TABLE IF EXISTS workflow_history");
     expect(down).toContain("DROP TABLE IF EXISTS workflow_instances");
+    expect(down.indexOf("workflow_definitions")).toBeLessThan(down.indexOf("workflow_history"));
   });
 
   it("includes guard-rejected in the outcome CHECK", () => {

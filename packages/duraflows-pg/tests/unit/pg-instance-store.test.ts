@@ -39,6 +39,7 @@ const sampleRow = {
   workflow_name: "order",
   current_state: "pending",
   version: 0,
+  definition_version: null,
   expires_at: null,
   last_transition_at: now.toISOString(),
   context_json: { status: "new" },
@@ -58,11 +59,23 @@ describe("PgWorkflowInstanceStore", () => {
       expect(pool.query).toHaveBeenCalledOnce();
       const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("INSERT INTO workflow_instances");
+      expect(sql).toContain("definition_version");
       expect(params[0]).toBe("inst-uuid");
       expect(params[1]).toBe("order");
       expect(params[2]).toBe("pending");
       expect(params[6]).toBe(JSON.stringify({ status: "new" }));
       expect(params[7]).toBe(JSON.stringify({ orderId: "ORD-1" }));
+      expect(params[10]).toBeNull(); // definitionVersion
+    });
+
+    it("inserts a non-null definitionVersion", async () => {
+      const pool = createMockPool();
+      const store = new PgWorkflowInstanceStore(pool);
+
+      await store.create({ ...sampleInstance, definitionVersion: 3 });
+
+      const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(params[10]).toBe(3);
     });
   });
 
@@ -146,13 +159,15 @@ describe("PgWorkflowInstanceStore", () => {
       const pool = createMockPool({ rows: [], rowCount: 1 }); // 1 row affected
       const store = new PgWorkflowInstanceStore(pool);
 
-      const updated = { ...sampleInstance, version: 1, currentState: "approved" };
+      const updated = { ...sampleInstance, version: 1, currentState: "approved", definitionVersion: 2 };
       await store.update(updated);
 
       const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("UPDATE workflow_instances");
-      expect(sql).toContain("AND version = $8");
-      expect(params[7]).toBe(0); // expectedVersion = version - 1
+      expect(sql).toContain("definition_version = $8");
+      expect(sql).toContain("AND version = $9");
+      expect(params[7]).toBe(2); // definitionVersion
+      expect(params[8]).toBe(0); // expectedVersion = version - 1
     });
 
     it("throws WorkflowError on optimistic lock failure", async () => {

@@ -38,6 +38,7 @@ const sampleRow = {
   error_message: null,
   command_results_json: [{ ok: true, code: "DONE" }],
   trigger_metadata_json: { source: "user", actor: "actor-uuid" },
+  definition_version: null,
 };
 
 describe("PgWorkflowHistoryStore", () => {
@@ -52,10 +53,22 @@ describe("PgWorkflowHistoryStore", () => {
       expect(pool.query).toHaveBeenCalledOnce();
       const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("INSERT INTO workflow_history");
+      expect(sql).toContain("definition_version");
       expect(params[0]).toBe("inst-uuid");
       expect(params[4]).toBe("success");
       // commandResultsJson should be JSON-stringified
       expect(params[7]).toBe(JSON.stringify([{ ok: true, code: "DONE" }]));
+      expect(params[9]).toBeNull(); // definitionVersion defaults to null when absent
+    });
+
+    it("passes the definitionVersion when provided", async () => {
+      const pool = createMockPool({ rows: [{ uuid: "new-uuid" }] });
+      const store = new PgWorkflowHistoryStore(pool);
+
+      await store.append({ ...sampleEntry, definitionVersion: 7 });
+
+      const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(params[9]).toBe(7);
     });
 
     it("passes null for optional fields when undefined", async () => {
@@ -200,6 +213,28 @@ describe("PgWorkflowHistoryStore", () => {
       const records = await store.findByInstanceUuid("inst-uuid");
 
       expect(records[0].rejectedBy).toBeUndefined();
+    });
+
+    it("maps definition_version as undefined when the column is null (legacy row)", async () => {
+      const pool = createMockPool({
+        rows: [{ ...sampleRow, definition_version: null }],
+      });
+      const store = new PgWorkflowHistoryStore(pool);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+
+      expect(records[0].definitionVersion).toBeUndefined();
+    });
+
+    it("maps a non-null definition_version", async () => {
+      const pool = createMockPool({
+        rows: [{ ...sampleRow, definition_version: 6 }],
+      });
+      const store = new PgWorkflowHistoryStore(pool);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+
+      expect(records[0].definitionVersion).toBe(6);
     });
 
     it("maps error_message as undefined (not null) when the column is null", async () => {

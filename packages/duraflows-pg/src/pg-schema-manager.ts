@@ -23,6 +23,7 @@ CREATE TABLE workflow_instances (
   workflow_name       text NOT NULL,
   current_state       text NOT NULL,
   version             integer NOT NULL DEFAULT 0,
+  definition_version  integer NULL,
   expires_at          timestamptz NULL,
   last_transition_at  timestamptz NOT NULL DEFAULT now(),
   context_json        jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -50,13 +51,24 @@ CREATE TABLE workflow_history (
   rejected_by             text,
   command_results_json    jsonb NOT NULL DEFAULT '[]'::jsonb,
   trigger_metadata_json   jsonb NOT NULL DEFAULT '{}'::jsonb,
+  definition_version      integer NULL,
   created_at              timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX workflow_history_instance_created_idx
-  ON workflow_history (workflow_instance_uuid, created_at DESC);`;
+  ON workflow_history (workflow_instance_uuid, created_at DESC);
 
-  const down = `DROP TABLE IF EXISTS workflow_history;
+CREATE TABLE workflow_definitions (
+  workflow_name    text NOT NULL,
+  version          integer NOT NULL,
+  content_hash     text NOT NULL,
+  definition_json  jsonb NOT NULL,
+  registered_at    timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (workflow_name, version)
+);`;
+
+  const down = `DROP TABLE IF EXISTS workflow_definitions;
+DROP TABLE IF EXISTS workflow_history;
 DROP TABLE IF EXISTS workflow_instances;`;
 
   return { up, down };

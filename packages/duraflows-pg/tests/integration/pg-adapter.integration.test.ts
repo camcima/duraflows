@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
-import { runInstanceStoreConformance } from "@duraflows/core/testing";
+import { runInstanceStoreConformance, runDefinitionStoreConformance } from "@duraflows/core/testing";
 import type { WorkflowInstance, WorkflowHistoryRecord } from "@duraflows/core";
 import {
   PgWorkflowInstanceStore,
@@ -10,6 +10,7 @@ import {
   PgTransactionContext,
   generateMigrationSql,
 } from "@duraflows/pg";
+import { PgWorkflowDefinitionStore } from "../../src/pg-definition-store.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -43,6 +44,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
   const transactionRunner = new PgTransactionRunner(pool);
   const instanceStore = new PgWorkflowInstanceStore(pool);
   const historyStore = new PgWorkflowHistoryStore(pool);
+  const definitionStore = new PgWorkflowDefinitionStore(pool);
 
   const makeInstance = (overrides?: Partial<WorkflowInstance>): WorkflowInstance => ({
     uuid: randomUUID(),
@@ -67,7 +69,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     const client = await pool.connect();
     try {
       await client.query("CREATE SCHEMA IF NOT EXISTS duraflows_pg_it");
-      await client.query("DROP TABLE IF EXISTS workflow_history, workflow_instances CASCADE");
+      await client.query("DROP TABLE IF EXISTS workflow_history, workflow_instances, workflow_definitions CASCADE");
       const { up } = generateMigrationSql();
       await client.query(up);
     } finally {
@@ -95,11 +97,21 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     }),
   });
 
+  runDefinitionStoreConformance("pg (real PostgreSQL)", {
+    setup: async () => ({
+      store: definitionStore,
+      teardown: async () => {
+        await pool.query("TRUNCATE workflow_definitions");
+      },
+    }),
+  });
+
   describe("pg adapter integration", () => {
     // Cleanup runs in afterEach (not at the end of each test body) so a
     // failing assertion cannot leak rows into the next test.
     afterEach(async () => {
       await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
+      await pool.query("TRUNCATE workflow_definitions");
     });
 
     it("findExpired executes against a real database and claims only expired rows", async () => {
@@ -163,6 +175,35 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       expect(guardRow.errorMessage).toBeUndefined(); // NULL must map to undefined, not null
       const successRow = records.find((r) => r.outcome === "success")!;
       expect(successRow.rejectedBy).toBeUndefined();
+    });
+
+    it("round-trips instance definitionVersion through create, update and findByUuid", async () => {
+      const instance = makeInstance({ definitionVersion: 4 });
+      await transactionRunner.runInTransaction(() => instanceStore.create(instance));
+      let fetched = await instanceStore.findByUuid(instance.uuid);
+      expect(fetched!.definitionVersion).toBe(4);
+
+      fetched!.definitionVersion = 5;
+      fetched!.version++;
+      await transactionRunner.runInTransaction(() => instanceStore.update(fetched!));
+      fetched = await instanceStore.findByUuid(instance.uuid);
+      expect(fetched!.definitionVersion).toBe(5);
+    });
+
+    it("round-trips history definitionVersion", async () => {
+      const instance = makeInstance();
+      await transactionRunner.runInTransaction(() => instanceStore.create(instance));
+      await historyStore.append({
+        workflowInstanceUuid: instance.uuid,
+        fromState: "a",
+        eventName: "Go",
+        toState: "b",
+        outcome: "success",
+        commandResultsJson: [],
+        definitionVersion: 3,
+      });
+      const [record] = await historyStore.findByInstanceUuid(instance.uuid);
+      expect(record.definitionVersion).toBe(3);
     });
   });
 
