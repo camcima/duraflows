@@ -866,6 +866,9 @@ describe("WorkflowRuntime onEnter integration", () => {
     const final = await instanceStore2.findByUuid(instance.uuid);
     expect(final!.currentState).toBe("idle");
     expect(final!.expiresAt).toBeNull();
+    // The no-timeout branch still stamps definitionVersion on the update it performs
+    // (the definition omits `version`, so it defaults to 1).
+    expect(final!.definitionVersion).toBe(1);
   });
 
   it("can trigger an event from a state reachable only via onEnter.errorState", async () => {

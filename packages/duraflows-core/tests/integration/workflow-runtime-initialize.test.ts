@@ -77,6 +77,14 @@ describe("WorkflowRuntime.initialize", () => {
     expect(ensureSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("is idempotent — concurrent callers share one sync", async () => {
+    const store = new InMemoryDefinitionStore();
+    const ensureSpy = vi.spyOn(store, "ensure");
+    const runtime = makeRuntime(orderV2, store);
+    await Promise.all([runtime.initialize(), runtime.initialize(), runtime.initialize()]);
+    expect(ensureSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("is a no-op without a definition store", async () => {
     await expect(makeRuntime(orderV2, undefined).initialize()).resolves.toBeUndefined();
   });
