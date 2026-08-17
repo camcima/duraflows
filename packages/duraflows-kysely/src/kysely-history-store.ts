@@ -25,6 +25,7 @@ export class KyselyWorkflowHistoryStore implements WorkflowHistoryStore {
         rejected_by: entry.rejectedBy ?? null,
         command_results_json: JSON.stringify(entry.commandResultsJson),
         trigger_metadata_json: JSON.stringify(entry.triggerMetadata ?? {}),
+        definition_version: entry.definitionVersion ?? null,
       })
       .returning("uuid")
       // `INSERT ... RETURNING` always yields a row, so an empty result means the
@@ -65,6 +66,7 @@ export class KyselyWorkflowHistoryStore implements WorkflowHistoryStore {
       rejectedBy: row.rejected_by ?? undefined,
       commandResultsJson: row.command_results_json as unknown as WorkflowHistoryRecord["commandResultsJson"],
       triggerMetadata: row.trigger_metadata_json as Record<string, unknown> | undefined,
+      definitionVersion: row.definition_version ?? undefined,
     }));
   }
 }

@@ -26,6 +26,7 @@ const sampleRow = {
   error_message: null,
   command_results_json: [{ ok: true, code: "DONE" }],
   trigger_metadata_json: { source: "user", actor: "actor-uuid" },
+  definition_version: null,
 };
 
 function createMockDb(queryResult: Record<string, unknown>[] = []) {
@@ -81,10 +82,23 @@ describe("KyselyWorkflowHistoryStore", () => {
       expect(row.workflow_instance_uuid).toBe("inst-uuid");
       expect(row.outcome).toBe("success");
       expect(row.command_results_json).toBe(JSON.stringify([{ ok: true, code: "DONE" }]));
+      expect(row.definition_version).toBeNull(); // sampleEntry has no definitionVersion
 
       const returningCall = calls.find((c) => c.method === "returning");
       expect(returningCall).toBeDefined();
       expect(returningCall!.args[0]).toBe("uuid");
+    });
+
+    it("passes the definitionVersion when provided", async () => {
+      const { db, calls, executeTakeFirstOrThrowMock } = createMockDb();
+      executeTakeFirstOrThrowMock.mockResolvedValue({ uuid: "new-uuid" });
+      const store = new KyselyWorkflowHistoryStore(db);
+
+      await store.append({ ...sampleEntry, definitionVersion: 7 });
+
+      const valuesCall = calls.find((c) => c.method === "values");
+      const row = valuesCall!.args[0] as Record<string, unknown>;
+      expect(row.definition_version).toBe(7);
     });
 
     it("passes null for optional fields when undefined", async () => {
@@ -210,6 +224,22 @@ describe("KyselyWorkflowHistoryStore", () => {
 
       const records = await store.findByInstanceUuid("inst-uuid");
       expect(records[0].rejectedBy).toBeUndefined();
+    });
+
+    it("maps definition_version as undefined when the column is null (legacy row)", async () => {
+      const { db } = createMockDb([{ ...sampleRow, definition_version: null }]);
+      const store = new KyselyWorkflowHistoryStore(db);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+      expect(records[0].definitionVersion).toBeUndefined();
+    });
+
+    it("maps a non-null definition_version", async () => {
+      const { db } = createMockDb([{ ...sampleRow, definition_version: 6 }]);
+      const store = new KyselyWorkflowHistoryStore(db);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+      expect(records[0].definitionVersion).toBe(6);
     });
   });
 });

@@ -2,12 +2,13 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Kysely, PostgresDialect, sql } from "kysely";
 import { Pool } from "pg";
-import { runInstanceStoreConformance } from "@duraflows/core/testing";
+import { runInstanceStoreConformance, runDefinitionStoreConformance } from "@duraflows/core/testing";
 import type { WorkflowInstance } from "@duraflows/core";
 import { generateMigrationSql } from "@duraflows/pg";
 import {
   KyselyWorkflowInstanceStore,
   KyselyWorkflowHistoryStore,
+  KyselyWorkflowDefinitionStore,
   KyselyTransactionRunner,
   KyselyTransactionContext,
   type WorkflowDatabase,
@@ -47,6 +48,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
   const transactionRunner = new KyselyTransactionRunner(db);
   const instanceStore = new KyselyWorkflowInstanceStore(db);
   const historyStore = new KyselyWorkflowHistoryStore(db);
+  const definitionStore = new KyselyWorkflowDefinitionStore(db);
 
   const makeInstance = (overrides?: Partial<WorkflowInstance>): WorkflowInstance => ({
     uuid: randomUUID(),
@@ -72,7 +74,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     const client = await pool.connect();
     try {
       await client.query("CREATE SCHEMA IF NOT EXISTS kysely_it");
-      await client.query("DROP TABLE IF EXISTS workflow_history, workflow_instances CASCADE");
+      await client.query("DROP TABLE IF EXISTS workflow_history, workflow_instances, workflow_definitions CASCADE");
       const { up } = generateMigrationSql();
       await client.query(up);
     } finally {
@@ -100,11 +102,21 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     }),
   });
 
+  runDefinitionStoreConformance("kysely (real PostgreSQL)", {
+    setup: async () => ({
+      store: definitionStore,
+      teardown: async () => {
+        await sql`TRUNCATE workflow_definitions`.execute(db);
+      },
+    }),
+  });
+
   describe("kysely adapter integration", () => {
     // Cleanup runs in afterEach (not at the end of each test body) so a
     // failing assertion cannot leak rows into the next test.
     afterEach(async () => {
       await sql`TRUNCATE workflow_history, workflow_instances CASCADE`.execute(db);
+      await sql`TRUNCATE workflow_definitions`.execute(db);
     });
 
     it("findExpired executes and claims only expired rows", async () => {
@@ -136,6 +148,37 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       const [record] = await historyStore.findByInstanceUuid(instance.uuid);
       expect(record.rejectedBy).toBeUndefined();
       expect(record.errorMessage).toBeUndefined();
+    });
+
+    it("round-trips instance definitionVersion through create, update and findByUuid", async () => {
+      const instance = makeInstance({ definitionVersion: 4 });
+      await transactionRunner.runInTransaction(() => instanceStore.create(instance));
+      let fetched = await instanceStore.findByUuid(instance.uuid);
+      expect(fetched!.definitionVersion).toBe(4);
+
+      fetched!.definitionVersion = 5;
+      fetched!.version++;
+      await transactionRunner.runInTransaction(() => instanceStore.update(fetched!));
+      fetched = await instanceStore.findByUuid(instance.uuid);
+      expect(fetched!.definitionVersion).toBe(5);
+    });
+
+    it("round-trips history definitionVersion", async () => {
+      const instance = makeInstance();
+      await transactionRunner.runInTransaction(() => instanceStore.create(instance));
+      await transactionRunner.runInTransaction(() =>
+        historyStore.append({
+          workflowInstanceUuid: instance.uuid,
+          fromState: "a",
+          eventName: "Go",
+          toState: "b",
+          outcome: "success",
+          commandResultsJson: [],
+          definitionVersion: 3,
+        }),
+      );
+      const [record] = await historyStore.findByInstanceUuid(instance.uuid);
+      expect(record.definitionVersion).toBe(3);
     });
   });
 

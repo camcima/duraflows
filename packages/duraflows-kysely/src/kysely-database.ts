@@ -44,7 +44,16 @@ export interface WorkflowHistoryTable {
   created_at: Generated<Date>;
 }
 
+export interface WorkflowDefinitionsTable {
+  workflow_name: string;
+  version: number;
+  content_hash: string;
+  definition_json: JsonObjectColumn;
+  registered_at: Generated<Date>;
+}
+
 export interface WorkflowDatabase {
   workflow_instances: WorkflowInstancesTable;
   workflow_history: WorkflowHistoryTable;
+  workflow_definitions: WorkflowDefinitionsTable;
 }
