@@ -64,9 +64,9 @@
   },
   "devDependencies": {
     "@duraflows/core": "workspace:*",
-    "@nestjs/common": "^11.1.28",
-    "@nestjs/core": "^11.1.28",
-    "@nestjs/testing": "^11.1.28",
+    "@nestjs/common": "^11.1.29",
+    "@nestjs/core": "^11.1.29",
+    "@nestjs/testing": "^11.1.29",
     "reflect-metadata": "^0.2.2"
   }
 }
