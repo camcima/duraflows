@@ -285,7 +285,7 @@ This is an implementation detail -- you typically don't interact with it directl
 
 ## Writing a Custom Adapter
 
-To use a different database library, implement the three interfaces and pass them as the `persistence` option.
+To use a different database library, implement the three required interfaces and pass them as the `persistence` option. Optionally implement the fourth, [`WorkflowDefinitionStore`](#workflowdefinitionstore), to support definition versioning -- it's an optional field on `WorkflowPersistenceProvider`, so an adapter that omits it still compiles and runs, it just leaves definition versioning inert.
 
 ### Example: Prisma Adapter
 
@@ -296,9 +296,12 @@ import type {
   WorkflowInstanceStore,
   WorkflowHistoryStore,
   WorkflowTransactionRunner,
+  WorkflowDefinitionStore,
   WorkflowPersistenceProvider,
   WorkflowInstance,
   WorkflowHistoryRecord,
+  StoredWorkflowDefinition,
+  WorkflowDefinition,
 } from "@duraflows/core";
 
 // Transaction context for Prisma
@@ -417,12 +420,23 @@ class PrismaWorkflowHistoryStore implements WorkflowHistoryStore {
   // ... implement append() and findByInstanceUuid()
 }
 
+// Definition store (optional -- required only to support definition versioning;
+// omit it from the returned provider below and the adapter still compiles and runs).
+class PrismaWorkflowDefinitionStore implements WorkflowDefinitionStore {
+  constructor(private readonly prisma: PrismaClient) {}
+  // ... implement ensure() as insert-if-absent (e.g. Prisma's `createMany` with
+  // `skipDuplicates`, or `$queryRaw` with `ON CONFLICT DO NOTHING`) followed by a
+  // re-select -- it must never overwrite an existing (workflowName, version) row --
+  // and findByNameAndVersion() as a plain lookup returning null when absent.
+}
+
 // Convenience function
 export function prismaWorkflowProviders(prisma: PrismaClient): WorkflowPersistenceProvider {
   return {
     instanceStore: new PrismaWorkflowInstanceStore(prisma),
     historyStore: new PrismaWorkflowHistoryStore(prisma),
     transactionRunner: new PrismaTransactionRunner(prisma),
+    definitionStore: new PrismaWorkflowDefinitionStore(prisma), // optional
   };
 }
 ```
