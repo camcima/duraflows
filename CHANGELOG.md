@@ -1,5 +1,29 @@
 # Changelog
 
+## [5.0.0](https://github.com/camcima/duraflows/compare/v4.1.0...v5.0.0) (2026-08-18)
+
+### ⚠ BREAKING CHANGES
+
+* **core:** `WorkflowInstance` gains a required `definitionVersion: number | null` property. Custom persistence adapters that construct `WorkflowInstance` must map it; adapters using the bundled `pgWorkflowProviders()` / `kyselyWorkflowProviders()` need no change.
+* **kysely:** `WorkflowDatabase` gains a required `workflow_definitions` member, and both `WorkflowInstancesTable` and `WorkflowHistoryTable` gain a required `definition_version` column. Consumer database types written as `interface AppDb extends WorkflowDatabase` are unaffected; hand-listed database types must add them.
+* **pg:** the database schema gains a `workflow_definitions` table and a nullable `definition_version` column on `workflow_instances` and `workflow_history`. Apply migration `004_definition_versions.sql` **before** deploying this release — the runtime writes these on every operation, and under NestJS an un-migrated database fails application startup.
+
+### Features
+
+* definition version stamping (workflow versioning phase 1) ([#81](https://github.com/camcima/duraflows/issues/81)) ([90226ab](https://github.com/camcima/duraflows/commit/90226ab0a61ac053524d955a4f2dbff18f0a5212))
+* **core:** add `WorkflowDefinition.version` (a positive integer, defaulting to `1`) and a canonical content hash that excludes it, giving the invariant *content changed ⇒ version must be bumped*
+* **core:** add `WorkflowRuntime.initialize()`, which snapshots every registered definition into `workflow_definitions` and throws `WorkflowDefinitionError` when a known version's stored content hash no longer matches. Idempotent, a no-op without a definition store, and invoked lazily by the first mutating operation
+* **core:** stamp `definitionVersion` on instances at creation and on every transition, and on each history row with the version that governed it. Rows predating this release read as `null` and adopt the current version on their next transition
+* **core:** add the `WorkflowDefinitionStore` persistence interface (optional on `WorkflowPersistenceProvider`) plus a `runDefinitionStoreConformance` suite in `@duraflows/core/testing`
+* **core:** populate `WorkflowHistoryRecord.createdAt` on reads — previously the column was fetched and sorted on, then discarded before returning
+* **pg,kysely:** implement `WorkflowDefinitionStore` and persist `definition_version` on both stores
+* **nestjs:** call `runtime.initialize()` during module init, so a definition changed without a version bump fails application startup rather than the first workflow operation
+
+### Notes
+
+* Resolution behaviour is unchanged: every instance still executes the **currently registered** definition. The version stamp is provenance only — version-pinned execution is planned for a later release.
+* Reading a multi-hop transition's history rows in the order they occurred requires `generateMigrationSql({ uuidStrategy: "uuidv7" })` (PostgreSQL 18+). See [docs/persistence.md](./docs/persistence.md).
+
 ## [4.1.0](https://github.com/camcima/duraflows/compare/v4.0.1...v4.1.0) (2026-08-15)
 
 ### Features
