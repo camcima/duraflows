@@ -431,11 +431,11 @@ WorkflowModule.forRootAsync<[ConfigService, AuditService]>({
 
 **v1.0.0 BREAKING:** `WorkflowModuleAsyncOptions.observers` was removed from the top level. Move existing `observers: [...]` into the object returned by `useFactory`. The synchronous `forRoot` is unchanged — `observers` remains a top-level option there.
 
-**Observer DI scope gotcha:** the `forRootAsync` factory can only inject providers that are global, declared in this module's `imports`, or exported by modules listed there. If your observer is a NestJS provider in the consuming module, bundle it in its own module:
+**Provider DI scope gotcha:** the `forRootAsync` factory can only inject providers that are global, declared in this module's `imports`, or exported by modules listed there. This applies to anything passed through `inject` — observers and guards included. If your observer or guard is a NestJS provider in the consuming module, bundle it in its own module:
 
 ```ts
 @Module({ providers: [OrderAuditObserver], exports: [OrderAuditObserver] })
-class OrderObserversModule {}
+class OrderObserversModule {} // same fix applies to a DI-backed guard
 
 WorkflowModule.forRootAsync<[pg.Pool, OrderAuditObserver]>({
   imports: [OrderObserversModule],
