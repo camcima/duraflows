@@ -70,8 +70,11 @@ interface WorkflowHistoryRecord {
   commandResultsJson: CommandResult[];
   triggerMetadata?: Record<string, unknown>;
   definitionVersion?: number | null; // the definition version that governed this transition
+  createdAt?: Date; // when the store recorded this transition; ignored on write
 }
 ```
+
+`createdAt` is populated by the store on read and ignored on `append()` -- the database assigns it. **Caveat:** every history row written inside the same database transaction (an event plus its entire `onEnter` chain) shares an identical `createdAt`, and stores tiebreak same-timestamp rows on a random UUID, so this field tells you roughly _when_ a transition happened but must not be used to reconstruct the order of steps within one multi-hop transition.
 
 ### WorkflowTransactionRunner
 

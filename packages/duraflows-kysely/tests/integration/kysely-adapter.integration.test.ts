@@ -180,6 +180,31 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       const [record] = await historyStore.findByInstanceUuid(instance.uuid);
       expect(record.definitionVersion).toBe(3);
     });
+
+    it("round-trips history createdAt as a Date assigned by the database", async () => {
+      const instance = makeInstance();
+      await transactionRunner.runInTransaction(() => instanceStore.create(instance));
+
+      const before = Date.now();
+      await transactionRunner.runInTransaction(() =>
+        historyStore.append({
+          workflowInstanceUuid: instance.uuid,
+          fromState: "a",
+          eventName: "Go",
+          toState: "b",
+          outcome: "success",
+          commandResultsJson: [],
+        }),
+      );
+      const after = Date.now();
+
+      const [record] = await historyStore.findByInstanceUuid(instance.uuid);
+      expect(record.createdAt).toBeInstanceOf(Date);
+      // The database assigns created_at via `now()`, so it must fall within the
+      // wall-clock window the append() call actually executed in.
+      expect(record.createdAt!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+      expect(record.createdAt!.getTime()).toBeLessThanOrEqual(after + 1000);
+    });
   });
 
   describe("kysely transaction timeouts", () => {

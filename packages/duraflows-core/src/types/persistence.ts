@@ -94,6 +94,17 @@ export interface WorkflowHistoryRecord {
   triggerMetadata?: Record<string, unknown>;
   /** The definition version that governed this transition. Absent/null on legacy rows. */
   definitionVersion?: number | null;
+  /**
+   * When this transition was recorded. Populated by the store on read;
+   * ignored on write — the database assigns it.
+   *
+   * Caveat: every history row written inside the same database transaction
+   * (an event plus its entire `onEnter` chain) shares an identical
+   * `createdAt`, and stores tiebreak ties with a random UUID, so this field
+   * must not be used to reconstruct the order of steps within one multi-hop
+   * transition — only to know roughly when the transition happened.
+   */
+  createdAt?: Date;
 }
 
 export interface WorkflowTransactionRunner {

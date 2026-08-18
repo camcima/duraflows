@@ -27,6 +27,7 @@ const sampleRow = {
   command_results_json: [{ ok: true, code: "DONE" }],
   trigger_metadata_json: { source: "user", actor: "actor-uuid" },
   definition_version: null,
+  created_at: new Date("2026-01-01T12:00:00.000Z"),
 };
 
 function createMockDb(queryResult: Record<string, unknown>[] = []) {
@@ -177,6 +178,7 @@ describe("KyselyWorkflowHistoryStore", () => {
       expect(records[0].fromState).toBe("pending");
       expect(records[0].eventName).toBe("Approve");
       expect(records[0].outcome).toBe("success");
+      expect(records[0].createdAt).toEqual(new Date("2026-01-01T12:00:00.000Z"));
 
       const limitCall = calls.find((c) => c.method === "limit");
       expect(limitCall!.args[0]).toBe(50);
@@ -240,6 +242,15 @@ describe("KyselyWorkflowHistoryStore", () => {
 
       const records = await store.findByInstanceUuid("inst-uuid");
       expect(records[0].definitionVersion).toBe(6);
+    });
+
+    it("maps created_at as a Date instance", async () => {
+      const { db } = createMockDb([{ ...sampleRow, created_at: new Date("2026-03-15T08:30:00.000Z") }]);
+      const store = new KyselyWorkflowHistoryStore(db);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+      expect(records[0].createdAt).toBeInstanceOf(Date);
+      expect(records[0].createdAt).toEqual(new Date("2026-03-15T08:30:00.000Z"));
     });
   });
 });

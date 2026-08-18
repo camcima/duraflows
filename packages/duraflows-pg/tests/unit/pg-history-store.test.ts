@@ -39,6 +39,7 @@ const sampleRow = {
   command_results_json: [{ ok: true, code: "DONE" }],
   trigger_metadata_json: { source: "user", actor: "actor-uuid" },
   definition_version: null,
+  created_at: "2026-01-01T12:00:00.000Z",
 };
 
 describe("PgWorkflowHistoryStore", () => {
@@ -158,6 +159,7 @@ describe("PgWorkflowHistoryStore", () => {
       expect(records[0].fromState).toBe("pending");
       expect(records[0].eventName).toBe("Approve");
       expect(records[0].outcome).toBe("success");
+      expect(records[0].createdAt).toEqual(new Date("2026-01-01T12:00:00.000Z"));
 
       const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1];
       expect(params[1]).toBe(50); // default limit
@@ -235,6 +237,18 @@ describe("PgWorkflowHistoryStore", () => {
       const records = await store.findByInstanceUuid("inst-uuid");
 
       expect(records[0].definitionVersion).toBe(6);
+    });
+
+    it("maps created_at into a Date instance", async () => {
+      const pool = createMockPool({
+        rows: [{ ...sampleRow, created_at: "2026-03-15T08:30:00.000Z" }],
+      });
+      const store = new PgWorkflowHistoryStore(pool);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+
+      expect(records[0].createdAt).toBeInstanceOf(Date);
+      expect(records[0].createdAt).toEqual(new Date("2026-03-15T08:30:00.000Z"));
     });
 
     it("maps error_message as undefined (not null) when the column is null", async () => {

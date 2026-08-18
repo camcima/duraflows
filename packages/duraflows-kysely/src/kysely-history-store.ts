@@ -67,6 +67,7 @@ export class KyselyWorkflowHistoryStore implements WorkflowHistoryStore {
       commandResultsJson: row.command_results_json as unknown as WorkflowHistoryRecord["commandResultsJson"],
       triggerMetadata: row.trigger_metadata_json as Record<string, unknown> | undefined,
       definitionVersion: row.definition_version ?? undefined,
+      createdAt: row.created_at,
     }));
   }
 }

@@ -286,22 +286,25 @@ context: row.context_json as Record<string, unknown>,
 
 ## WorkflowHistoryRecord Fields
 
-| Field                  | Type                                         | Storage Notes                                                                                                                                                          |
-| ---------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workflowInstanceUuid` | `string`                                     | FK to workflow_instances                                                                                                                                               |
-| `fromState`            | `string \| null`                             | Null for creation records                                                                                                                                              |
-| `eventName`            | `string`                                     | "onEnter" for auto-transitions                                                                                                                                         |
-| `toState`              | `string`                                     | Target state (== `fromState` for guard-rejected and command-only events)                                                                                               |
-| `outcome`              | `"success" \| "failure" \| "guard-rejected"` | Constrained string. **(v1.1.0)** `"guard-rejected"` was added; CHECK constraint must accept it.                                                                        |
-| `errorMessage`         | `string \| undefined`                        | Optional. Map DB `NULL` → `undefined` on read.                                                                                                                         |
-| `rejectedBy`           | `string \| undefined`                        | **(v1.1.0)** declared `eventDef.guard.name` for guard-rejected rows; `undefined` otherwise. Map `NULL → undefined` on read, the same convention as `errorMessage`.     |
-| `commandResultsJson`   | `CommandResult[]`                            | JSON array. Empty `[]` for guard-rejected rows. (Field name on the public type ends in `Json` — distinct from the runtime's `WorkflowExecutionResult.commandResults`.) |
-| `triggerMetadata`      | `Record<string, unknown> \| undefined`       | JSON object. Optional on the public type — map DB `NULL` → `undefined` on read.                                                                                        |
-| `definitionVersion`    | `number \| null \| undefined`                | The definition version that governed this transition. Optional on the public type — map DB `NULL` → `undefined` on read, the same convention as `errorMessage`.        |
+| Field                  | Type                                         | Storage Notes                                                                                                                                                                                                                                                           |
+| ---------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflowInstanceUuid` | `string`                                     | FK to workflow_instances                                                                                                                                                                                                                                                |
+| `fromState`            | `string \| null`                             | Null for creation records                                                                                                                                                                                                                                               |
+| `eventName`            | `string`                                     | "onEnter" for auto-transitions                                                                                                                                                                                                                                          |
+| `toState`              | `string`                                     | Target state (== `fromState` for guard-rejected and command-only events)                                                                                                                                                                                                |
+| `outcome`              | `"success" \| "failure" \| "guard-rejected"` | Constrained string. **(v1.1.0)** `"guard-rejected"` was added; CHECK constraint must accept it.                                                                                                                                                                         |
+| `errorMessage`         | `string \| undefined`                        | Optional. Map DB `NULL` → `undefined` on read.                                                                                                                                                                                                                          |
+| `rejectedBy`           | `string \| undefined`                        | **(v1.1.0)** declared `eventDef.guard.name` for guard-rejected rows; `undefined` otherwise. Map `NULL → undefined` on read, the same convention as `errorMessage`.                                                                                                      |
+| `commandResultsJson`   | `CommandResult[]`                            | JSON array. Empty `[]` for guard-rejected rows. (Field name on the public type ends in `Json` — distinct from the runtime's `WorkflowExecutionResult.commandResults`.)                                                                                                  |
+| `triggerMetadata`      | `Record<string, unknown> \| undefined`       | JSON object. Optional on the public type — map DB `NULL` → `undefined` on read.                                                                                                                                                                                         |
+| `definitionVersion`    | `number \| null \| undefined`                | The definition version that governed this transition. Optional on the public type — map DB `NULL` → `undefined` on read, the same convention as `errorMessage`.                                                                                                         |
+| `createdAt`            | `Date \| undefined`                          | **(v5.0.0)** When the store recorded this transition. Populated on read from the `created_at` column; ignored on write (`append()` never sends it — the database assigns it via its column default). Optional on the public type so pre-v5.0.0 adapters keep compiling. |
 
 `append()` must return a string UUID for the created record.
 
 `findByInstanceUuid()` should default `limit` to 50 and `offset` to 0 when not provided. Order by `created_at DESC`.
+
+`createdAt` caveat: every history row written inside the same database transaction (an event plus its entire `onEnter` chain) shares an identical `created_at`, and ties are broken on a random UUID, so `createdAt` must never be used to reconstruct the order of steps within one multi-hop transition — only to know roughly when the transition happened.
 
 ---
 
@@ -486,6 +489,7 @@ WorkflowModule.forRootAsync({
 - [ ] **(v5.0.0)** `workflow_definitions` table exists with primary key `(workflow_name, version)`
 - [ ] **(v5.0.0)** `definitionStore` wired into your `WorkflowPersistenceProvider` — it's optional (an adapter that omits it still compiles), but versioning stays inert without it
 - [ ] **(v5.0.0)** `runDefinitionStoreConformance` from `@duraflows/core/testing` passes against your `WorkflowDefinitionStore`
+- [ ] **(v5.0.0)** `findByInstanceUuid()` maps `created_at` into `WorkflowHistoryRecord.createdAt` (a `Date`); `append()` does NOT send it — the field is optional, so a forgotten mapping compiles fine and silently returns `undefined` for every caller (there's no history-store conformance suite to catch this)
 
 ---
 

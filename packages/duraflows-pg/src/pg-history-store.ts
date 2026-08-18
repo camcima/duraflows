@@ -68,6 +68,7 @@ export class PgWorkflowHistoryStore implements WorkflowHistoryStore {
       commandResultsJson: row.command_results_json as WorkflowHistoryRecord["commandResultsJson"],
       triggerMetadata: row.trigger_metadata_json as Record<string, unknown> | undefined,
       definitionVersion: (row.definition_version as number | null) ?? undefined,
+      createdAt: new Date(row.created_at as string),
     }));
   }
 }

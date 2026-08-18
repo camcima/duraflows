@@ -352,9 +352,11 @@ async getHistory(
 ```ts
 const history = await runtime.getHistory(instance.uuid, { limit: 50 });
 for (const record of history) {
-  console.log(`${record.fromState} → ${record.toState} via ${record.eventName}`);
+  console.log(`${record.fromState} → ${record.toState} via ${record.eventName} at ${record.createdAt}`);
 }
 ```
+
+Each record's `createdAt` is when the store recorded that transition (populated on read; adapters that predate this field return `undefined`). **Caveat:** every history row written inside the same database transaction -- an event plus its entire `onEnter` chain -- shares an identical `createdAt`, so it must not be used to reconstruct the order of steps within a single multi-hop transition, only roughly when the transition happened.
 
 ### getHandle()
 
