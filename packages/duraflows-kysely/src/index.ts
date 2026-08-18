@@ -3,6 +3,7 @@ import type { WorkflowPersistenceProvider } from "@duraflows/core";
 import type { WorkflowDatabase } from "./kysely-database.js";
 import { KyselyWorkflowInstanceStore } from "./kysely-instance-store.js";
 import { KyselyWorkflowHistoryStore } from "./kysely-history-store.js";
+import { KyselyWorkflowDefinitionStore } from "./kysely-definition-store.js";
 import { KyselyTransactionRunner, type KyselyTransactionRunnerOptions } from "./kysely-transaction-runner.js";
 import { KyselyTransactionContext } from "./kysely-transaction-context.js";
 
@@ -11,7 +12,13 @@ export { KyselyTransactionRunner } from "./kysely-transaction-runner.js";
 export type { KyselyTransactionRunnerOptions } from "./kysely-transaction-runner.js";
 export { KyselyWorkflowInstanceStore } from "./kysely-instance-store.js";
 export { KyselyWorkflowHistoryStore } from "./kysely-history-store.js";
-export type { WorkflowDatabase, WorkflowInstancesTable, WorkflowHistoryTable } from "./kysely-database.js";
+export { KyselyWorkflowDefinitionStore } from "./kysely-definition-store.js";
+export type {
+  WorkflowDatabase,
+  WorkflowInstancesTable,
+  WorkflowHistoryTable,
+  WorkflowDefinitionsTable,
+} from "./kysely-database.js";
 
 /**
  * Options accepted by {@link kyselyWorkflowProviders}. Every field is optional
@@ -35,7 +42,8 @@ export function kyselyWorkflowProviders<DB extends WorkflowDatabase>(
   const transactionRunner = new KyselyTransactionRunner(narrowed, options);
   const instanceStore = new KyselyWorkflowInstanceStore(narrowed);
   const historyStore = new KyselyWorkflowHistoryStore(narrowed);
-  return { instanceStore, historyStore, transactionRunner };
+  const definitionStore = new KyselyWorkflowDefinitionStore(narrowed);
+  return { instanceStore, historyStore, transactionRunner, definitionStore };
 }
 
 /**
@@ -59,5 +67,6 @@ export function kyselyWorkflowProvidersFromTransaction<DB extends WorkflowDataba
   };
   const instanceStore = new KyselyWorkflowInstanceStore(narrowed);
   const historyStore = new KyselyWorkflowHistoryStore(narrowed);
-  return { instanceStore, historyStore, transactionRunner };
+  const definitionStore = new KyselyWorkflowDefinitionStore(narrowed);
+  return { instanceStore, historyStore, transactionRunner, definitionStore };
 }

@@ -40,6 +40,7 @@ export function runInstanceStoreConformance(label: string, harness: InstanceStor
       workflowName: "test-workflow",
       currentState: "initial",
       version: 0,
+      definitionVersion: null,
       expiresAt: null,
       lastTransitionAt: new Date("2026-01-01T00:00:00Z"),
       context: {},
@@ -187,6 +188,31 @@ export function runInstanceStoreConformance(label: string, harness: InstanceStor
 
         const found = await transactionRunner.runInTransaction(() => store.findExpired(3, now));
         expect(found.length).toBeLessThanOrEqual(3);
+      } finally {
+        await teardown();
+      }
+    });
+
+    it("round-trips definitionVersion through create, update and findByUuid", async () => {
+      const { store, transactionRunner, teardown } = await harness.setup();
+      try {
+        const instance = makeInstance({ definitionVersion: 4 });
+        await transactionRunner.runInTransaction(() => store.create(instance));
+        let fetched = await store.findByUuid(instance.uuid);
+        expect(fetched!.definitionVersion).toBe(4);
+
+        fetched!.definitionVersion = 5;
+        fetched!.version++;
+        await transactionRunner.runInTransaction(() => store.update(fetched!));
+        fetched = await store.findByUuid(instance.uuid);
+        expect(fetched!.definitionVersion).toBe(5);
+
+        const legacy = makeInstance({
+          uuid: "00000000-0000-0000-0000-000000000002",
+          definitionVersion: null,
+        });
+        await transactionRunner.runInTransaction(() => store.create(legacy));
+        expect((await store.findByUuid(legacy.uuid))!.definitionVersion).toBeNull();
       } finally {
         await teardown();
       }

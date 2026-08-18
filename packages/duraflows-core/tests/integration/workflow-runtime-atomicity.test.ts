@@ -265,6 +265,7 @@ describe("WorkflowRuntime transactional atomicity", () => {
           workflowName: "atomicity-simple",
           currentState: "draft",
           version: 1,
+          definitionVersion: null,
           expiresAt: null,
           lastTransitionAt: fixedDate,
           context: {},

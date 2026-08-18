@@ -33,6 +33,8 @@ export type {
   WorkflowTransactionRunner,
   WorkflowClock,
   WorkflowPersistenceProvider,
+  StoredWorkflowDefinition,
+  WorkflowDefinitionStore,
 } from "./types/persistence.js";
 
 // Errors
@@ -61,6 +63,9 @@ export type { ValidationResult, ValidationError, WorkflowValidationOptions } fro
 // Compilation
 export { WorkflowCompiler } from "./compilation/workflow-compiler.js";
 export type { CompiledWorkflow } from "./compilation/workflow-compiler.js";
+
+// Utilities
+export { computeDefinitionHash } from "./util/definition-hash.js";
 
 // Execution
 export { CommandExecutor } from "./execution/command-executor.js";

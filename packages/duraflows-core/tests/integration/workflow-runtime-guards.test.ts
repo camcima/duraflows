@@ -245,6 +245,10 @@ describe("WorkflowRuntime guards", () => {
     const afterFirst = await instanceStore.findByUuid(created.uuid);
     expect(afterFirst?.expiresAt).toBeNull();
     expect(afterFirst?.currentState).toBe("waiting");
+    // The timeout guard-rejected branch still stamps definitionVersion on the
+    // instance update it performs (timeoutDefinition omits `version`, so it
+    // defaults to 1).
+    expect(afterFirst?.definitionVersion).toBe(1);
 
     // Exactly one guard-rejected history row.
     const historyAfterFirst = await historyStore.findByInstanceUuid(created.uuid);
@@ -252,6 +256,7 @@ describe("WorkflowRuntime guards", () => {
     expect(rejectedRows).toHaveLength(1);
     expect(rejectedRows[0].eventName).toBe("expire");
     expect(rejectedRows[0].rejectedBy).toBe("isVerified");
+    expect(rejectedRows[0].definitionVersion).toBe(1);
 
     // Second sweep must NOT pick up the instance again (expiresAt is null).
     const secondResult = await runtime.processExpiredWorkflows();

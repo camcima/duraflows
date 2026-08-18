@@ -4,6 +4,7 @@ import { pgWorkflowProviders } from "../../src/index.js";
 import { PgTransactionRunner } from "../../src/pg-transaction-runner.js";
 import { PgWorkflowInstanceStore } from "../../src/pg-instance-store.js";
 import { PgWorkflowHistoryStore } from "../../src/pg-history-store.js";
+import { PgWorkflowDefinitionStore } from "../../src/pg-definition-store.js";
 
 function createMockPool(): Pool {
   return {
@@ -33,6 +34,7 @@ describe("pgWorkflowProviders()", () => {
     expect(providers.transactionRunner).toBeInstanceOf(PgTransactionRunner);
     expect(providers.instanceStore).toBeInstanceOf(PgWorkflowInstanceStore);
     expect(providers.historyStore).toBeInstanceOf(PgWorkflowHistoryStore);
+    expect(providers.definitionStore).toBeInstanceOf(PgWorkflowDefinitionStore);
   });
 
   it("produces fresh instances on each call (no shared mutable state)", () => {
@@ -44,6 +46,7 @@ describe("pgWorkflowProviders()", () => {
     expect(a.transactionRunner).not.toBe(b.transactionRunner);
     expect(a.instanceStore).not.toBe(b.instanceStore);
     expect(a.historyStore).not.toBe(b.historyStore);
+    expect(a.definitionStore).not.toBe(b.definitionStore);
   });
 
   it("emits no timeout statements when called without options (default behaviour)", async () => {

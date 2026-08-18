@@ -18,17 +18,46 @@ new WorkflowRuntime(options: WorkflowRuntimeOptions)
 
 **WorkflowRuntimeOptions:**
 
-| Property             | Type                          | Description                                                                                            |
-| -------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                                       |
-| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                                           |
-| `instanceStore`      | `WorkflowInstanceStore`       | Persistence for workflow instances                                                                     |
-| `historyStore`       | `WorkflowHistoryStore`        | Persistence for history records                                                                        |
-| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                                                 |
-| `clock`              | `WorkflowClock`               | Clock for timestamps (injectable for testing)                                                          |
-| `maxOnEnterDepth`    | `number`                      | Maximum depth for onEnter auto-transition chains (default: 10)                                         |
-| `observers`          | `readonly WorkflowObserver[]` | Optional observers notified post-commit on every state entry                                           |
-| `guardRegistry`      | `WorkflowGuardRegistry`       | Optional registry of guard implementations; required when any workflow definition references a `guard` |
+| Property             | Type                          | Description                                                                                                                                                                                |
+| -------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                                                                                                                           |
+| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                                                                                                                               |
+| `instanceStore`      | `WorkflowInstanceStore`       | Persistence for workflow instances                                                                                                                                                         |
+| `historyStore`       | `WorkflowHistoryStore`        | Persistence for history records                                                                                                                                                            |
+| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                                                                                                                                     |
+| `clock`              | `WorkflowClock`               | Clock for timestamps (injectable for testing)                                                                                                                                              |
+| `maxOnEnterDepth`    | `number`                      | Maximum depth for onEnter auto-transition chains (default: 10)                                                                                                                             |
+| `observers`          | `readonly WorkflowObserver[]` | Optional observers notified post-commit on every state entry                                                                                                                               |
+| `guardRegistry`      | `WorkflowGuardRegistry`       | Optional registry of guard implementations; required when any workflow definition references a `guard`                                                                                     |
+| `definitionStore`    | `WorkflowDefinitionStore`     | Optional store for definition snapshots; when present, `initialize()` syncs registered definitions into it and enforces the version-bump guard. Omit to leave definition versioning inert. |
+
+### initialize()
+
+Syncs registered workflow definitions into the configured `definitionStore` and enforces the version-bump guard.
+
+```ts
+async initialize(): Promise<void>
+```
+
+**Behavior:**
+
+1. For each definition in the `definitionRegistry`, computes its content hash and calls `definitionStore.ensure()`, which inserts a snapshot for that `(workflowName, version)` if one doesn't already exist, or returns the existing one untouched.
+2. Compares the returned snapshot's stored content hash against the freshly computed one. A mismatch means a known version was re-registered with different content.
+3. No-ops entirely when the runtime was constructed without a `definitionStore` — definition versioning is inert in that case.
+
+Idempotent and safe to call repeatedly or concurrently: the first call starts the sync and every caller — concurrent or later — shares that same in-flight (or already-settled) result, so definitions are synced once. A **failed** sync is not cached — the next call to `initialize()` retries from scratch rather than replaying the failure.
+
+Calling it explicitly is optional: `createInstance()`, `triggerEvent()`, and `processExpiredWorkflows()` each call `initialize()` first, so the sync also happens lazily on whichever mutating operation runs first. Calling it explicitly at boot is still recommended — the NestJS module does this automatically (see [Startup Validation](./nestjs-integration.md#startup-validation)) — because it makes a version-bump violation fail application startup instead of surfacing unpredictably on the first workflow operation.
+
+**Throws:**
+
+- `WorkflowDefinitionError` — a known `(workflowName, version)` pair's stored content hash differs from the registered definition's, meaning the definition's content changed without its `version` being bumped.
+
+**Example:**
+
+```ts
+await runtime.initialize(); // recommended at boot, before serving traffic
+```
 
 ### createInstance()
 
@@ -323,9 +352,13 @@ async getHistory(
 ```ts
 const history = await runtime.getHistory(instance.uuid, { limit: 50 });
 for (const record of history) {
-  console.log(`${record.fromState} → ${record.toState} via ${record.eventName}`);
+  console.log(`${record.fromState} → ${record.toState} via ${record.eventName} at ${record.createdAt}`);
 }
 ```
+
+Each record's `createdAt` is when the store recorded that transition (populated on read; adapters that predate this field return `undefined`). **Caveat:** every history row written inside the same database transaction -- an event plus its entire `onEnter` chain -- shares an identical `createdAt`, so it must not be used to reconstruct the order of steps within a single multi-hop transition, only roughly when the transition happened.
+
+The array returned by `getHistory()` (and `findByInstanceUuid()` underneath it) is itself ordered `created_at DESC, uuid DESC`, so this caveat is also about the order of the returned array, not just the `createdAt` field on each record. With the `@duraflows/pg` default `uuidStrategy` (`gen_random_uuid`), a multi-hop transition's rows come back in an arbitrary (but stable) order; pass `uuidStrategy: "uuidv7"` to `generateMigrationSql()` (PostgreSQL 18+ only) to make them come back in the order they actually happened. See [Persistence: Ordering within a multi-hop transition](./persistence.md#ordering-within-a-multi-hop-transition) for the full explanation and a verified empirical example.
 
 ### getHandle()
 

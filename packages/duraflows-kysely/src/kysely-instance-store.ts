@@ -20,6 +20,7 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
         workflow_name: instance.workflowName,
         current_state: instance.currentState,
         version: instance.version,
+        definition_version: instance.definitionVersion,
         expires_at: instance.expiresAt,
         last_transition_at: instance.lastTransitionAt,
         context_json: JSON.stringify(instance.context),
@@ -62,6 +63,7 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
       .set({
         current_state: instance.currentState,
         version: instance.version,
+        definition_version: instance.definitionVersion,
         expires_at: instance.expiresAt,
         last_transition_at: instance.lastTransitionAt,
         context_json: JSON.stringify(instance.context),
@@ -104,6 +106,7 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
       workflowName: row.workflow_name,
       currentState: row.current_state,
       version: row.version,
+      definitionVersion: row.definition_version ?? null,
       expiresAt: row.expires_at,
       lastTransitionAt: row.last_transition_at,
       context: row.context_json,

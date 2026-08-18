@@ -37,6 +37,11 @@ Use this checklist when reviewing code that touches duraflows workflows, command
 - [ ] **Bootstrap validation matches the registry shape.** `WorkflowModule.forRoot[Async]` accepts EITHER `guards: WorkflowGuard[]` (composed into an `InMemoryGuardRegistry`, validated at registration) OR `guardRegistry: WorkflowGuardRegistry` (custom; validation skipped). Passing both throws synchronously. Flag any module config that supplies both, or that references `WORKFLOW_GUARD_REGISTRY` while also passing `guards`.
 - [ ] **Timeout poller observability accounts for `rejected`.** `ProcessExpiredWorkflowsResult` now has `rejected: number` (v1.1.0). If the poller logs only `processed`/`failed`, guard-rejected timeouts are silently invisible. Flag dashboards/alerts that don't surface `rejected`.
 
+### Definition Versions (v5.0.0)
+
+- [ ] **Content changes bump `version`.** If a definition's `states`/`events`/`commands` changed since it last shipped, `version` must increment too — `WorkflowRuntime.initialize()` compares content hashes and throws `WorkflowDefinitionError` for a known version whose content drifted (a version-bump guard, not pinning). Flag a diff that changes definition content without touching `version`.
+- [ ] **`WorkflowInstance` fixtures/constructions include `definitionVersion`.** It's a required field (`number | null`) as of v5.0.0 — a literal `WorkflowInstance` object (test fixture, custom-adapter row mapping) missing it fails to typecheck. `null` is only correct for a deliberately-legacy fixture; otherwise expect a number.
+
 ### onEnter Chains
 
 - [ ] **No unintended depth.** Count the maximum chain length. Default `maxOnEnterDepth` is 10. Long chains run in a single transaction -- consider performance.
@@ -106,7 +111,7 @@ Use this checklist when reviewing code that touches duraflows workflows, command
 
 ### Database
 
-- [ ] **Migration is applied.** `workflow_instances` and `workflow_history` tables must exist.
+- [ ] **Migration is applied.** `workflow_instances`, `workflow_history`, and (v5.0.0) `workflow_definitions` tables must exist; `workflow_instances`/`workflow_history` need a `definition_version` column (v5.0.0).
 - [ ] **Indexes exist.** `expires_at` partial index is critical for timeout performance. `workflow_name` index for lookups. `workflow_instance_uuid, created_at DESC` for history queries.
 
 ---

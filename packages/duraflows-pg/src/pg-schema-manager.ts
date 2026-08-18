@@ -10,6 +10,19 @@ export interface MigrationSqlOptions {
  * Use `uuidStrategy: "uuidv7"` for PostgreSQL 18+ (time-ordered UUIDs)
  * or `"gen_random_uuid"` for PostgreSQL 13+ (random UUIDs, the default).
  *
+ * This is not just a version preference: `workflow_history` reads are
+ * ordered `created_at DESC, uuid DESC`, and every row written inside one
+ * transaction (an event plus its entire `onEnter` chain) shares an
+ * identical `created_at` because PostgreSQL's `now()` is transaction-scoped
+ * -- so `uuid` is the only tiebreaker. `"uuidv7"` makes that tiebreak
+ * monotonic, so a multi-hop transition reads back in the order it
+ * happened; `"gen_random_uuid"` makes it arbitrary (though stable once
+ * written). On PostgreSQL 13-17, `"uuidv7"` is unavailable, so that
+ * ordering is simply not recoverable there. See docs/persistence.md for
+ * the full explanation, including a verified empirical example. Note the
+ * shipped dbmate migration (`sql/dbmate/001_workflow_core.sql`) hard-codes
+ * `gen_random_uuid()` -- use this function instead if you need `uuidv7`.
+ *
  * Copy the output into a dbmate migration file (or any other migration tool).
  */
 export function generateMigrationSql(options?: MigrationSqlOptions): { up: string; down: string } {
@@ -23,6 +36,7 @@ CREATE TABLE workflow_instances (
   workflow_name       text NOT NULL,
   current_state       text NOT NULL,
   version             integer NOT NULL DEFAULT 0,
+  definition_version  integer NULL,
   expires_at          timestamptz NULL,
   last_transition_at  timestamptz NOT NULL DEFAULT now(),
   context_json        jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -50,13 +64,24 @@ CREATE TABLE workflow_history (
   rejected_by             text,
   command_results_json    jsonb NOT NULL DEFAULT '[]'::jsonb,
   trigger_metadata_json   jsonb NOT NULL DEFAULT '{}'::jsonb,
+  definition_version      integer NULL,
   created_at              timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX workflow_history_instance_created_idx
-  ON workflow_history (workflow_instance_uuid, created_at DESC);`;
+  ON workflow_history (workflow_instance_uuid, created_at DESC);
 
-  const down = `DROP TABLE IF EXISTS workflow_history;
+CREATE TABLE workflow_definitions (
+  workflow_name    text NOT NULL,
+  version          integer NOT NULL,
+  content_hash     text NOT NULL,
+  definition_json  jsonb NOT NULL,
+  registered_at    timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (workflow_name, version)
+);`;
+
+  const down = `DROP TABLE IF EXISTS workflow_definitions;
+DROP TABLE IF EXISTS workflow_history;
 DROP TABLE IF EXISTS workflow_instances;`;
 
   return { up, down };

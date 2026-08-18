@@ -1,4 +1,5 @@
 import type { CommandResult, WorkflowInstance } from "./runtime.js";
+import type { WorkflowDefinition } from "./definition.js";
 
 export interface WorkflowInstanceStore {
   /**
@@ -91,6 +92,22 @@ export interface WorkflowHistoryRecord {
   rejectedBy?: string;
   commandResultsJson: CommandResult[];
   triggerMetadata?: Record<string, unknown>;
+  /** The definition version that governed this transition. Absent/null on legacy rows. */
+  definitionVersion?: number | null;
+  /**
+   * When this transition was recorded. Populated by the store on read;
+   * ignored on write — the database assigns it.
+   *
+   * Caveat: every history row written inside the same database transaction
+   * (an event plus its entire `onEnter` chain) shares an identical
+   * `createdAt`, and stores tiebreak ties with a random UUID by default, so
+   * this field must not be used to reconstruct the order of steps within one
+   * multi-hop transition — only to know roughly when the transition happened.
+   * On the pg adapter, `generateMigrationSql({ uuidStrategy: "uuidv7" })`
+   * (PostgreSQL 18+) makes that tiebreak monotonic instead of random — see
+   * docs/persistence.md.
+   */
+  createdAt?: Date;
 }
 
 export interface WorkflowTransactionRunner {
@@ -115,8 +132,47 @@ export interface WorkflowClock {
   now(): Date;
 }
 
+export interface StoredWorkflowDefinition {
+  workflowName: string;
+  version: number;
+  contentHash: string;
+  definitionJson: WorkflowDefinition;
+  registeredAt: Date;
+}
+
+export interface WorkflowDefinitionStore {
+  /**
+   * Insert the definition snapshot if `(workflowName, version)` is absent,
+   * then return the stored row — the pre-existing one or the newly created
+   * one. Must be atomic under concurrent callers (e.g. `INSERT ... ON
+   * CONFLICT DO NOTHING` followed by a re-select) and must NEVER overwrite
+   * an existing row.
+   *
+   * Transactional: not required.
+   */
+  ensure(record: {
+    workflowName: string;
+    version: number;
+    contentHash: string;
+    definitionJson: WorkflowDefinition;
+  }): Promise<StoredWorkflowDefinition>;
+
+  /**
+   * Fetch a stored definition snapshot.
+   *
+   * Transactional: not required (read-only).
+   */
+  findByNameAndVersion(workflowName: string, version: number): Promise<StoredWorkflowDefinition | null>;
+}
+
 export interface WorkflowPersistenceProvider {
   instanceStore: WorkflowInstanceStore;
   historyStore: WorkflowHistoryStore;
   transactionRunner: WorkflowTransactionRunner;
+  /**
+   * Optional so existing custom providers keep compiling; the bundled pg and
+   * kysely providers always supply it. Definition-versioning features are
+   * inert without it.
+   */
+  definitionStore?: WorkflowDefinitionStore;
 }

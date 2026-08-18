@@ -16,8 +16,8 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
       `INSERT INTO workflow_instances (
         uuid, workflow_name, current_state, version, expires_at,
         last_transition_at, context_json, metadata_json,
-        created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        created_at, updated_at, definition_version
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         instance.uuid,
         instance.workflowName,
@@ -29,6 +29,7 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
         JSON.stringify(instance.metadata),
         instance.createdAt,
         instance.updatedAt,
+        instance.definitionVersion,
       ],
     );
   }
@@ -62,8 +63,9 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
         expires_at = $4,
         last_transition_at = $5,
         context_json = $6,
-        updated_at = $7
-      WHERE uuid = $1 AND version = $8`,
+        updated_at = $7,
+        definition_version = $8
+      WHERE uuid = $1 AND version = $9`,
       [
         instance.uuid,
         instance.currentState,
@@ -72,6 +74,7 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
         instance.lastTransitionAt,
         JSON.stringify(instance.context),
         instance.updatedAt,
+        instance.definitionVersion,
         expectedVersion,
       ],
     );
@@ -104,6 +107,7 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
       workflowName: row.workflow_name as string,
       currentState: row.current_state as string,
       version: row.version as number,
+      definitionVersion: (row.definition_version as number | null | undefined) ?? null,
       expiresAt: row.expires_at ? new Date(row.expires_at as string) : null,
       lastTransitionAt: new Date(row.last_transition_at as string),
       context: row.context_json as Record<string, unknown>,

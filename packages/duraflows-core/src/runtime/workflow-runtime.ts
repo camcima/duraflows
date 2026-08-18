@@ -8,6 +8,7 @@ import type {
   WorkflowHistoryRecord,
   WorkflowTransactionRunner,
   WorkflowClock,
+  WorkflowDefinitionStore,
 } from "../types/persistence.js";
 import type {
   CreateWorkflowInstanceInput,
@@ -28,10 +29,11 @@ import { OnEnterExecutor } from "../execution/on-enter-executor.js";
 import { TimeoutResolver } from "../execution/timeout-resolver.js";
 import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
 import type { WorkflowGuardRegistry } from "../registry/guard-registry.js";
-import { WorkflowInstanceNotFoundError, InvalidArgumentError } from "../errors/index.js";
+import { WorkflowInstanceNotFoundError, InvalidArgumentError, WorkflowDefinitionError } from "../errors/index.js";
 import { WorkflowHandle } from "./workflow-handle.js";
 import type { WorkflowObserver, StateEnterEvent, ObserverErrorHandler } from "../types/observer.js";
 import { ObserverRegistry } from "./observer-registry.js";
+import { computeDefinitionHash } from "../util/definition-hash.js";
 
 const DEFAULT_MAX_ON_ENTER_DEPTH = 10;
 
@@ -105,6 +107,13 @@ export interface WorkflowRuntimeOptions {
   historyStore: WorkflowHistoryStore;
   transactionRunner: WorkflowTransactionRunner;
   clock: WorkflowClock;
+  /**
+   * Optional store for definition snapshots. When present, `initialize()`
+   * (called explicitly or lazily by the first mutating operation) syncs every
+   * registered definition into it and fails if a definition's content changed
+   * without a version bump. When absent, definition versioning is inert.
+   */
+  definitionStore?: WorkflowDefinitionStore;
   maxOnEnterDepth?: number;
   observers?: readonly WorkflowObserver[];
   onObserverError?: ObserverErrorHandler;
@@ -116,6 +125,8 @@ export class WorkflowRuntime {
   private readonly historyStore: WorkflowHistoryStore;
   private readonly transactionRunner: WorkflowTransactionRunner;
   private readonly clock: WorkflowClock;
+  private readonly definitionStore?: WorkflowDefinitionStore;
+  private initPromise: Promise<void> | null = null;
   private readonly compiler: WorkflowCompiler;
   private readonly eventExecutor: EventExecutor;
   private readonly onEnterExecutor: OnEnterExecutor;
@@ -129,6 +140,7 @@ export class WorkflowRuntime {
     this.historyStore = options.historyStore;
     this.transactionRunner = options.transactionRunner;
     this.clock = options.clock;
+    this.definitionStore = options.definitionStore;
     this.compiler = new WorkflowCompiler();
     const commandExecutor = new CommandExecutor(options.commandRegistry);
     this.eventExecutor = new EventExecutor(commandExecutor, options.guardRegistry);
@@ -145,7 +157,47 @@ export class WorkflowRuntime {
     this.observerRegistry.add(observer);
   }
 
+  /**
+   * Syncs registered definitions into the definition store and enforces the
+   * version-bump guard. Idempotent: concurrent and repeated calls share one
+   * sync. A failed sync is not cached — the next call retries. Called lazily
+   * by mutating operations, but calling it explicitly at boot is recommended
+   * so registration errors surface at startup.
+   */
+  async initialize(): Promise<void> {
+    if (!this.initPromise) {
+      this.initPromise = this.syncDefinitions().catch((error: unknown) => {
+        this.initPromise = null;
+        throw error;
+      });
+    }
+    return this.initPromise;
+  }
+
+  private async syncDefinitions(): Promise<void> {
+    if (!this.definitionStore) return;
+    for (const definition of this.definitionRegistry.getAll()) {
+      const version = this.definitionVersionOf(definition);
+      const contentHash = computeDefinitionHash(definition);
+      const stored = await this.definitionStore.ensure({
+        workflowName: definition.name,
+        version,
+        contentHash,
+        definitionJson: definition,
+      });
+      if (stored.contentHash !== contentHash) {
+        throw new WorkflowDefinitionError(
+          definition.name,
+          `Definition content changed but version ${version} was not bumped ` +
+            `(stored ${stored.contentHash}, registered ${contentHash}). ` +
+            `Bump the definition's "version" field to publish the change.`,
+        );
+      }
+    }
+  }
+
   async createInstance(input: CreateWorkflowInstanceInput): Promise<WorkflowInstance> {
+    await this.initialize();
     const definition = this.definitionRegistry.get(input.workflowName);
 
     const now = this.clock.now();
@@ -163,6 +215,7 @@ export class WorkflowRuntime {
       workflowName: definition.name,
       currentState: definition.initialState,
       version: 0,
+      definitionVersion: this.definitionVersionOf(definition),
       expiresAt,
       lastTransitionAt: now,
       context,
@@ -234,6 +287,7 @@ export class WorkflowRuntime {
   }
 
   async triggerEvent(input: TriggerWorkflowEventInput): Promise<WorkflowExecutionResult> {
+    await this.initialize();
     const eventsToFire: StateEnterEvent[] = [];
 
     const result = await this.transactionRunner.runInTransaction(async () => {
@@ -280,6 +334,7 @@ export class WorkflowRuntime {
           rejectedBy: eventResult.rejectedBy,
           commandResultsJson: [],
           triggerMetadata: structuredClone(input.triggerMetadata ?? {}),
+          definitionVersion: this.definitionVersionOf(definition),
         });
 
         return {
@@ -307,6 +362,7 @@ export class WorkflowRuntime {
         errorMessage,
         commandResultsJson: eventResult.commandResults,
         triggerMetadata: structuredClone(input.triggerMetadata ?? {}),
+        definitionVersion: this.definitionVersionOf(definition),
       });
 
       eventsToFire.push(
@@ -353,6 +409,7 @@ export class WorkflowRuntime {
   }
 
   async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<ProcessExpiredWorkflowsResult> {
+    await this.initialize();
     const limit = input?.limit ?? 100;
     assertPositiveSafeInteger(limit, "limit");
     const now = this.clock.now();
@@ -395,6 +452,7 @@ export class WorkflowRuntime {
             instance.expiresAt = null;
             instance.version++;
             instance.updatedAt = this.clock.now();
+            instance.definitionVersion = this.definitionVersionOf(definition);
             await this.instanceStore.update(instance);
             return;
           }
@@ -460,6 +518,7 @@ export class WorkflowRuntime {
       instance.version++;
       instance.lastTransitionAt = now;
       instance.updatedAt = now;
+      instance.definitionVersion = this.definitionVersionOf(definition);
       await this.instanceStore.update(instance);
 
       await this.historyStore.append({
@@ -471,6 +530,7 @@ export class WorkflowRuntime {
         rejectedBy: result.rejectedBy,
         commandResultsJson: [],
         triggerMetadata: { source: "timeout" },
+        definitionVersion: this.definitionVersionOf(definition),
       });
       return "rejected";
     }
@@ -491,6 +551,7 @@ export class WorkflowRuntime {
       errorMessage,
       commandResultsJson: result.commandResults,
       triggerMetadata: { source: "timeout" },
+      definitionVersion: this.definitionVersionOf(definition),
     });
 
     eventsToFire.push(
@@ -534,6 +595,7 @@ export class WorkflowRuntime {
     instance.version++;
     instance.lastTransitionAt = now;
     instance.updatedAt = now;
+    instance.definitionVersion = this.definitionVersionOf(definition);
 
     const stateDef = definition.states[toState];
     instance.context = {
@@ -543,6 +605,11 @@ export class WorkflowRuntime {
     executionContext.context = { ...instance.context };
 
     instance.expiresAt = this.timeoutResolver.computeDeadline(definition, toState, now);
+  }
+
+  /** The version label of a registered definition; omitted means 1. */
+  private definitionVersionOf(definition: WorkflowDefinition): number {
+    return definition.version ?? 1;
   }
 
   private async processOnEnterChain(
@@ -582,6 +649,7 @@ export class WorkflowRuntime {
         errorMessage,
         commandResultsJson: hop.commandResults,
         triggerMetadata: { source: "onEnter" },
+        definitionVersion: this.definitionVersionOf(definition),
       });
 
       eventsToFire.push(

@@ -4,6 +4,7 @@ import { kyselyWorkflowProviders, kyselyWorkflowProvidersFromTransaction } from 
 import { KyselyTransactionRunner } from "../../src/kysely-transaction-runner.js";
 import { KyselyWorkflowInstanceStore } from "../../src/kysely-instance-store.js";
 import { KyselyWorkflowHistoryStore } from "../../src/kysely-history-store.js";
+import { KyselyWorkflowDefinitionStore } from "../../src/kysely-definition-store.js";
 import { KyselyTransactionContext } from "../../src/kysely-transaction-context.js";
 import type { WorkflowDatabase } from "../../src/kysely-database.js";
 
@@ -63,6 +64,7 @@ describe("kyselyWorkflowProviders()", () => {
     expect(providers.transactionRunner).toBeInstanceOf(KyselyTransactionRunner);
     expect(providers.instanceStore).toBeInstanceOf(KyselyWorkflowInstanceStore);
     expect(providers.historyStore).toBeInstanceOf(KyselyWorkflowHistoryStore);
+    expect(providers.definitionStore).toBeInstanceOf(KyselyWorkflowDefinitionStore);
   });
 
   it("produces fresh instances on each call", () => {
@@ -74,6 +76,7 @@ describe("kyselyWorkflowProviders()", () => {
     expect(a.transactionRunner).not.toBe(b.transactionRunner);
     expect(a.instanceStore).not.toBe(b.instanceStore);
     expect(a.historyStore).not.toBe(b.historyStore);
+    expect(a.definitionStore).not.toBe(b.definitionStore);
   });
 
   it("emits no timeout statement when called without options (default behaviour)", async () => {
@@ -116,6 +119,7 @@ describe("kyselyWorkflowProvidersFromTransaction()", () => {
     expect(providers.transactionRunner).toBeDefined();
     expect(providers.instanceStore).toBeInstanceOf(KyselyWorkflowInstanceStore);
     expect(providers.historyStore).toBeInstanceOf(KyselyWorkflowHistoryStore);
+    expect(providers.definitionStore).toBeInstanceOf(KyselyWorkflowDefinitionStore);
   });
 
   it("transactionRunner.runInTransaction installs the trx into KyselyTransactionContext", async () => {

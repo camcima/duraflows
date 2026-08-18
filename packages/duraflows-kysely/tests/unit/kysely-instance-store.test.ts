@@ -13,6 +13,7 @@ const sampleInstance: WorkflowInstance = {
   workflowName: "order",
   currentState: "pending",
   version: 0,
+  definitionVersion: null,
   expiresAt: null,
   lastTransitionAt: now,
   context: { status: "new" },
@@ -26,6 +27,7 @@ const sampleRow = {
   workflow_name: "order",
   current_state: "pending",
   version: 0,
+  definition_version: null,
   expires_at: null,
   last_transition_at: now,
   context_json: { status: "new" },
@@ -94,8 +96,20 @@ describe("KyselyWorkflowInstanceStore", () => {
       expect(row.workflow_name).toBe("order");
       expect(row.current_state).toBe("pending");
       expect(row.version).toBe(0);
+      expect(row.definition_version).toBeNull();
       expect(row.context_json).toBe(JSON.stringify({ status: "new" }));
       expect(row.metadata_json).toBe(JSON.stringify({ orderId: "ORD-1" }));
+    });
+
+    it("inserts a non-null definitionVersion", async () => {
+      const { db, calls } = createMockDb();
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      await store.create({ ...sampleInstance, definitionVersion: 3 });
+
+      const valuesCall = calls.find((c) => c.method === "values");
+      const row = valuesCall!.args[0] as Record<string, unknown>;
+      expect(row.definition_version).toBe(3);
     });
   });
 
@@ -111,9 +125,19 @@ describe("KyselyWorkflowInstanceStore", () => {
       expect(result!.workflowName).toBe("order");
       expect(result!.currentState).toBe("pending");
       expect(result!.version).toBe(0);
+      expect(result!.definitionVersion).toBeNull();
       expect(result!.expiresAt).toBeNull();
       expect(result!.context).toEqual({ status: "new" });
       expect(result!.metadata).toEqual({ orderId: "ORD-1" });
+    });
+
+    it("maps a non-null definition_version", async () => {
+      const { db } = createMockDb([{ ...sampleRow, definition_version: 7 }]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      const result = await store.findByUuid("inst-uuid");
+
+      expect(result!.definitionVersion).toBe(7);
     });
 
     it("returns null when not found", async () => {
@@ -173,6 +197,19 @@ describe("KyselyWorkflowInstanceStore", () => {
       expect(whereCalls.length).toBe(2);
       expect(whereCalls[0].args).toEqual(["uuid", "=", "inst-uuid"]);
       expect(whereCalls[1].args).toEqual(["version", "=", 0]); // expectedVersion = 1 - 1
+    });
+
+    it("includes definition_version in the SET payload", async () => {
+      const { db, executeMock, calls } = createMockDb();
+      executeMock.mockResolvedValue([{ numUpdatedRows: BigInt(1) }]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      const updated = { ...sampleInstance, version: 1, definitionVersion: 2 };
+      await store.update(updated);
+
+      const setCall = calls.find((c) => c.method === "set");
+      const payload = setCall!.args[0] as Record<string, unknown>;
+      expect(payload.definition_version).toBe(2);
     });
 
     it("throws WorkflowError on optimistic lock failure", async () => {

@@ -678,6 +678,11 @@ WorkflowModule.forRoot({
 });
 ```
 
+The module also registers a `WorkflowRuntimeInitializer` (implementing `OnModuleInit`) that calls `runtime.initialize()` during module init, so definition snapshots sync at boot rather than on the first workflow operation:
+
+- A definition whose content changed without its `version` being bumped throws `WorkflowDefinitionError` at application startup, instead of surfacing later on the first `createInstance()`, `triggerEvent()`, or `processExpiredWorkflows()` call.
+- This is inert when the configured `persistence` has no `definitionStore` — the bundled `pgWorkflowProviders()` and `kyselyWorkflowProviders()` always supply one, so it applies automatically whenever you use either.
+
 ## NestCommandRegistry
 
 The NestJS module uses `NestCommandRegistry` to resolve command handlers from the DI container:

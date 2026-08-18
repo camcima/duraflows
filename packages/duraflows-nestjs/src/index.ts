@@ -20,6 +20,7 @@ export {
   WORKFLOW_DEFINITION_REGISTRY,
   WORKFLOW_TRANSACTION_RUNNER,
   WORKFLOW_CLOCK,
+  WORKFLOW_DEFINITION_STORE,
 } from "./providers/injection-tokens.js";
 export { NestCommandRegistry } from "./providers/nest-command-registry.js";
 export type { WorkflowCommandRegistration } from "./providers/nest-command-registry.js";

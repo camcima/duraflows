@@ -44,6 +44,13 @@ export class InMemoryDefinitionRegistry implements WorkflowDefinitionRegistry {
       throw new WorkflowDefinitionError(definition.name, "A workflow with this name is already registered");
     }
 
+    if (definition.version !== undefined && (!Number.isSafeInteger(definition.version) || definition.version <= 0)) {
+      throw new WorkflowDefinitionError(
+        definition.name,
+        `version must be a positive integer, got ${definition.version}`,
+      );
+    }
+
     const frozen = deepFreeze(structuredClone(definition));
 
     if (this.validator) {

@@ -269,10 +269,11 @@ interface WorkflowHistoryRecord {
   rejectedBy?: string; // v1.1.0: guard ref name when outcome === "guard-rejected"
   commandResultsJson: CommandResult[]; // field name ends in `Json` — distinct from WorkflowExecutionResult.commandResults
   triggerMetadata?: Record<string, unknown>;
+  createdAt?: Date; // v5.0.0: populated by the store on read; ignored on write (the database assigns it)
 }
 ```
 
-The exported type intentionally omits the row's `uuid` and `created_at` — those are storage concerns, returned out-of-band by `WorkflowHistoryStore.append` (which returns a generated UUID) and not part of the read shape adapter authors implement against.
+The exported type intentionally omits the row's `uuid` — that's a storage concern, returned out-of-band by `WorkflowHistoryStore.append` (which returns a generated UUID) and not part of the read shape adapter authors implement against. `createdAt` tells you roughly when a transition happened, but rows written inside the same database transaction (an event plus its entire `onEnter` chain) share an identical value, so it must not be used to order steps within one multi-hop transition.
 
 **v1.1.0:** a guard rejection writes a row with `outcome: "guard-rejected"`, `rejectedBy: "<guard-name>"`, `fromState === toState`, and an empty `commandResultsJson` array. Both the underlying CHECK constraint and the `rejected_by` column are added by migration `003_event_guards.sql` in `@duraflows/pg`; custom adapters must persist `rejectedBy` on append and map `null → undefined` on read.
 

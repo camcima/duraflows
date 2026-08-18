@@ -28,6 +28,12 @@ export interface WorkflowInstance<TState extends string = string> {
   workflowName: string;
   currentState: TState;
   version: number;
+  /**
+   * The definition version that currently governs this instance. `null` for
+   * legacy rows created before definition versioning existed; such instances
+   * are stamped on their next successful transition.
+   */
+  definitionVersion: number | null;
   expiresAt: Date | null;
   lastTransitionAt: Date;
   context: Record<string, unknown>;

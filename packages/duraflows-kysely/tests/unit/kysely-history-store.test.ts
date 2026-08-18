@@ -26,6 +26,8 @@ const sampleRow = {
   error_message: null,
   command_results_json: [{ ok: true, code: "DONE" }],
   trigger_metadata_json: { source: "user", actor: "actor-uuid" },
+  definition_version: null,
+  created_at: new Date("2026-01-01T12:00:00.000Z"),
 };
 
 function createMockDb(queryResult: Record<string, unknown>[] = []) {
@@ -81,10 +83,23 @@ describe("KyselyWorkflowHistoryStore", () => {
       expect(row.workflow_instance_uuid).toBe("inst-uuid");
       expect(row.outcome).toBe("success");
       expect(row.command_results_json).toBe(JSON.stringify([{ ok: true, code: "DONE" }]));
+      expect(row.definition_version).toBeNull(); // sampleEntry has no definitionVersion
 
       const returningCall = calls.find((c) => c.method === "returning");
       expect(returningCall).toBeDefined();
       expect(returningCall!.args[0]).toBe("uuid");
+    });
+
+    it("passes the definitionVersion when provided", async () => {
+      const { db, calls, executeTakeFirstOrThrowMock } = createMockDb();
+      executeTakeFirstOrThrowMock.mockResolvedValue({ uuid: "new-uuid" });
+      const store = new KyselyWorkflowHistoryStore(db);
+
+      await store.append({ ...sampleEntry, definitionVersion: 7 });
+
+      const valuesCall = calls.find((c) => c.method === "values");
+      const row = valuesCall!.args[0] as Record<string, unknown>;
+      expect(row.definition_version).toBe(7);
     });
 
     it("passes null for optional fields when undefined", async () => {
@@ -163,6 +178,7 @@ describe("KyselyWorkflowHistoryStore", () => {
       expect(records[0].fromState).toBe("pending");
       expect(records[0].eventName).toBe("Approve");
       expect(records[0].outcome).toBe("success");
+      expect(records[0].createdAt).toEqual(new Date("2026-01-01T12:00:00.000Z"));
 
       const limitCall = calls.find((c) => c.method === "limit");
       expect(limitCall!.args[0]).toBe(50);
@@ -210,6 +226,31 @@ describe("KyselyWorkflowHistoryStore", () => {
 
       const records = await store.findByInstanceUuid("inst-uuid");
       expect(records[0].rejectedBy).toBeUndefined();
+    });
+
+    it("maps definition_version as undefined when the column is null (legacy row)", async () => {
+      const { db } = createMockDb([{ ...sampleRow, definition_version: null }]);
+      const store = new KyselyWorkflowHistoryStore(db);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+      expect(records[0].definitionVersion).toBeUndefined();
+    });
+
+    it("maps a non-null definition_version", async () => {
+      const { db } = createMockDb([{ ...sampleRow, definition_version: 6 }]);
+      const store = new KyselyWorkflowHistoryStore(db);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+      expect(records[0].definitionVersion).toBe(6);
+    });
+
+    it("maps created_at as a Date instance", async () => {
+      const { db } = createMockDb([{ ...sampleRow, created_at: new Date("2026-03-15T08:30:00.000Z") }]);
+      const store = new KyselyWorkflowHistoryStore(db);
+
+      const records = await store.findByInstanceUuid("inst-uuid");
+      expect(records[0].createdAt).toBeInstanceOf(Date);
+      expect(records[0].createdAt).toEqual(new Date("2026-03-15T08:30:00.000Z"));
     });
   });
 });

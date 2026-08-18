@@ -104,6 +104,38 @@ class InMemoryTransactionRunner implements WorkflowTransactionRunner {
 }
 ```
 
+### InMemoryDefinitionStore (v5.0.0)
+
+Only needed when a test exercises definition versioning itself (the version-bump guard, `initialize()`) — most workflow tests can omit `definitionStore` entirely and versioning stays inert. `ensure()` must be insert-if-absent: a second call for the same `(workflowName, version)` returns the original row untouched, which is what lets the bump guard detect a content-hash mismatch.
+
+```ts
+import type { WorkflowDefinitionStore, StoredWorkflowDefinition, WorkflowDefinition } from "@duraflows/core";
+
+class InMemoryDefinitionStore implements WorkflowDefinitionStore {
+  private readonly rows = new Map<string, StoredWorkflowDefinition>();
+
+  async ensure(record: {
+    workflowName: string;
+    version: number;
+    contentHash: string;
+    definitionJson: WorkflowDefinition;
+  }): Promise<StoredWorkflowDefinition> {
+    const key = `${record.workflowName}@${record.version}`;
+    const existing = this.rows.get(key);
+    if (existing) return structuredClone(existing); // never overwrite
+
+    const stored: StoredWorkflowDefinition = { ...record, registeredAt: new Date() };
+    this.rows.set(key, stored);
+    return structuredClone(stored);
+  }
+
+  async findByNameAndVersion(workflowName: string, version: number): Promise<StoredWorkflowDefinition | null> {
+    const row = this.rows.get(`${workflowName}@${version}`);
+    return row ? structuredClone(row) : null;
+  }
+}
+```
+
 ---
 
 ## Clock Injection
@@ -170,6 +202,10 @@ beforeEach(() => {
     // v1.1.0: only required if any registered definition uses an event guard.
     // Pass an `InMemoryGuardRegistry` (or any `WorkflowGuardRegistry`) here.
     // guardRegistry,
+    // (v5.0.0) optional: pass an InMemoryDefinitionStore to exercise definition-version
+    // syncing and the version-bump guard. Omit it and versioning stays inert —
+    // instances/history still get `definitionVersion` stamped either way.
+    // definitionStore,
   });
 });
 ```
@@ -534,6 +570,7 @@ it("processes expired workflows after timeout elapses", async () => {
     historyStore,
     transactionRunner: new InMemoryTransactionRunner(),
     clock,
+    // definitionStore, // (v5.0.0) optional -- omit to leave definition versioning inert
   });
 
   // 2. Create instance — enters a state with a 2-hour timeout
@@ -987,6 +1024,86 @@ it("custom registry: unresolved guard surfaces at first use", async () => {
 
 ---
 
+## Testing Definition Versions (v5.0.0)
+
+### 1. Version-bump guard: `initialize()` throws on a content-hash mismatch
+
+`WorkflowRuntime.initialize()` snapshots every registered definition into `definitionStore` and compares content hashes against what's already stored for that `(workflowName, version)`. Re-registering a known version with different content is exactly the bug this guard exists to catch:
+
+```ts
+import {
+  WorkflowDefinitionError,
+  InMemoryDefinitionRegistry,
+  InMemoryCommandRegistry,
+  WorkflowRuntime,
+} from "@duraflows/core";
+import type { WorkflowDefinition } from "@duraflows/core";
+
+it("throws WorkflowDefinitionError when content changed without a version bump", async () => {
+  const definitionStore = new InMemoryDefinitionStore();
+  const v2: WorkflowDefinition = {
+    name: "order",
+    version: 2,
+    initialState: "new",
+    states: { new: { events: { Submit: { targetState: "submitted" } } }, submitted: {} },
+  };
+
+  const makeRuntime = (definition: WorkflowDefinition) => {
+    const definitionRegistry = new InMemoryDefinitionRegistry();
+    definitionRegistry.register(definition);
+    return new WorkflowRuntime({
+      definitionRegistry,
+      commandRegistry: new InMemoryCommandRegistry(),
+      instanceStore,
+      historyStore,
+      transactionRunner: new InMemoryTransactionRunner(),
+      definitionStore,
+      clock,
+    });
+  };
+
+  await makeRuntime(v2).initialize(); // first sync: snapshots v2 as-is
+
+  // Same version, different content -- the drift the guard is meant to catch.
+  const drifted = structuredClone(v2);
+  drifted.states.submitted = { context: { closed: true } };
+
+  await expect(makeRuntime(drifted).initialize()).rejects.toThrow(WorkflowDefinitionError);
+});
+```
+
+Notes for this pattern:
+
+- Bumping `version` on the drifted copy instead makes `initialize()` succeed — assert that too if you want to pin both sides of the contract.
+- `initialize()` is idempotent: concurrent and repeated calls against the same runtime share one sync (`await Promise.all([runtime.initialize(), runtime.initialize()])` triggers only one `ensure()` per definition). A **failed** sync is not cached, so the next call retries and fails the same way until the content is fixed.
+- It also runs lazily on the first `createInstance`/`triggerEvent`/`processExpiredWorkflows` call, so the same `WorkflowDefinitionError` can surface from one of those instead of an explicit `initialize()` call — test whichever entry point your production code actually relies on.
+- Without a `definitionStore`, `initialize()` always resolves — the guard is inert. Don't expect a rejection in a test double setup that omits it.
+
+### 2. Definition-store conformance
+
+If you write a custom `WorkflowDefinitionStore` (see the duraflows-persistence-adapter skill), verify it with the shared suite instead of hand-rolling `ensure`/`findByNameAndVersion` tests:
+
+```ts
+import { describe } from "vitest";
+import { runDefinitionStoreConformance } from "@duraflows/core/testing";
+import { MyDefinitionStore } from "../src/my-definition-store.js";
+
+describe("MyDefinitionStore (conformance)", () => {
+  runDefinitionStoreConformance("my-adapter", {
+    setup: async () => ({
+      store: new MyDefinitionStore(db),
+      teardown: async () => {
+        await db.destroy();
+      },
+    }),
+  });
+});
+```
+
+It verifies: `ensure()` inserts a new snapshot and returns it; `ensure()` returns the pre-existing row unchanged (never the caller's new content) when `(workflowName, version)` already exists; `findByNameAndVersion()` round-trips a structurally equal definition and returns `null` for unknown pairs; and different versions of the same workflow are stored as independent rows. `@duraflows/pg` and `@duraflows/kysely` both run this in CI.
+
+---
+
 ## Adapter Conformance (v1.0.0)
 
 For custom `WorkflowInstanceStore` implementations (Prisma, Drizzle, TypeORM, Kysely, etc.), use the shared conformance suite from `@duraflows/core/testing`:
@@ -1047,6 +1164,7 @@ describe("WorkflowModule", () => {
             instanceStore: new InMemoryInstanceStore(),
             historyStore: new InMemoryHistoryStore(),
             transactionRunner: new InMemoryTransactionRunner(),
+            // definitionStore: new InMemoryDefinitionStore(), // (v5.0.0) optional -- omit to leave versioning inert
           },
         }),
       ],
@@ -1068,10 +1186,28 @@ Mock the `pg` Pool and PoolClient:
 
 ```ts
 import { vi } from "vitest";
+import type { WorkflowInstance } from "@duraflows/core";
 
 function createMockPool(queryResult = { rows: [] }) {
   return { query: vi.fn().mockResolvedValue(queryResult) } as unknown as Pool;
 }
+
+// (v5.0.0) definitionVersion is a required field on WorkflowInstance -- a
+// literal fixture that omits it fails to typecheck. Use `null` only for a
+// fixture that deliberately represents a legacy, pre-versioning row.
+const sampleInstance: WorkflowInstance = {
+  uuid: "11111111-1111-1111-1111-111111111111",
+  workflowName: "order",
+  currentState: "new",
+  version: 0,
+  definitionVersion: 1,
+  expiresAt: null,
+  lastTransitionAt: new Date("2025-06-15T12:00:00.000Z"),
+  context: {},
+  metadata: {},
+  createdAt: new Date("2025-06-15T12:00:00.000Z"),
+  updatedAt: new Date("2025-06-15T12:00:00.000Z"),
+};
 
 it("inserts instance with correct SQL", async () => {
   const pool = createMockPool();
@@ -1110,6 +1246,11 @@ expect(history[0].commandResults[0].code).toBe("CHARGED");
 
 // Assert trigger metadata
 expect(history[0].triggerMetadata?.actor).toBe("user-123");
+
+// (v5.0.0) definitionVersion: the definition version that governed this
+// transition. Optional on the public type -- undefined/null on legacy rows
+// written before definition versioning existed.
+expect(history[0].definitionVersion).toBe(1);
 
 // v1.1.0 — guard-rejected row.
 // findByInstanceUuid returns rows newest-first (created_at DESC), so the

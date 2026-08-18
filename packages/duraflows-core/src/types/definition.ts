@@ -1,5 +1,11 @@
 export interface WorkflowDefinition<TState extends string = string> {
   name: string;
+  /**
+   * Explicit definition version. Defaults to 1 when omitted. Must be a
+   * positive safe integer. Bump it whenever the definition's content changes;
+   * `WorkflowRuntime.initialize()` enforces this against the definition store.
+   */
+  version?: number;
   initialState: TState;
   states: Record<TState, WorkflowStateDefinition<TState>>;
 }

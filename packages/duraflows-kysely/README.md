@@ -110,6 +110,7 @@ Factory function that creates all required persistence providers from a `Kysely<
 - `instanceStore` -- `KyselyWorkflowInstanceStore`
 - `historyStore` -- `KyselyWorkflowHistoryStore`
 - `transactionRunner` -- `KyselyTransactionRunner`
+- `definitionStore` -- `KyselyWorkflowDefinitionStore`
 
 Options (all optional; omitting them keeps the previous behaviour):
 
