@@ -481,11 +481,11 @@ WorkflowModule.forRootAsync({
 - [ ] **(v1.1.0)** `workflow_history.outcome` CHECK constraint accepts `'guard-rejected'` (in addition to `'success'`/`'failure'`)
 - [ ] **(v1.1.0)** `rejected_by` column exists on `workflow_history`; persisted on `append()` for guard-rejected rows; mapped `NULL → undefined` on read (same convention as `errorMessage`)
 - [ ] **(v1.1.0)** Guard-rejected rows are persisted with `commandResults: []` and `toState === fromState` — verify your write path doesn't strip or rewrite either
-- [ ] **(definition versioning)** `definition_version` column exists on both `workflow_instances` and `workflow_history`; `create()`/`update()` persist `WorkflowInstance.definitionVersion` (mapped `null` on legacy rows); `append()` persists `WorkflowHistoryRecord.definitionVersion` (mapped `NULL → undefined` on read)
-- [ ] **(definition versioning)** `WorkflowDefinitionStore` implemented: `ensure()` is insert-if-absent, atomic under concurrent callers, and never overwrites an existing `(workflow_name, version)` row; `findByNameAndVersion()` returns `null` for unknown pairs
-- [ ] **(definition versioning)** `workflow_definitions` table exists with primary key `(workflow_name, version)`
-- [ ] **(definition versioning)** `definitionStore` wired into your `WorkflowPersistenceProvider` — it's optional (an adapter that omits it still compiles), but versioning stays inert without it
-- [ ] **(definition versioning)** `runDefinitionStoreConformance` from `@duraflows/core/testing` passes against your `WorkflowDefinitionStore`
+- [ ] **(v5.0.0)** `definition_version` column exists on both `workflow_instances` and `workflow_history`; `create()`/`update()` persist `WorkflowInstance.definitionVersion` (mapped `null` on legacy rows); `append()` persists `WorkflowHistoryRecord.definitionVersion` (mapped `NULL → undefined` on read)
+- [ ] **(v5.0.0)** `WorkflowDefinitionStore` implemented: `ensure()` is insert-if-absent, atomic under concurrent callers, and never overwrites an existing `(workflow_name, version)` row; `findByNameAndVersion()` returns `null` for unknown pairs
+- [ ] **(v5.0.0)** `workflow_definitions` table exists with primary key `(workflow_name, version)`
+- [ ] **(v5.0.0)** `definitionStore` wired into your `WorkflowPersistenceProvider` — it's optional (an adapter that omits it still compiles), but versioning stays inert without it
+- [ ] **(v5.0.0)** `runDefinitionStoreConformance` from `@duraflows/core/testing` passes against your `WorkflowDefinitionStore`
 
 ---
 

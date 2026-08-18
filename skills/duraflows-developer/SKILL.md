@@ -38,6 +38,7 @@ import type { WorkflowDefinition } from "@duraflows/core";
 
 const workflow: WorkflowDefinition = {
   name: "order", // unique identifier
+  version: 1, // (v5.0.0) optional, defaults to 1 — see Definition Versions below
   initialState: "new", // must exist in states
   states: {
     new: {/* WorkflowStateDefinition */},
@@ -46,6 +47,16 @@ const workflow: WorkflowDefinition = {
   },
 };
 ```
+
+### Definition Versions (v5.0.0)
+
+Every `WorkflowDefinition` carries an explicit `version` -- a positive safe integer, defaulting to `1` when omitted. Bump it whenever the definition's **content** changes. The canonical content hash used to detect drift deliberately **excludes** `version` itself: relabeling a version without changing anything else never trips the guard, but changing content without bumping the version does.
+
+At startup -- or lazily, on the first `createInstance`/`triggerEvent`/`processExpiredWorkflows` call if `initialize()` was never invoked -- `WorkflowRuntime.initialize()` snapshots every registered definition into the `workflow_definitions` table (via the optional `definitionStore`) and compares content hashes against what's already stored. If a previously-registered `(workflowName, version)` now has different content, it throws `WorkflowDefinitionError` instead of silently running drifted logic. `initialize()` is idempotent: concurrent and repeated calls share one sync, and a failed sync is not cached, so the next call retries.
+
+Instances and history rows record the version that governed them: `WorkflowInstance.definitionVersion` and `WorkflowHistoryRecord.definitionVersion`. Both are stamped at creation and re-stamped on every transition. `null` marks a legacy row that predates versioning; it picks up a real version stamp on its next transition.
+
+**Resolution is unchanged in 5.0.0.** Every instance -- new or in-flight -- still executes the _currently registered_ definition, regardless of which version it's stamped with. The stamp is provenance only, not pinning. Version-pinned execution (running an instance against the exact definition content it was created under) is planned for a later release.
 
 ### States
 
@@ -477,10 +488,17 @@ const runtime = new WorkflowRuntime({
   definitionRegistry,
   commandRegistry,
   guardRegistry, // omit if no events declare a guard
-  ...persistence,
+  ...persistence, // includes definitionStore -- pgWorkflowProviders() always supplies it
   clock: { now: () => new Date() },
 });
+
+// (v5.0.0) Recommended: call explicitly at boot so a version-bump violation
+// (WorkflowDefinitionError) surfaces before the app starts serving traffic,
+// instead of lazily on the first createInstance/triggerEvent/processExpiredWorkflows call.
+await runtime.initialize();
 ```
+
+In NestJS, `WorkflowModule` does this automatically -- it registers a `WorkflowRuntimeInitializer` provider (`OnModuleInit`) that calls `initialize()` during module init, so a version-bump violation fails application startup rather than the first workflow operation.
 
 ### Database Setup
 
@@ -538,13 +556,13 @@ Returns `{ processed: number, rejected: number (v1.1.0), failed: Array<{ uuid, e
 
 ## Error Hierarchy
 
-| Error                       | When Thrown                                                                                                                                       |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WorkflowError`             | Instance not found, optimistic lock failure, command not in registry, **(v1.1.0)** guard ref not in registry                                      |
-| `WorkflowDefinitionError`   | Invalid/duplicate definition, unknown workflow name, **(v1.1.0)** unresolved `guard.name` ref at registration when `knownGuardNames` was supplied |
-| `InvalidEventError`         | Event not available on current state                                                                                                              |
-| `CommandFailureError`       | Command returned `{ ok: false }` with no `errorState` defined (note: guard rejections don't throw — see Outcome rules)                            |
-| `OnEnterDepthExceededError` | onEnter chain exceeded `maxOnEnterDepth`                                                                                                          |
+| Error                       | When Thrown                                                                                                                                                                                                                                                                             |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WorkflowError`             | Instance not found, optimistic lock failure, command not in registry, **(v1.1.0)** guard ref not in registry                                                                                                                                                                            |
+| `WorkflowDefinitionError`   | Invalid/duplicate definition, unknown workflow name, **(v1.1.0)** unresolved `guard.name` ref at registration when `knownGuardNames` was supplied, **(v5.0.0)** a registered definition's content changed without a version bump (detected by `initialize()`'s content-hash comparison) |
+| `InvalidEventError`         | Event not available on current state                                                                                                                                                                                                                                                    |
+| `CommandFailureError`       | Command returned `{ ok: false }` with no `errorState` defined (note: guard rejections don't throw — see Outcome rules)                                                                                                                                                                  |
+| `OnEnterDepthExceededError` | onEnter chain exceeded `maxOnEnterDepth`                                                                                                                                                                                                                                                |
 
 All extend `WorkflowError` which extends `Error`.
 
@@ -568,6 +586,7 @@ All extend `WorkflowError` which extends `Error`.
 - (v1.1.0) Routing a guard rejection to `errorState` — `errorState` catches **command** failures only. A guard rejection means "not allowed right now"; either let the caller try again or model the rejection as an explicit alternate event
 - (v1.1.0) Asserting on a guard implementation's `.name` property in tests of `rejectedBy` — the runtime reports the **declared `eventDef.guard.name` ref** (definition is the source of truth). With aliasing custom registries the two can diverge
 - (v1.1.0) Passing both `guards` and `guardRegistry` to `WorkflowModule.forRoot[Async]` — they're mutually exclusive and the module throws synchronously if both are present
+- (v5.0.0) Changing a definition's content but forgetting to bump `version` — `WorkflowRuntime.initialize()` detects the content-hash mismatch and throws `WorkflowDefinitionError`. The failure is loud, not silent -- but only if `initialize()` actually runs before the drifted definition serves traffic, which is why calling it explicitly at boot (rather than relying on lazy invocation) is recommended
 
 ---
 

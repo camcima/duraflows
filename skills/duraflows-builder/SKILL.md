@@ -226,6 +226,19 @@ For waiting states that need deadlines:
 
 ### Step 7: Assemble the WorkflowDefinition
 
+Give the assembled definition an explicit `version` (a positive integer, defaults to `1` if omitted):
+
+```ts
+export const myWorkflow: WorkflowDefinition = {
+  name: "my-workflow",
+  version: 1,
+  initialState: "...",
+  states: {/* ... */},
+};
+```
+
+**(v5.0.0)** Bump `version` whenever you change the definition's content (states, events, commands) after it has already shipped — `WorkflowRuntime.initialize()` detects a content change under an unbumped version and throws `WorkflowDefinitionError`. A first-time build doesn't need to worry about this; it matters from the second deploy onward. See the duraflows-developer skill for the full mechanics.
+
 Use the skeleton templates as starting points:
 
 - [Simple sequence](./assets/simple-sequence.ts) -- linear progression with timeout
