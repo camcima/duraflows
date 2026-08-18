@@ -100,9 +100,12 @@ export interface WorkflowHistoryRecord {
    *
    * Caveat: every history row written inside the same database transaction
    * (an event plus its entire `onEnter` chain) shares an identical
-   * `createdAt`, and stores tiebreak ties with a random UUID, so this field
-   * must not be used to reconstruct the order of steps within one multi-hop
-   * transition — only to know roughly when the transition happened.
+   * `createdAt`, and stores tiebreak ties with a random UUID by default, so
+   * this field must not be used to reconstruct the order of steps within one
+   * multi-hop transition — only to know roughly when the transition happened.
+   * On the pg adapter, `generateMigrationSql({ uuidStrategy: "uuidv7" })`
+   * (PostgreSQL 18+) makes that tiebreak monotonic instead of random — see
+   * docs/persistence.md.
    */
   createdAt?: Date;
 }

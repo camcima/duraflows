@@ -54,6 +54,8 @@ const { up, down } = generateMigrationSql();
 
 Paste the returned `up` and `down` SQL into your migration file.
 
+This choice also determines whether `workflow_history` rows written in the same transaction (e.g. an event plus its `onEnter` chain) can be read back in the order they happened -- see [Persistence: Ordering within a multi-hop transition](./persistence.md#ordering-within-a-multi-hop-transition).
+
 ---
 
 Both options create two tables:

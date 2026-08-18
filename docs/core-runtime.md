@@ -358,6 +358,8 @@ for (const record of history) {
 
 Each record's `createdAt` is when the store recorded that transition (populated on read; adapters that predate this field return `undefined`). **Caveat:** every history row written inside the same database transaction -- an event plus its entire `onEnter` chain -- shares an identical `createdAt`, so it must not be used to reconstruct the order of steps within a single multi-hop transition, only roughly when the transition happened.
 
+The array returned by `getHistory()` (and `findByInstanceUuid()` underneath it) is itself ordered `created_at DESC, uuid DESC`, so this caveat is also about the order of the returned array, not just the `createdAt` field on each record. With the `@duraflows/pg` default `uuidStrategy` (`gen_random_uuid`), a multi-hop transition's rows come back in an arbitrary (but stable) order; pass `uuidStrategy: "uuidv7"` to `generateMigrationSql()` (PostgreSQL 18+ only) to make them come back in the order they actually happened. See [Persistence: Ordering within a multi-hop transition](./persistence.md#ordering-within-a-multi-hop-transition) for the full explanation and a verified empirical example.
+
 ### getHandle()
 
 Returns a `WorkflowHandle` -- a thin proxy that binds the instance UUID and delegates all operations to the runtime. The handle caches nothing; every method is a fresh call.

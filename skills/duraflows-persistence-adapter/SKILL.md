@@ -302,9 +302,11 @@ context: row.context_json as Record<string, unknown>,
 
 `append()` must return a string UUID for the created record.
 
-`findByInstanceUuid()` should default `limit` to 50 and `offset` to 0 when not provided. Order by `created_at DESC`.
+`findByInstanceUuid()` should default `limit` to 50 and `offset` to 0 when not provided. Order by `created_at DESC, uuid DESC` -- both reference adapters use this exact two-column sort, and a custom adapter must match it (or an equivalent monotonic-tiebreak scheme) to return a well-defined order.
 
-`createdAt` caveat: every history row written inside the same database transaction (an event plus its entire `onEnter` chain) shares an identical `created_at`, and ties are broken on a random UUID, so `createdAt` must never be used to reconstruct the order of steps within one multi-hop transition — only to know roughly when the transition happened.
+**Why `uuid` is part of the sort:** PostgreSQL's `now()` is transaction-scoped, so every history row written inside the same database transaction (an event plus its entire `onEnter` chain) shares an identical `created_at`. `uuid` is therefore the only tiebreaker, and whether that tiebreak is _correct_ (matches write order) or merely _stable_ (consistent but arbitrary) depends entirely on how your adapter's `uuid` column is generated -- a monotonic scheme (e.g. PostgreSQL's `uuidv7()`, PG 18+) sorts rows in write order; a random one (e.g. `gen_random_uuid()`, the `@duraflows/pg` default) sorts them arbitrarily. If your adapter delegates UUID generation to the database (as both reference adapters do), this is a migration-level choice, not something adapter code can fix at read time. See [docs/persistence.md](https://github.com/camcima/duraflows/blob/main/docs/persistence.md#ordering-within-a-multi-hop-transition) for the full explanation, including a verified empirical example (`ORDER BY created_at DESC, uuid DESC` recovered a five-row transaction as `1,3,4,5,2` with `gen_random_uuid()` vs. `5,4,3,2,1` with `uuidv7()`).
+
+`createdAt` caveat: every history row written inside the same database transaction (an event plus its entire `onEnter` chain) shares an identical `created_at`, and ties are broken on a random UUID by default, so `createdAt` must never be used to reconstruct the order of steps within one multi-hop transition — only to know roughly when the transition happened.
 
 ---
 
@@ -476,7 +478,7 @@ WorkflowModule.forRootAsync({
 - [ ] `runInTransaction()` supports nesting (reuses existing transaction)
 - [ ] `runInTransaction()` rolls back on error
 - [ ] `append()` returns a generated UUID string
-- [ ] `findByInstanceUuid()` supports `limit`/`offset` pagination, returns newest-first
+- [ ] `findByInstanceUuid()` supports `limit`/`offset` pagination, returns newest-first (`created_at DESC, uuid DESC` -- see the ordering contract above)
 - [ ] All Date fields are stored and retrieved as `Date` objects
 - [ ] JSON fields (`context`, `metadata`, `commandResults`, `triggerMetadata`) survive round-trips
 - [ ] `null` handling for `expiresAt`, `fromState`, `errorMessage`

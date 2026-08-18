@@ -86,6 +86,8 @@ const { up, down } = generateMigrationSql({ uuidStrategy: "uuidv7" });
 const { up, down } = generateMigrationSql();
 ```
 
+**This choice affects history ordering, not just PostgreSQL-version support.** `workflow_history` reads are ordered `created_at DESC, uuid DESC`, and every row written inside one transaction (e.g. an event plus its `onEnter` chain) shares one `created_at` -- so `uuid` is the tiebreaker. `uuidv7()` makes that tiebreak monotonic, so a multi-hop transition reads back in the order it happened; `gen_random_uuid()` (Option 1's dbmate migrations, and `generateMigrationSql()`'s default) makes it arbitrary, though stable once written. `uuidv7()` needs PostgreSQL 18+ -- on PG 13-17 that ordering simply isn't recoverable from the returned records. See [docs/persistence.md](https://github.com/camcima/duraflows/blob/main/docs/persistence.md#ordering-within-a-multi-hop-transition) for the full explanation, including a verified empirical example.
+
 Both options create three tables: `workflow_instances`, `workflow_history`, and `workflow_definitions`.
 
 ## API

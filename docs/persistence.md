@@ -74,7 +74,24 @@ interface WorkflowHistoryRecord {
 }
 ```
 
-`createdAt` is populated by the store on read and ignored on `append()` -- the database assigns it. **Caveat:** every history row written inside the same database transaction (an event plus its entire `onEnter` chain) shares an identical `createdAt`, and stores tiebreak same-timestamp rows on a random UUID, so this field tells you roughly _when_ a transition happened but must not be used to reconstruct the order of steps within one multi-hop transition.
+`createdAt` is populated by the store on read and ignored on `append()` -- the database assigns it. **Caveat:** every history row written inside the same database transaction (an event plus its entire `onEnter` chain) shares an identical `createdAt`, and stores tiebreak same-timestamp rows on a random UUID, so this field tells you roughly _when_ a transition happened but must not be used to reconstruct the order of steps within one multi-hop transition. See [Ordering within a multi-hop transition](#ordering-within-a-multi-hop-transition) below for why, and how to make it recoverable.
+
+#### Ordering within a multi-hop transition
+
+Both bundled stores read history with `ORDER BY created_at DESC, uuid DESC` (see [`PgWorkflowHistoryStore.findByInstanceUuid()`](#individual-classes) and the Kysely adapter's equivalent `.orderBy("created_at", "desc").orderBy("uuid", "desc")`). PostgreSQL's `now()` -- and therefore every `created_at DEFAULT now()` write -- is **transaction-scoped**, so every history row written inside one transaction (an event plus its entire `onEnter` chain) gets an identical `created_at`. That makes `uuid` the only tiebreaker, and its default, `gen_random_uuid()`, is random.
+
+This was verified on PostgreSQL 18.4 by issuing five separate `INSERT`s inside one transaction and reading them back with the stores' exact ordering:
+
+- `now()` produced **one** distinct value across all five rows, confirming transaction scoping.
+- With `gen_random_uuid()`, rows inserted `1 → 5` came back as `1, 3, 4, 5, 2` -- scrambled.
+- With `uuidv7()`, they came back as `5, 4, 3, 2, 1` -- exactly right for a newest-first read, including ties within a single millisecond.
+
+So: pass `uuidStrategy: "uuidv7"` to [`generateMigrationSql()`](#schema-setup) to make multi-hop history ordering recoverable. Two caveats:
+
+- **`uuidv7()` requires PostgreSQL 18+.** On PG 13-17 it doesn't exist, so this isn't an option there -- on those versions, the relative order of rows written in the same transaction cannot be recovered from the returned records.
+- **The shipped dbmate migration uses the random default.** `sql/dbmate/001_workflow_core.sql` declares `uuid uuid primary key default gen_random_uuid()` with no strategy option. Copying the dbmate migrations as-is gets you the random default; use `generateMigrationSql({ uuidStrategy: "uuidv7" })` instead, or hand-edit that column default.
+
+This only affects ordering **within** one multi-hop transition. A single-hop transition writes one history row, so there's nothing to tiebreak. Ordering **between** separate transitions is unaffected either way -- they have distinct `created_at` values.
 
 ### WorkflowTransactionRunner
 
@@ -148,6 +165,8 @@ const { up, down } = generateMigrationSql({ uuidStrategy: "uuidv7" });
 ```
 
 Ready-made dbmate migrations using `gen_random_uuid()` are also shipped under `sql/dbmate/` — apply all of them in order (`001` alone is not sufficient for the current runtime).
+
+This is not just a PostgreSQL-version preference: it also determines whether `workflow_history` rows written inside one transaction read back in the order they happened. See [Ordering within a multi-hop transition](#ordering-within-a-multi-hop-transition).
 
 ### Guard rejections
 
@@ -260,7 +279,7 @@ class PgWorkflowHistoryStore implements WorkflowHistoryStore {
 ```
 
 - `append()` uses `INSERT ... RETURNING uuid`
-- `findByInstanceUuid()` uses `SELECT ... ORDER BY created_at DESC LIMIT $2 OFFSET $3`
+- `findByInstanceUuid()` uses `SELECT ... ORDER BY created_at DESC, uuid DESC LIMIT $2 OFFSET $3` -- see [Ordering within a multi-hop transition](#ordering-within-a-multi-hop-transition) for why `uuid` is part of the sort
 
 **PgWorkflowDefinitionStore**
 

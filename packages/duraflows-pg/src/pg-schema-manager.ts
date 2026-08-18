@@ -10,6 +10,19 @@ export interface MigrationSqlOptions {
  * Use `uuidStrategy: "uuidv7"` for PostgreSQL 18+ (time-ordered UUIDs)
  * or `"gen_random_uuid"` for PostgreSQL 13+ (random UUIDs, the default).
  *
+ * This is not just a version preference: `workflow_history` reads are
+ * ordered `created_at DESC, uuid DESC`, and every row written inside one
+ * transaction (an event plus its entire `onEnter` chain) shares an
+ * identical `created_at` because PostgreSQL's `now()` is transaction-scoped
+ * -- so `uuid` is the only tiebreaker. `"uuidv7"` makes that tiebreak
+ * monotonic, so a multi-hop transition reads back in the order it
+ * happened; `"gen_random_uuid"` makes it arbitrary (though stable once
+ * written). On PostgreSQL 13-17, `"uuidv7"` is unavailable, so that
+ * ordering is simply not recoverable there. See docs/persistence.md for
+ * the full explanation, including a verified empirical example. Note the
+ * shipped dbmate migration (`sql/dbmate/001_workflow_core.sql`) hard-codes
+ * `gen_random_uuid()` -- use this function instead if you need `uuidv7`.
+ *
  * Copy the output into a dbmate migration file (or any other migration tool).
  */
 export function generateMigrationSql(options?: MigrationSqlOptions): { up: string; down: string } {
