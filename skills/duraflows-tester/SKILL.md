@@ -570,6 +570,7 @@ it("processes expired workflows after timeout elapses", async () => {
     historyStore,
     transactionRunner: new InMemoryTransactionRunner(),
     clock,
+    // definitionStore, // (v5.0.0) optional -- omit to leave definition versioning inert
   });
 
   // 2. Create instance — enters a state with a 2-hour timeout
