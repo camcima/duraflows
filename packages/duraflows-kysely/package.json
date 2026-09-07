@@ -60,7 +60,7 @@
   "devDependencies": {
     "@duraflows/core": "workspace:*",
     "@duraflows/pg": "workspace:*",
-    "@types/pg": "^8.21.0",
+    "@types/pg": "^8.23.1",
     "kysely": "^0.29.5",
     "pg": "^8.23.0"
   }
