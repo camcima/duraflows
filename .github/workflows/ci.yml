@@ -64,6 +64,45 @@ jobs:
           # green with zero real-SQL coverage.
           REQUIRE_INTEGRATION_DB: "1"
 
+  # @duraflows/nestjs supports NestJS 11 and 12 (peer: ^11.0.0 || ^12.0.0). The
+  # lockfile tracks 12; this matrix re-resolves each supported major and also
+  # smoke-tests the packed dist (CJS + ESM) so the require(esm) path NestJS 12
+  # relies on is covered.
+  nestjs-compat:
+    name: nestjs-compat (NestJS ${{ matrix.nest }}, Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `range` re-resolves @nestjs/* before testing; empty = keep the lockfile.
+          - { nest: "11.0.0 (floor)", range: "11.0.0", node: "20" }
+          - { nest: "11", range: "^11", node: "20" }
+          - { nest: "12", range: "", node: "20" }
+          - { nest: "12", range: "", node: "22" }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - name: Pin NestJS ${{ matrix.range }}
+        if: matrix.range != ''
+        run: >-
+          pnpm --filter @duraflows/nestjs add -D
+          "@nestjs/common@${{ matrix.range }}"
+          "@nestjs/core@${{ matrix.range }}"
+          "@nestjs/testing@${{ matrix.range }}"
+          "@nestjs/platform-express@${{ matrix.range }}"
+      - run: pnpm run build
+      - run: pnpm run typecheck
+      - run: pnpm vitest run packages/duraflows-nestjs
+      - run: node scripts/smoke-nestjs-consumer.mjs
+
   osv-scanner:
     runs-on: ubuntu-latest
     permissions:
