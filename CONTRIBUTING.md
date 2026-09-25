@@ -72,6 +72,18 @@ pnpm run lint
 pnpm test
 ```
 
+### NestJS versions
+
+`@duraflows/nestjs` supports NestJS 11 and 12. The lockfile tracks NestJS 12; CI's `nestjs-compat` job also re-resolves NestJS 11 and runs the package tests plus a smoke test of the packed `dist` (CommonJS and ESM). If you change `packages/duraflows-nestjs`, check NestJS 11 locally too, without committing the resulting `package.json`/lockfile changes:
+
+```bash
+pnpm --filter @duraflows/nestjs add -D "@nestjs/common@^11" "@nestjs/core@^11" "@nestjs/testing@^11" "@nestjs/platform-express@^11"
+pnpm run build
+pnpm vitest run packages/duraflows-nestjs
+node scripts/smoke-nestjs-consumer.mjs   # packs core + nestjs and boots a real app (needs network for npm install)
+git checkout -- packages/duraflows-nestjs/package.json pnpm-lock.yaml && pnpm install
+```
+
 ## Commit Messages
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) enforced by [commitlint](https://commitlint.js.org/) and [Lefthook](https://github.com/evilmartians/lefthook). Every commit message must follow this format:

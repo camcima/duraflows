@@ -33,6 +33,15 @@ You will also need a persistence adapter such as [`@duraflows/pg`](https://www.n
 pnpm add @duraflows/pg pg
 ```
 
+### Compatibility
+
+| NestJS | Supported | Notes                                                                                                                                                           |
+| ------ | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 12.x   | ✅        | NestJS 12 ships ESM-only. CommonJS apps load it through `require(esm)`, which needs **Node.js ≥ 20.19 or ≥ 22.12** (a NestJS requirement, not a duraflows one). |
+| 11.x   | ✅        | From `11.0.0`.                                                                                                                                                  |
+
+The same `@duraflows/nestjs` release works on both majors, from both CommonJS and ESM apps. No duraflows changes are needed when you upgrade an app from NestJS 11 to 12.
+
 ## Quick Start
 
 ### Module Registration
