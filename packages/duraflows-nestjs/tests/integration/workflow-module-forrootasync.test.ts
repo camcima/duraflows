@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach } from "vitest";
 import { Test, type TestingModule } from "@nestjs/testing";
-import { Injectable, Module } from "@nestjs/common";
+import { Injectable, Module, type OnModuleInit } from "@nestjs/common";
 import {
   WorkflowModule,
   WorkflowService,
@@ -426,5 +426,104 @@ describe("WorkflowModule.forRootAsync()", () => {
     expect(captured).toEqual([{ state: "ready" }]);
 
     await moduleRef.close();
+  });
+  // NestJS 12 runs a module's onModuleInit hooks level by level through the
+  // dependency hierarchy, where NestJS 11 fired them concurrently. These tests
+  // pin the ordering duraflows sees so a change between majors fails loudly.
+  describe("lifecycle hook ordering", () => {
+    // Characterization, not a contract: WorkflowModule is global, and Nest gives
+    // global modules Number.MAX_VALUE distance, so their hooks run BEFORE those
+    // of every non-global module (NestJS 11 and 12 alike). runtime.initialize()
+    // therefore cannot rely on an imported module's onModuleInit having run.
+    it("runs runtime.initialize() before an imported non-global module's onModuleInit", async () => {
+      const events: string[] = [];
+
+      @Injectable()
+      class DatabaseConnection implements OnModuleInit {
+        async onModuleInit(): Promise<void> {
+          events.push("db:onModuleInit");
+        }
+      }
+
+      @Module({ providers: [DatabaseConnection], exports: [DatabaseConnection] })
+      class DatabaseModule {}
+
+      const mod = await Test.createTestingModule({
+        imports: [
+          WorkflowModule.forRootAsync<[DatabaseConnection]>({
+            imports: [DatabaseModule],
+            inject: [DatabaseConnection],
+            useFactory: (db) => {
+              expect(db).toBeInstanceOf(DatabaseConnection);
+              return {
+                workflows: [testWorkflow],
+                persistence: {
+                  ...stubPersistence,
+                  definitionStore: {
+                    ensure: async (record) => {
+                      events.push("runtime:initialize");
+                      return { ...record, registeredAt: new Date() };
+                    },
+                    findByNameAndVersion: async () => null,
+                  },
+                },
+                clock: fixedClock,
+              };
+            },
+            commands: [{ name: "test-ship", useClass: TestShipCommand }],
+          }),
+        ],
+      }).compile();
+
+      await mod.init();
+
+      expect(events).toEqual(["runtime:initialize", "db:onModuleInit"]);
+      await mod.close();
+    });
+
+    it("initializes when an explicitly registered command has its own onModuleInit", async () => {
+      const events: string[] = [];
+
+      @Injectable()
+      class WarmUpShipCommand implements WorkflowCommand, OnModuleInit {
+        async onModuleInit(): Promise<void> {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          events.push("command:init");
+        }
+
+        async execute(_subject: unknown, _context: WorkflowExecutionContext): Promise<CommandResult> {
+          return { ok: true, code: "SHIPPED" };
+        }
+      }
+
+      const mod = await Test.createTestingModule({
+        imports: [
+          WorkflowModule.forRootAsync({
+            commands: [{ name: "test-ship", useClass: WarmUpShipCommand }],
+            useFactory: () => ({
+              workflows: [testWorkflow],
+              persistence: {
+                ...stubPersistence,
+                definitionStore: {
+                  ensure: async (record) => {
+                    events.push("runtime:initialize");
+                    return { ...record, registeredAt: new Date() };
+                  },
+                  findByNameAndVersion: async () => null,
+                },
+              },
+              clock: fixedClock,
+            }),
+          }),
+        ],
+      }).compile();
+
+      await expect(mod.init()).resolves.toBeDefined();
+
+      expect(events).toEqual(expect.arrayContaining(["command:init", "runtime:initialize"]));
+      const registry = mod.get<WorkflowCommandRegistry>(WORKFLOW_COMMAND_REGISTRY);
+      expect(registry.get("test-ship")).toBeInstanceOf(WarmUpShipCommand);
+      await mod.close();
+    });
   });
 });
