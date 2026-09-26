@@ -16,6 +16,13 @@ pnpm add class-validator class-transformer
 
 `@duraflows/nestjs` does **not** depend on `@duraflows/pg`. You choose your persistence adapter.
 
+### Compatibility
+
+`@duraflows/nestjs` supports **NestJS 11 and 12** (`@nestjs/common` / `@nestjs/core` peer range `^11.0.0 || ^12.0.0`), from both CommonJS and ESM applications. CI runs the package's tests and a packed-`dist` smoke test against NestJS `11.0.0`, the latest 11.x, and the latest 12.x.
+
+- NestJS 12 packages are ESM-only. A CommonJS app loads them (and the CommonJS build of `@duraflows/nestjs` loads them) through Node's `require(esm)`, which is unflagged from **Node.js 20.19 / 22.12**. Jest on CommonJS additionally needs Node.js 24.9+, per the NestJS migration guide.
+- Moving an app from NestJS 11 to 12 needs no duraflows changes: the module API, the REST controllers, the `ValidationPipe`-based DTOs, and the exception filter behave the same on both.
+
 ## @WorkflowCommand Decorator
 
 The `@WorkflowCommand("name")` decorator auto-registers command handlers via NestJS discovery, eliminating the need to manually list them in the `commands` array.
@@ -682,6 +689,8 @@ The module also registers a `WorkflowRuntimeInitializer` (implementing `OnModule
 
 - A definition whose content changed without its `version` being bumped throws `WorkflowDefinitionError` at application startup, instead of surfacing later on the first `createInstance()`, `triggerEvent()`, or `processExpiredWorkflows()` call.
 - This is inert when the configured `persistence` has no `definitionStore` — the bundled `pgWorkflowProviders()` and `kyselyWorkflowProviders()` always supply one, so it applies automatically whenever you use either.
+
+`WorkflowModule` is a global module, and NestJS runs the lifecycle hooks of global modules **before** those of non-global modules (on both NestJS 11 and 12). So `runtime.initialize()` runs before the `onModuleInit()` of your own modules, including a module you pass to `forRootAsync({ imports })`. The persistence you return from the factory must be usable as soon as it is constructed. A `pg` `Pool` or a Kysely instance is fine, because they connect lazily. A client that only connects in its own `onModuleInit()` is not ready yet.
 
 ## NestCommandRegistry
 
