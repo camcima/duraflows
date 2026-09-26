@@ -1,5 +1,11 @@
 # Changelog
 
+## [5.1.0](https://github.com/camcima/duraflows/compare/v5.0.0...v5.1.0) (2026-09-26)
+
+### Features
+
+* **nestjs:** support NestJS v12 alongside v11 ([#90](https://github.com/camcima/duraflows/issues/90)) ([836098a](https://github.com/camcima/duraflows/commit/836098ab2666ca41f9128049dea2de665965497b))
+
 ## [5.0.0](https://github.com/camcima/duraflows/compare/v4.1.0...v5.0.0) (2026-08-18)
 
 ### ⚠ BREAKING CHANGES
