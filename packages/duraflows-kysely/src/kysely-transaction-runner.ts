@@ -3,8 +3,8 @@ import type { AfterCommitCallback, WorkflowTransactionRunner } from "@duraflows/
 import { WorkflowError } from "@duraflows/core";
 import type { WorkflowDatabase } from "./kysely-database.js";
 import {
-  executeRawStatement,
   kyselyTransactionScopes,
+  runInKyselySavepoint,
   runOwnedKyselyTransaction,
 } from "./kysely-transaction-context.js";
 
@@ -80,9 +80,7 @@ export class KyselyTransactionRunner implements WorkflowTransactionRunner {
     if (scope) {
       // Nested: a savepoint on the outer transaction, so a failure rolls back
       // only this call. The outer transaction's timeouts stay in force.
-      return kyselyTransactionScopes.runInSavepoint(this.db, scope, callback, (sql) =>
-        executeRawStatement(scope.connection, sql),
-      );
+      return runInKyselySavepoint(this.db, scope, callback);
     }
     return runOwnedKyselyTransaction(
       this.db,
