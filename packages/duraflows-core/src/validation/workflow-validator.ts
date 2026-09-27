@@ -16,6 +16,15 @@ export interface WorkflowValidationOptions {
   knownGuardNames?: Set<string>;
 }
 
+/**
+ * Whether `name` is a state the definition itself declares. An own-property
+ * check, so inherited Object.prototype members ("toString", "constructor", ...)
+ * never pass for a state.
+ */
+function hasState(definition: WorkflowDefinition, name: string): boolean {
+  return Object.hasOwn(definition.states, name);
+}
+
 export class WorkflowValidator {
   validate(definition: WorkflowDefinition, options?: WorkflowValidationOptions): ValidationResult {
     const errors: ValidationError[] = [];
@@ -30,7 +39,7 @@ export class WorkflowValidator {
       errors.push({ path: "states", message: "Workflow must have at least one state" });
     }
 
-    if (!definition.states[definition.initialState]) {
+    if (!hasState(definition, definition.initialState)) {
       errors.push({
         path: "initialState",
         message: `Initial state "${definition.initialState}" does not exist in states`,
@@ -44,14 +53,14 @@ export class WorkflowValidator {
       if (state.onEnter) {
         const onEnterPath = `states.${stateName}.onEnter`;
 
-        if (state.onEnter.targetState && !definition.states[state.onEnter.targetState]) {
+        if (state.onEnter.targetState && !hasState(definition, state.onEnter.targetState)) {
           errors.push({
             path: `${onEnterPath}.targetState`,
             message: `Target state "${state.onEnter.targetState}" does not exist in states`,
           });
         }
 
-        if (state.onEnter.errorState && !definition.states[state.onEnter.errorState]) {
+        if (state.onEnter.errorState && !hasState(definition, state.onEnter.errorState)) {
           errors.push({
             path: `${onEnterPath}.errorState`,
             message: `Error state "${state.onEnter.errorState}" does not exist in states`,
@@ -89,14 +98,14 @@ export class WorkflowValidator {
           });
         }
 
-        if (event.targetState && !definition.states[event.targetState]) {
+        if (event.targetState && !hasState(definition, event.targetState)) {
           errors.push({
             path: `${eventPath}.targetState`,
             message: `Target state "${event.targetState}" does not exist in states`,
           });
         }
 
-        if (event.errorState && !definition.states[event.errorState]) {
+        if (event.errorState && !hasState(definition, event.errorState)) {
           errors.push({
             path: `${eventPath}.errorState`,
             message: `Error state "${event.errorState}" does not exist in states`,
@@ -143,7 +152,7 @@ export class WorkflowValidator {
     this.validateOnEnterCycles(definition, errors);
 
     // Reachability pass: warn about states unreachable from the initial state
-    if (definition.states[definition.initialState]) {
+    if (hasState(definition, definition.initialState)) {
       const reachable = new Set<string>([definition.initialState]);
       const queue = [definition.initialState];
       while (queue.length > 0) {
@@ -155,7 +164,7 @@ export class WorkflowValidator {
           targets.push(event.targetState, event.errorState);
         }
         for (const target of targets) {
-          if (target && definition.states[target] && !reachable.has(target)) {
+          if (target && hasState(definition, target) && !reachable.has(target)) {
             reachable.add(target);
             queue.push(target);
           }

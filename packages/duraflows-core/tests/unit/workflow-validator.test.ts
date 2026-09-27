@@ -54,6 +54,42 @@ describe("WorkflowValidator", () => {
     );
   });
 
+  it("returns an error when the initial state is an inherited Object.prototype name", () => {
+    const def = validDefinition();
+    def.initialState = "constructor";
+
+    const result = validator.validate(def);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({ path: "initialState" }));
+  });
+
+  it.each([
+    ["event targetState", { events: { go: { targetState: "toString" } } }, "states.start.events.go.targetState"],
+    [
+      "event errorState",
+      { events: { go: { targetState: "end", errorState: "valueOf", commands: [{ name: "c" }] } } },
+      "states.start.events.go.errorState",
+    ],
+    ["onEnter targetState", { onEnter: { targetState: "toString" } }, "states.start.onEnter.targetState"],
+    [
+      "onEnter errorState",
+      { onEnter: { errorState: "hasOwnProperty", commands: [{ name: "c" }] } },
+      "states.start.onEnter.errorState",
+    ],
+  ])("returns an error when an %s names an inherited Object.prototype property", (_label, start, path) => {
+    const def: WorkflowDefinition = {
+      name: "inherited-state-names",
+      initialState: "start",
+      states: { start, end: {} } as WorkflowDefinition["states"],
+    };
+
+    const result = validator.validate(def);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({ path }));
+  });
+
   it("returns an error when no states are defined", () => {
     const def: WorkflowDefinition = {
       name: "empty-workflow",

@@ -166,6 +166,46 @@ describe("EventExecutor", () => {
     ).rejects.toThrow(InvalidEventError);
   });
 
+  it.each(["toString", "constructor", "hasOwnProperty", "valueOf"])(
+    "should throw InvalidEventError for the inherited Object.prototype name %s",
+    async (eventName) => {
+      const definition: WorkflowDefinition = {
+        name: "test-wf-inherited",
+        initialState: "draft",
+        states: {
+          draft: { events: { submit: { targetState: "submitted" } } },
+          submitted: {},
+        },
+      };
+
+      const compiled = compiler.compile(definition);
+      const executor = new EventExecutor(new CommandExecutor(makeRegistry({})));
+
+      await expect(
+        executor.execute(compiled, "draft", eventName, "instance-inherited", {}, makeContext()),
+      ).rejects.toThrow(InvalidEventError);
+    },
+  );
+
+  it("should execute an event explicitly declared under an Object.prototype name", async () => {
+    const definition: WorkflowDefinition = {
+      name: "test-wf-declared-tostring",
+      initialState: "draft",
+      states: {
+        draft: { events: { toString: { targetState: "submitted" } } },
+        submitted: {},
+      },
+    };
+
+    const compiled = compiler.compile(definition);
+    const executor = new EventExecutor(new CommandExecutor(makeRegistry({})));
+
+    const result = await executor.execute(compiled, "draft", "toString", "instance-declared", {}, makeContext());
+
+    expect(result.outcome).toBe("success");
+    expect(result.toState).toBe("submitted");
+  });
+
   it("should throw CommandFailureError when command fails and no errorState is defined", async () => {
     const definition: WorkflowDefinition = {
       name: "test-wf-cmd-fail",
