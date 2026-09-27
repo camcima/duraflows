@@ -1,5 +1,18 @@
 # Changelog
 
+## [5.2.1](https://github.com/camcima/duraflows/compare/v5.2.0...v5.2.1) (2026-09-27)
+
+### Bug Fixes
+
+* **pg:** evict a client whose ROLLBACK failed instead of returning it to the pool ([b7f61c4](https://github.com/camcima/duraflows/commit/b7f61c4cbb8e3ad246ea33127a658c3c023c7f4f))
+
+### Notes
+
+* New documentation on three transaction pitfalls:
+  * Under a seeded transaction, an observer must `await` the duraflows calls it makes ([core runtime](./docs/core-runtime.md#firing-semantics)).
+  * Don't start duraflows calls from timers or unawaited promises created inside a transaction ([persistence](./docs/persistence.md)).
+  * Don't mix `kyselyWorkflowProvidersFromTransaction` with the long-lived `db`-bound providers in one transaction ([kysely README](./packages/duraflows-kysely/README.md)).
+
 ## [5.2.0](https://github.com/camcima/duraflows/compare/v5.1.0...v5.2.0) (2026-09-27)
 
 ### Features
