@@ -347,6 +347,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       now += 60_000 + 1;
       const parkedSweep = await restarted.processExpiredWorkflows();
       expect(parkedSweep.parked.map((p) => p.uuid)).toEqual([instance.uuid]);
+      expect(parkedSweep.failed).toEqual([{ uuid: instance.uuid, error: "js boom", attempts: 2, retryAt: null }]);
 
       const another = buildRuntime();
       expect((await another.findParkedTimeouts()).map((i) => i.uuid)).toEqual([instance.uuid]);

@@ -314,6 +314,39 @@ describe("KyselyWorkflowInstanceStore", () => {
       });
     });
 
+    const neverFailed = {
+      timeout_attempts: 0,
+      timeout_retry_at: null,
+      timeout_last_error: null,
+      timeout_parked_at: null,
+    };
+
+    it("create writes 'never failed' for a null timeoutRetry", async () => {
+      const { db, calls } = createMockDb();
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      await store.create({ ...sampleInstance, timeoutRetry: null });
+
+      expect(calls.find((c) => c.method === "values")!.args[0]).toMatchObject(neverFailed);
+    });
+
+    it("update writes 'never failed' for a null timeoutRetry", async () => {
+      const { db, calls, executeMock } = createMockDb();
+      executeMock.mockResolvedValue([{ numUpdatedRows: BigInt(1) }]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      await store.update({ ...sampleInstance, version: 1, timeoutRetry: null });
+
+      expect(calls.find((c) => c.method === "set")!.args[0]).toMatchObject(neverFailed);
+    });
+
+    it("maps a row with zero timeout attempts to a null timeoutRetry", async () => {
+      const { db } = createMockDb([{ ...sampleRow, ...neverFailed }]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      expect((await store.findByUuid("inst-uuid"))!.timeoutRetry).toBeNull();
+    });
+
     it("findExpired filters parked and not-yet-due rows and orders by due time", async () => {
       const { db, calls } = createMockDb([sampleRow]);
       const store = new KyselyWorkflowInstanceStore(db);

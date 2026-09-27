@@ -411,7 +411,7 @@ WorkflowModule.forRoot({
 
 ### NestJS (async, v1.0.0)
 
-`forRootAsync` is generic over the factory's argument tuple. Declaring `<TArgs>` typechecks `inject` against `useFactory` parameters at compile time. Observers, `onObserverError`, and `clock` go in the factory's return value (the `WorkflowModuleFactoryConfig`) so they can compose from injected services.
+`forRootAsync` is generic over the factory's argument tuple. Declaring `<TArgs>` typechecks `inject` against `useFactory` parameters at compile time. Observers, `onObserverError`, `clock`, and `timeoutRetry` go in the factory's return value (the `WorkflowModuleFactoryConfig`) so they can compose from injected services.
 
 ```ts
 WorkflowModule.forRootAsync<[ConfigService, AuditService]>({
@@ -585,7 +585,7 @@ const parked = await runtime.findParkedTimeouts({ workflowName: "order", limit: 
 await runtime.rearmTimeout(parked[0].uuid); // clears timeoutRetry; the next sweep retries it
 ```
 
-In NestJS, `WorkflowTimeoutService` exposes the same `findParkedTimeouts(input?)` and `rearmTimeout(uuid)`. `rearmTimeout` throws `WorkflowInstanceNotFoundError` for an unknown UUID and returns an instance without retry state unchanged. `timeoutRetry.lastError` holds the raw error message (truncated to 2000 characters), which may include internal details.
+In NestJS, pass `timeoutRetry` in `WorkflowModule.forRoot({ ... })` or in the `forRootAsync` factory's return value; `WorkflowTimeoutService` exposes the same `findParkedTimeouts(input?)` and `rearmTimeout(uuid)`. `rearmTimeout` throws `WorkflowInstanceNotFoundError` for an unknown UUID and returns an instance without retry state unchanged. `timeoutRetry.lastError` holds the raw error message (truncated to 2000 characters), which may include internal details.
 
 ---
 

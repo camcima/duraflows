@@ -1191,7 +1191,7 @@ The suite verifies:
 - `update` enforces optimistic concurrency on `version` and throws `WorkflowError` on mismatch
 - `update` does NOT modify `metadata` (write-once after `create`)
 - `findExpired` honors limit + ordering and skips already-locked rows
-- **(v6.0.0)** `timeoutRetry` round-trips; `findExpired` skips parked and not-yet-due retries and orders by `timeoutRetry.retryAt ?? expiresAt`; `findParkedTimeouts` filters, orders and limits parked instances
+- **(v6.0.0)** `timeoutRetry` round-trips; `findExpired` skips parked and not-yet-due retries and orders by `timeoutRetry?.retryAt ?? expiresAt`; `findParkedTimeouts` filters, orders and limits parked instances
 - Nested-transaction reuse via `transactionRunner.runInTransaction`
 
 A passing run is the contract guarantee that your adapter works with the runtime. `@duraflows/pg` and `@duraflows/kysely` both run it in CI.

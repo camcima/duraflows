@@ -335,6 +335,25 @@ describe("WorkflowModule.forRootAsync()", () => {
     ).rejects.toThrow(/cannot supply both `guards` and `guardRegistry`/);
   });
 
+  it("passes the timeoutRetry option from the async factory config to the runtime", async () => {
+    await expect(
+      Test.createTestingModule({
+        imports: [
+          WorkflowModule.forRootAsync(
+            defaultAsyncOptions({
+              useFactory: () => ({
+                workflows: [testWorkflow],
+                persistence: stubPersistence,
+                clock: fixedClock,
+                timeoutRetry: { initialDelayMs: 10_000, maxDelayMs: 5_000 },
+              }),
+            }),
+          ),
+        ],
+      }).compile(),
+    ).rejects.toThrow("timeoutRetry.initialDelayMs (10000) must not exceed timeoutRetry.maxDelayMs (5000)");
+  });
+
   it("accepts guards via the async factory config", async () => {
     const guards: WorkflowGuard[] = [{ name: "isVerified", evaluate: () => true }];
 

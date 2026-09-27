@@ -240,6 +240,27 @@ describe("WorkflowModule.forRoot()", () => {
     expect(definitionRegistry.has("guarded-wf")).toBe(true);
   });
 
+  it("passes the timeoutRetry option to the runtime: an invalid value fails module setup", async () => {
+    await expect(
+      Test.createTestingModule({
+        imports: [WorkflowModule.forRoot(defaultOptions({ timeoutRetry: { maxAttempts: 0 } }))],
+      }).compile(),
+    ).rejects.toThrow("timeoutRetry.maxAttempts must be a positive integer, got 0");
+  });
+
+  it("accepts a valid timeoutRetry option", async () => {
+    const mod = await Test.createTestingModule({
+      imports: [
+        WorkflowModule.forRoot(
+          defaultOptions({ timeoutRetry: { initialDelayMs: 1_000, maxDelayMs: 5_000, maxAttempts: 3 } }),
+        ),
+      ],
+    }).compile();
+
+    expect(mod.get(WORKFLOW_RUNTIME)).toBeInstanceOf(WorkflowRuntime);
+    await mod.close();
+  });
+
   it("rejects definitions that reference an unregistered guard", async () => {
     const guardedDefinition: WorkflowDefinition = {
       name: "guarded-wf",
