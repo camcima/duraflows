@@ -233,9 +233,9 @@ async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<Pro
    released when this transaction ends; `now` comes from the injected clock
    rather than the database's `now()`.
 2. Processes each expired instance in its **own transaction**:
-   - Re-locks the instance with `lockByUuid` and re-checks `expiresAt` — the
-     scan's locks were released, so another worker may have processed the
-     instance in between. Instances no longer expired are skipped.
+   - Re-locks the instance with `lockByUuid` and re-checks that its timeout is
+     still due — the scan's locks were released, so another worker may have
+     processed the instance in between. Instances no longer due are skipped.
    - Resolves the timeout event name from the freshly locked state. If the
      definition changed and no timeout event exists, clears `expiresAt`.
    - Triggers the event with `triggerMetadata: { source: "timeout" }` and runs

@@ -50,15 +50,34 @@ class InMemoryInstanceStore implements WorkflowInstanceStore {
     this.instances.set(instance.uuid, structuredClone(instance));
   }
 
+  // Due: expired, not parked (v6.0.0), and no retry scheduled or the retry is due.
+  // Ordered by the retry time when one is scheduled, otherwise expiresAt.
   async findExpired(limit: number, now: Date): Promise<WorkflowInstance[]> {
-    const results: WorkflowInstance[] = [];
-    for (const inst of this.instances.values()) {
-      if (inst.expiresAt && inst.expiresAt <= now) {
-        results.push(structuredClone(inst));
-        if (results.length >= limit) break;
-      }
-    }
-    return results;
+    const dueAt = (inst: WorkflowInstance) => (inst.timeoutRetry?.retryAt ?? inst.expiresAt!).getTime();
+    return [...this.instances.values()]
+      .filter(
+        (inst) =>
+          inst.expiresAt !== null &&
+          inst.expiresAt < now &&
+          !inst.timeoutRetry?.parkedAt &&
+          (!inst.timeoutRetry?.retryAt || inst.timeoutRetry.retryAt < now),
+      )
+      .sort((a, b) => dueAt(a) - dueAt(b))
+      .slice(0, limit)
+      .map((inst) => structuredClone(inst));
+  }
+
+  // (v6.0.0) Required: parked instances, oldest-parked first (ties by uuid).
+  async findParkedTimeouts(options: { limit: number; workflowName?: string }): Promise<WorkflowInstance[]> {
+    return [...this.instances.values()]
+      .filter((inst) => inst.timeoutRetry?.parkedAt)
+      .filter((inst) => options.workflowName === undefined || inst.workflowName === options.workflowName)
+      .sort(
+        (a, b) =>
+          a.timeoutRetry!.parkedAt!.getTime() - b.timeoutRetry!.parkedAt!.getTime() || a.uuid.localeCompare(b.uuid),
+      )
+      .slice(0, options.limit)
+      .map((inst) => structuredClone(inst));
   }
 }
 ```
@@ -590,6 +609,40 @@ it("processes expired workflows after timeout elapses", async () => {
   expect(updated?.currentState).toBe("escalated"); // timeout target state
 });
 ```
+
+### Testing Timeout Retries and Parking (v6.0.0)
+
+When a timeout's processing fails (a command throws, an `onEnter` chain errors), its transaction rolls back and the runtime records the failure on the instance: `timeoutRetry.attempts` increments, `retryAt` is scheduled with exponential backoff, and after `maxAttempts` failures the instance is parked (`parkedAt` set) and skipped by later sweeps. Pass small `timeoutRetry` options so a test reaches parking quickly:
+
+```ts
+it("parks an instance whose timeout keeps failing, then re-arms it", async () => {
+  const runtime = new WorkflowRuntime({
+    definitionRegistry,
+    commandRegistry, // the timeout event's command throws
+    instanceStore,
+    historyStore,
+    transactionRunner: new InMemoryTransactionRunner(),
+    clock,
+    timeoutRetry: { initialDelayMs: 60_000, maxDelayMs: 60_000, maxAttempts: 2 },
+  });
+  const instance = await runtime.createInstance({ workflowName: "order" });
+  currentTime = new Date(currentTime.getTime() + 3 * 60 * 60_000); // past the deadline
+
+  const first = await runtime.processExpiredWorkflows();
+  expect(first.failed).toEqual([expect.objectContaining({ uuid: instance.uuid, attempts: 1 })]);
+  expect(first.failed[0]!.retryAt).toEqual(new Date(currentTime.getTime() + 60_000));
+
+  currentTime = new Date(currentTime.getTime() + 60_001); // past the retry
+  const second = await runtime.processExpiredWorkflows();
+  expect(second.parked.map((p) => p.uuid)).toEqual([instance.uuid]);
+  expect((await runtime.findParkedTimeouts()).map((i) => i.uuid)).toEqual([instance.uuid]);
+
+  const rearmed = await runtime.rearmTimeout(instance.uuid); // clears timeoutRetry
+  expect(rearmed.timeoutRetry).toBeNull();
+});
+```
+
+Failed attempts write no history rows; the failure lives only in `instance.timeoutRetry`.
 
 ### Verifying Timeout Trigger Metadata
 
@@ -1138,6 +1191,7 @@ The suite verifies:
 - `update` enforces optimistic concurrency on `version` and throws `WorkflowError` on mismatch
 - `update` does NOT modify `metadata` (write-once after `create`)
 - `findExpired` honors limit + ordering and skips already-locked rows
+- **(v6.0.0)** `timeoutRetry` round-trips; `findExpired` skips parked and not-yet-due retries and orders by `timeoutRetry.retryAt ?? expiresAt`; `findParkedTimeouts` filters, orders and limits parked instances
 - Nested-transaction reuse via `transactionRunner.runInTransaction`
 
 A passing run is the contract guarantee that your adapter works with the runtime. `@duraflows/pg` and `@duraflows/kysely` both run it in CI.
