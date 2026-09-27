@@ -42,7 +42,14 @@ import { TimeoutRetryPolicy } from "./timeout-retry-policy.js";
 
 const DEFAULT_MAX_ON_ENTER_DEPTH = 10;
 
-/** Whether `instance`'s timeout should be processed at `now`: expired, not parked, and any scheduled retry reached. */
+/**
+ * Whether `instance`'s timeout should be processed at `now`: expired, not parked, and any scheduled retry reached.
+ *
+ * The boundary is inclusive, while `findExpired`'s scan is strict (`< now`). That is safe: the scan
+ * decides what enters a sweep, and this re-check always runs at the same or a later `now`, so
+ * anything the scan returned still passes here. It only has to reject instances another worker
+ * moved, rescheduled, or parked in between.
+ */
 function isTimeoutDue(instance: WorkflowInstance, now: Date): boolean {
   if (!instance.expiresAt || instance.expiresAt > now) return false;
   if (instance.timeoutRetry?.parkedAt) return false;

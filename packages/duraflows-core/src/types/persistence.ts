@@ -50,7 +50,8 @@ export interface WorkflowInstanceStore {
    * not parked (`timeoutRetry?.parkedAt` is null); and no retry scheduled or
    * `timeoutRetry.retryAt < now`. Ordered by when each became due —
    * `timeoutRetry.retryAt` when set, otherwise `expiresAt` — oldest first, so
-   * instances whose timeout keeps failing move behind healthy ones.
+   * instances whose timeout keeps failing move behind healthy ones. Instances
+   * that became due at the same moment come back in no particular order.
    * Adapters must throw if called outside an active transaction.
    *
    * `SKIP LOCKED` only keeps concurrently sweeping workers from blocking on
