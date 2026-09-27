@@ -18,6 +18,14 @@ export interface OnEnterChainResult {
   hops: OnEnterHopResult[];
 }
 
+/**
+ * Called after each hop is decided and before the next state's onEnter
+ * commands run. The runtime uses it to apply and persist the hop, which also
+ * updates `context.context` so the next hop's commands observe the state they
+ * are running in.
+ */
+export type OnEnterHopHandler = (hop: OnEnterHopResult) => Promise<void>;
+
 export class OnEnterExecutor {
   constructor(private readonly commandExecutor: CommandExecutor) {}
 
@@ -28,8 +36,13 @@ export class OnEnterExecutor {
     subject: unknown,
     context: WorkflowExecutionContext,
     maxDepth: number,
+    onHop?: OnEnterHopHandler,
   ): Promise<OnEnterChainResult> {
     const hops: OnEnterHopResult[] = [];
+    const recordHop = async (hop: OnEnterHopResult): Promise<void> => {
+      hops.push(hop);
+      await onHop?.(hop);
+    };
     let currentState = startingState;
     let depth = 0;
     let predecessor: string | null = context.fromState;
@@ -64,7 +77,7 @@ export class OnEnterExecutor {
       if (outcome === "failure") {
         if (onEnter.errorState) {
           const errorEntryUuid = randomUUID();
-          hops.push({
+          await recordHop({
             fromState,
             toState: onEnter.errorState,
             transitionUuid: errorEntryUuid,
@@ -84,7 +97,7 @@ export class OnEnterExecutor {
 
       if (onEnter.targetState) {
         const nextEntryUuid = randomUUID();
-        hops.push({
+        await recordHop({
           fromState,
           toState: onEnter.targetState,
           transitionUuid: nextEntryUuid,
@@ -98,7 +111,7 @@ export class OnEnterExecutor {
       }
 
       if (commandExecResult.commandResults.length > 0) {
-        hops.push({
+        await recordHop({
           fromState,
           toState: currentState,
           transitionUuid: currentEntryUuid,

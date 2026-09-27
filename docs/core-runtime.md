@@ -128,7 +128,7 @@ async triggerEvent(input: TriggerWorkflowEventInput): Promise<WorkflowExecutionR
 8. Persists context: command mutations first, then new state's `context` merged on top (state context wins)
 9. Updates instance (state, version++, context, timeout deadline)
 10. Appends history record
-11. If the new state has an `onEnter` definition, processes the onEnter chain (each hop updates the instance, appends a history record with `eventName: "onEnter"` and `triggerMetadata: { source: "onEnter" }`, and merges context). See [onEnter](./workflow-definitions.md#workflowonenterdefinition).
+11. If the new state has an `onEnter` definition, processes the onEnter chain (each hop updates the instance, appends a history record with `eventName: "onEnter"` and `triggerMetadata: { source: "onEnter" }`, and merges context). Each hop is applied before the next state's `onEnter` commands run, so they see that state's context; a state's own `onEnter` command writes win over its declared `context`. See [onEnter](./workflow-definitions.md#workflowonenterdefinition).
 12. Returns the final landing state (after any onEnter hops)
 13. Commits transaction
 

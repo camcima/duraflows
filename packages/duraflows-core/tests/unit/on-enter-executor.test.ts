@@ -661,4 +661,41 @@ describe("OnEnterExecutor", () => {
     expect(result.outcome).toBe("success");
     expect(result.hops).toHaveLength(0);
   });
+
+  it("calls onHop after each hop, before the next state's commands run", async () => {
+    const definition: WorkflowDefinition = {
+      name: "test-wf-on-hop",
+      initialState: "a",
+      states: {
+        a: { onEnter: { targetState: "b", commands: [{ name: "cmdA" }] } },
+        b: { onEnter: { errorState: "c", commands: [{ name: "cmdB" }] } },
+        c: { onEnter: { commands: [{ name: "cmdC" }] } },
+      },
+    };
+    const calls: string[] = [];
+    const record = (name: string, ok: boolean): WorkflowCommand => ({
+      execute: async () => {
+        calls.push(`run ${name}`);
+        return { ok };
+      },
+    });
+    const executor = new OnEnterExecutor(
+      new CommandExecutor(
+        makeRegistry({ cmdA: record("cmdA", true), cmdB: record("cmdB", false), cmdC: record("cmdC", true) }),
+      ),
+    );
+
+    await executor.executeChain(definition, "a", "instance-on-hop", {}, makeContext(), 10, async (hop) => {
+      calls.push(`hop ${hop.fromState}->${hop.toState} ${hop.outcome}`);
+    });
+
+    expect(calls).toEqual([
+      "run cmdA",
+      "hop a->b success",
+      "run cmdB",
+      "hop b->c failure",
+      "run cmdC",
+      "hop c->c success",
+    ]);
+  });
 });

@@ -73,7 +73,7 @@ export type { CommandExecutionResult } from "./execution/command-executor.js";
 export { EventExecutor } from "./execution/event-executor.js";
 export type { EventExecutionResult } from "./execution/event-executor.js";
 export { OnEnterExecutor } from "./execution/on-enter-executor.js";
-export type { OnEnterChainResult, OnEnterHopResult } from "./execution/on-enter-executor.js";
+export type { OnEnterChainResult, OnEnterHopResult, OnEnterHopHandler } from "./execution/on-enter-executor.js";
 export { TimeoutResolver } from "./execution/timeout-resolver.js";
 
 // Diagram
