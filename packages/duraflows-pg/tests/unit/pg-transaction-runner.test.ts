@@ -280,6 +280,40 @@ describe("PgTransactionRunner", () => {
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("rollback failed"));
     warnSpy.mockRestore();
   });
+
+  it("evicts the client from the pool when ROLLBACK fails, instead of returning it", async () => {
+    const { pool, client } = createMocks();
+    const rollbackError = new Error("rollback failed");
+    (client.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: string) => {
+      if (sql === "ROLLBACK") throw rollbackError;
+      return { rows: [] };
+    });
+    const runner = new PgTransactionRunner(pool);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(
+      runner.runInTransaction(async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+
+    // pg destroys a client released with an error rather than pooling it.
+    expect(client.release).toHaveBeenCalledWith(rollbackError);
+    warnSpy.mockRestore();
+  });
+
+  it("returns the client to the pool (no error) after a successful ROLLBACK", async () => {
+    const { pool, client } = createMocks();
+    const runner = new PgTransactionRunner(pool);
+
+    await expect(
+      runner.runInTransaction(async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+
+    expect(client.release).toHaveBeenCalledWith(undefined);
+  });
 });
 
 describe("PgTransactionRunner timeouts", () => {
