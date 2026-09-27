@@ -138,7 +138,8 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
   });
 
   describe("kysely runtime inside an outer transaction", () => {
-    let now = new Date("2026-01-01T00:00:00Z").getTime();
+    const start = new Date("2026-01-01T00:00:00Z").getTime();
+    let now = start;
     const observed: string[] = [];
 
     function registries() {
@@ -162,6 +163,14 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
           done: {},
         },
       });
+      definitionRegistry.register({
+        name: "healthy",
+        initialState: "start",
+        states: {
+          start: { events: { expire: { targetState: "finished", timeout: { afterMinutes: 1 } } } },
+          finished: {},
+        },
+      });
       commandRegistry.register("boom", {
         execute: async () => {
           throw new Error("js boom");
@@ -181,6 +190,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
 
     afterEach(async () => {
       observed.length = 0;
+      now = start;
       await sql`TRUNCATE workflow_history, workflow_instances CASCADE`.execute(db);
       await sql`TRUNCATE workflow_definitions`.execute(db);
     });
@@ -225,6 +235,25 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       expect(result.failed.map((f) => f.uuid)).toEqual([instance.uuid]);
       expect((await runtime.getInstance(instance.uuid))!.currentState).toBe("start");
       expect(await runtime.getHistory(instance.uuid)).toHaveLength(historyBefore.length);
+    });
+
+    it("a nested sweep commits a healthy instance and fires its observer only after the outer commit", async () => {
+      const runtime = buildRuntime();
+      const failing = await runtime.createInstance({ workflowName: "flow" });
+      const healthy = await runtime.createInstance({ workflowName: "healthy" });
+      observed.length = 0;
+      now += 5 * 60_000;
+
+      const result = await transactionRunner.runInTransaction(async () => {
+        const sweep = await runtime.processExpiredWorkflows();
+        expect(observed).toEqual([]);
+        return sweep;
+      });
+
+      expect(result.failed.map((f) => f.uuid)).toEqual([failing.uuid]);
+      expect((await runtime.getInstance(healthy.uuid))!.currentState).toBe("finished");
+      expect((await runtime.getInstance(failing.uuid))!.currentState).toBe("start");
+      expect(observed).toEqual(["finished"]);
     });
 
     it("kyselyWorkflowProvidersFromTransaction leaves no partial writes from a caught failure", async () => {

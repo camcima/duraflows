@@ -175,6 +175,56 @@ describe("KyselyTransactionRunner", () => {
     expect(executedSql).toEqual(["SAVEPOINT duraflows_sp_1", "RELEASE SAVEPOINT duraflows_sp_1"]);
   });
 
+  it("KyselyTransactionContext.transaction drops its callbacks when the commit fails", async () => {
+    const { db, mockTrx } = createMockDb();
+    (db.transaction as ReturnType<typeof vi.fn>).mockReturnValue({
+      execute: vi.fn(async (callback: (trx: MockTransaction) => Promise<unknown>) => {
+        await callback(mockTrx);
+        throw new Error("could not serialize access");
+      }),
+    });
+    const runner = new KyselyTransactionRunner(db);
+    const callback = vi.fn();
+
+    await expect(
+      KyselyTransactionContext.transaction(db, () => runner.runInTransaction(async () => runner.afterCommit(callback))),
+    ).rejects.toThrow("could not serialize access");
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it("KyselyTransactionContext.transaction applies none of a runner's timeouts", async () => {
+    const { db, setConfigCalls } = createMockDb();
+    const runner = new KyselyTransactionRunner(db, { lockTimeoutMs: 3000, statementTimeoutMs: 5000 });
+
+    await KyselyTransactionContext.transaction(db, () => runner.runInTransaction(async () => "nested"));
+
+    expect(setConfigCalls).toEqual([]);
+  });
+
+  it("gives sibling nested calls distinct savepoint names", async () => {
+    const { db, executedSql } = createMockDb();
+    const runner = new KyselyTransactionRunner(db);
+
+    await runner.runInTransaction(async () => {
+      await runner.runInTransaction(async () => "first");
+      await runner.runInTransaction(async () => "second");
+    });
+
+    expect(executedSql).toEqual([
+      "SAVEPOINT duraflows_sp_1",
+      "RELEASE SAVEPOINT duraflows_sp_1",
+      "SAVEPOINT duraflows_sp_2",
+      "RELEASE SAVEPOINT duraflows_sp_2",
+    ]);
+  });
+
+  it("afterCommit outside a transaction throws WorkflowError", () => {
+    const { db } = createMockDb();
+    const runner = new KyselyTransactionRunner(db);
+
+    expect(() => runner.afterCommit(vi.fn())).toThrow(WorkflowError);
+  });
+
   it("KyselyTransactionContext.transaction inside an active scope joins it in a savepoint", async () => {
     const { db } = createMockDb();
     const runner = new KyselyTransactionRunner(db);
