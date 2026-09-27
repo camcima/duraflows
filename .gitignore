@@ -15,6 +15,7 @@ coverage/
 .codex
 .specify/
 docs/superpowers/
+docs/reviews/
 
 # Skill eval-run outputs (the eval definitions in skills/*/evals/evals.json
 # are tracked; this only catches transient run artefacts)
