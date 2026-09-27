@@ -48,7 +48,7 @@ describe("pg transaction context isolation (AR-01)", () => {
     expect(calls(a.client.query)).toEqual(["BEGIN", "COMMIT"]);
   });
 
-  it("the same pool still reuses its own active transaction (no nested BEGIN)", async () => {
+  it("the same pool nests in a savepoint on its own active transaction (no nested BEGIN)", async () => {
     const a = createMocks();
     const runner = new PgTransactionRunner(a.pool);
     const store = new PgWorkflowInstanceStore(a.pool);
@@ -64,5 +64,7 @@ describe("pg transaction context isolation (AR-01)", () => {
     expect(clientCalls.some((sql) => sql.includes("SELECT"))).toBe(true);
     expect(a.pool.query).not.toHaveBeenCalled();
     expect(a.pool.connect).toHaveBeenCalledTimes(1);
+    expect(clientCalls).toContain("SAVEPOINT duraflows_sp_1");
+    expect(clientCalls).toContain("RELEASE SAVEPOINT duraflows_sp_1");
   });
 });

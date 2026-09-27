@@ -1,7 +1,7 @@
 import type { Pool } from "pg";
-import type { WorkflowTransactionRunner } from "@duraflows/core";
+import type { AfterCommitCallback, WorkflowTransactionRunner } from "@duraflows/core";
 import { WorkflowError } from "@duraflows/core";
-import { PgTransactionContext } from "./pg-transaction-context.js";
+import { pgTransactionScopes, runOwnedPgTransaction } from "./pg-transaction-context.js";
 
 /**
  * Transaction-scoped PostgreSQL timeouts.
@@ -70,34 +70,16 @@ export class PgTransactionRunner implements WorkflowTransactionRunner {
   }
 
   async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
-    // If already within a transaction, reuse the existing client
-    const existingClient = PgTransactionContext.getClient(this.pool);
-    if (existingClient) {
-      return callback();
+    const scope = pgTransactionScopes.current(this.pool);
+    if (scope) {
+      // Nested: a savepoint on the outer transaction's client, so a failure
+      // rolls back only this call. The outer transaction's timeouts stay in force.
+      return pgTransactionScopes.runInSavepoint(this.pool, scope, callback, (sql) => scope.connection.query(sql));
     }
+    return runOwnedPgTransaction(this.pool, this.timeoutStatements, () => callback());
+  }
 
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      // `SET LOCAL` is scoped to this transaction, so the settings are reverted
-      // on COMMIT/ROLLBACK and never leak to other users of the shared pool.
-      for (const statement of this.timeoutStatements) {
-        await client.query(statement);
-      }
-      const result = await PgTransactionContext.run(this.pool, client, callback);
-      await client.query("COMMIT");
-      return result;
-    } catch (error) {
-      try {
-        await client.query("ROLLBACK");
-      } catch (rollbackError) {
-        // Never mask the causative error with a rollback failure.
-        const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
-        console.warn(`[duraflows] ROLLBACK failed after transaction error: ${message}`);
-      }
-      throw error;
-    } finally {
-      client.release();
-    }
+  afterCommit(callback: AfterCommitCallback): void {
+    pgTransactionScopes.afterCommit(this.pool, callback);
   }
 }
