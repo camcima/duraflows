@@ -691,17 +691,18 @@ Caches by definition name. Invalidates on definition change (JSON hash compariso
 WorkflowModule.forRoot(options: WorkflowModuleOptions)
 ```
 
-| Option              | Type                            | Description                                                                                              |
-| ------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `workflows`         | `WorkflowDefinition[]`          | Definitions to register                                                                                  |
-| `commands`          | `WorkflowCommandRegistration[]` | Explicit command registrations `{ name, useClass }`                                                      |
-| `guards`            | `WorkflowGuard[]`               | v1.1.0: built-in guard implementations. Module wires them into an `InMemoryGuardRegistry` automatically. |
-| `guardRegistry`     | `WorkflowGuardRegistry`         | v1.1.0: prebuilt custom registry. Mutually exclusive with `guards`; throws synchronously if both given.  |
-| `observers`         | `WorkflowObserver[]`            | v1.0.0: lifecycle observers                                                                              |
-| `onObserverError`   | `ObserverErrorHandler`          | v1.0.0: handler for observer throws (default `console.warn`)                                             |
-| `persistence`       | `WorkflowPersistenceProvider`   | Persistence providers                                                                                    |
-| `clock`             | `WorkflowClock`                 | Optional clock override                                                                                  |
-| `enableControllers` | `boolean`                       | Enable REST endpoints                                                                                    |
+| Option              | Type                            | Description                                                                                                                                                                |
+| ------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflows`         | `WorkflowDefinition[]`          | Definitions to register                                                                                                                                                    |
+| `commands`          | `WorkflowCommandRegistration[]` | Explicit command registrations `{ name, useClass }`                                                                                                                        |
+| `guards`            | `WorkflowGuard[]`               | v1.1.0: built-in guard implementations. Module wires them into an `InMemoryGuardRegistry` automatically.                                                                   |
+| `guardRegistry`     | `WorkflowGuardRegistry`         | v1.1.0: prebuilt custom registry. Mutually exclusive with `guards`; throws synchronously if both given.                                                                    |
+| `observers`         | `WorkflowObserver[]`            | v1.0.0: lifecycle observers                                                                                                                                                |
+| `onObserverError`   | `ObserverErrorHandler`          | v1.0.0: handler for observer throws (default `console.warn`)                                                                                                               |
+| `persistence`       | `WorkflowPersistenceProvider`   | Persistence providers                                                                                                                                                      |
+| `clock`             | `WorkflowClock`                 | Optional clock override                                                                                                                                                    |
+| `timeoutRetry`      | `WorkflowTimeoutRetryOptions`   | v6.1.0: how timeout failures are retried and parked (`{ initialDelayMs?, maxDelayMs?, maxAttempts? }`); see [core-runtime.md](../docs/core-runtime.md#retries-and-parking) |
+| `enableControllers` | `boolean`                       | Enable REST endpoints                                                                                                                                                      |
 
 ### WorkflowModule.forRootAsync()
 
@@ -723,15 +724,16 @@ WorkflowModule.forRootAsync<TArgs extends unknown[] = unknown[]>(
 
 **WorkflowModuleFactoryConfig:**
 
-| Property          | Type                          | Description                                                                                                   |
-| ----------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `workflows`       | `WorkflowDefinition[]`        | Definitions to register                                                                                       |
-| `persistence`     | `WorkflowPersistenceProvider` | Persistence providers                                                                                         |
-| `clock`           | `WorkflowClock`               | Optional clock override                                                                                       |
-| `observers`       | `WorkflowObserver[]`          | v1.0.0: observers — moved here from top-level (BREAKING in v1.0.0) so they can compose from injected services |
-| `onObserverError` | `ObserverErrorHandler`        | v1.0.0: handler for observer throws                                                                           |
-| `guards`          | `WorkflowGuard[]`             | v1.1.0: built-in guards composed into an `InMemoryGuardRegistry`. Mutually exclusive with `guardRegistry`.    |
-| `guardRegistry`   | `WorkflowGuardRegistry`       | v1.1.0: prebuilt custom registry. Mutually exclusive with `guards`.                                           |
+| Property          | Type                          | Description                                                                                                                                                                |
+| ----------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflows`       | `WorkflowDefinition[]`        | Definitions to register                                                                                                                                                    |
+| `persistence`     | `WorkflowPersistenceProvider` | Persistence providers                                                                                                                                                      |
+| `clock`           | `WorkflowClock`               | Optional clock override                                                                                                                                                    |
+| `observers`       | `WorkflowObserver[]`          | v1.0.0: observers — moved here from top-level (BREAKING in v1.0.0) so they can compose from injected services                                                              |
+| `onObserverError` | `ObserverErrorHandler`        | v1.0.0: handler for observer throws                                                                                                                                        |
+| `guards`          | `WorkflowGuard[]`             | v1.1.0: built-in guards composed into an `InMemoryGuardRegistry`. Mutually exclusive with `guardRegistry`.                                                                 |
+| `guardRegistry`   | `WorkflowGuardRegistry`       | v1.1.0: prebuilt custom registry. Mutually exclusive with `guards`.                                                                                                        |
+| `timeoutRetry`    | `WorkflowTimeoutRetryOptions` | v6.1.0: how timeout failures are retried and parked (`{ initialDelayMs?, maxDelayMs?, maxAttempts? }`); see [core-runtime.md](../docs/core-runtime.md#retries-and-parking) |
 
 **v1.0.0 BREAKING — observers moved into `useFactory`:**
 

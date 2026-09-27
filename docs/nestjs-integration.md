@@ -174,12 +174,13 @@ export class AppModule {}
 
 **WorkflowModuleFactoryConfig** (returned by `useFactory`):
 
-| Property      | Type                          | Required | Description                                                                          |
-| ------------- | ----------------------------- | -------- | ------------------------------------------------------------------------------------ |
-| `workflows`   | `WorkflowDefinition[]`        | Yes      | Workflow definitions to register                                                     |
-| `persistence` | `WorkflowPersistenceProvider` | Yes      | Persistence implementations                                                          |
-| `clock`       | `WorkflowClock`               | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                |
-| `observers`   | `WorkflowObserver[]`          | No       | Lifecycle observers. Return them from the factory to compose from injected services. |
+| Property       | Type                          | Required | Description                                                                                                                                                      |
+| -------------- | ----------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflows`    | `WorkflowDefinition[]`        | Yes      | Workflow definitions to register                                                                                                                                 |
+| `persistence`  | `WorkflowPersistenceProvider` | Yes      | Persistence implementations                                                                                                                                      |
+| `clock`        | `WorkflowClock`               | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                                                                                            |
+| `observers`    | `WorkflowObserver[]`          | No       | Lifecycle observers. Return them from the factory to compose from injected services.                                                                             |
+| `timeoutRetry` | `WorkflowTimeoutRetryOptions` | No       | How timeout failures are retried and parked: `{ initialDelayMs?, maxDelayMs?, maxAttempts? }`. See [Retries and parking](./core-runtime.md#retries-and-parking). |
 
 #### Breaking change: observers moved into useFactory (v0.6.0)
 
