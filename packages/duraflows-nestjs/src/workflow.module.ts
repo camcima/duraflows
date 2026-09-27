@@ -21,6 +21,7 @@ import type {
   ObserverErrorHandler,
   WorkflowGuard,
   WorkflowGuardRegistry,
+  WorkflowTimeoutRetryOptions,
 } from "@duraflows/core";
 import {
   InMemoryDefinitionRegistry,
@@ -60,6 +61,11 @@ export interface WorkflowModuleOptions {
   onObserverError?: ObserverErrorHandler;
   persistence: WorkflowPersistenceProvider;
   clock?: WorkflowClock;
+  /**
+   * How `processExpiredWorkflows` retries an instance whose timeout processing
+   * fails: exponential backoff, then parking. Defaults apply when omitted.
+   */
+  timeoutRetry?: WorkflowTimeoutRetryOptions;
   enableControllers?: boolean;
 }
 
@@ -71,6 +77,8 @@ export interface WorkflowModuleFactoryConfig {
   guardRegistry?: WorkflowGuardRegistry;
   observers?: WorkflowObserver[];
   onObserverError?: ObserverErrorHandler;
+  /** See {@link WorkflowModuleOptions.timeoutRetry}. */
+  timeoutRetry?: WorkflowTimeoutRetryOptions;
 }
 
 export interface WorkflowModuleAsyncOptions<TArgs extends unknown[] = unknown[]> {
@@ -235,6 +243,7 @@ function buildWorkflowProviders(explicitCommands: WorkflowCommandRegistration[])
           definitionStore: definitionStore ?? undefined,
           observers: config.observers,
           onObserverError: config.onObserverError,
+          timeoutRetry: config.timeoutRetry,
         }),
       inject: [
         WORKFLOW_MODULE_OPTIONS,
