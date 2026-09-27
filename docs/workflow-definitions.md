@@ -142,6 +142,8 @@ If the `targetState` (or `errorState`) also has an `onEnter`, the chain continue
 
 The entire chain runs inside a single transaction. `triggerEvent()` returns only the **final landing state** -- intermediate hops are visible in the history table.
 
+Each hop is applied before the next state's `onEnter` commands run. Those commands therefore see the `context` of the state they are running in, including that state's declared `context` values. Each observer event carries the context as it was on entry to its own state, without writes from commands that ran later in the chain.
+
 A runtime depth guard (configurable via `maxOnEnterDepth`, default 10) prevents infinite chains. Static cycle detection at registration time also catches cycles in `onEnter` graphs.
 
 ### Examples
@@ -465,6 +467,8 @@ class ChargePaymentCommand implements WorkflowCommand<Order> {
 3. The new state's `context` values are merged on top
 
 This means state-defined context values take precedence over command writes for the same key. If a command sets `paymentStatus = "processing"` and the target state defines `paymentStatus: "confirmed"`, the final value is `"confirmed"`.
+
+A state's own `onEnter` commands are different: they run **after** the state has been entered, so its `context` values are already merged and the commands' writes win. If `paid` declares `paymentStatus: "confirmed"` and its `onEnter` command sets `paymentStatus = "reconciled"`, the final value is `"reconciled"`.
 
 Persisted in `workflow_instances.context_json`.
 

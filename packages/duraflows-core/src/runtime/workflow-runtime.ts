@@ -583,6 +583,9 @@ export class WorkflowRuntime {
    * the commands mutated, and recomputes the timeout deadline. `executionContext`
    * is kept in step so a following onEnter hop's commands observe the merged
    * context. Persisting the result is the caller's job — this touches memory only.
+   *
+   * `applyDeclaredContext: false` persists the commands' context as-is, for an
+   * onEnter chain that ends in the state it was already in.
    */
   private applyTransition(
     instance: WorkflowInstance,
@@ -590,6 +593,7 @@ export class WorkflowRuntime {
     toState: string,
     now: Date,
     executionContext: WorkflowExecutionContext,
+    { applyDeclaredContext = true }: { applyDeclaredContext?: boolean } = {},
   ): void {
     instance.currentState = toState;
     instance.version++;
@@ -600,7 +604,7 @@ export class WorkflowRuntime {
     const stateDef = definition.states[toState];
     instance.context = {
       ...executionContext.context,
-      ...structuredClone(stateDef?.context ?? {}),
+      ...(applyDeclaredContext ? structuredClone(stateDef?.context ?? {}) : {}),
     };
     executionContext.context = { ...instance.context };
 
@@ -619,6 +623,12 @@ export class WorkflowRuntime {
     subject: unknown,
     eventsToFire: StateEnterEvent[],
   ): Promise<{ commandResults: CommandResult[]; lastHistoryUuid: string | null; chainOutcome: "success" | "failure" }> {
+    const allCommandResults: CommandResult[] = [];
+    let lastHistoryUuid: string | null = null;
+
+    // Each hop is applied before the next state's commands run, so those
+    // commands see the context of the state they are running in, and each
+    // observer snapshot holds the context at its own entry.
     const chainResult = await this.onEnterExecutor.executeChain(
       definition,
       instance.currentState,
@@ -626,45 +636,45 @@ export class WorkflowRuntime {
       subject,
       executionContext,
       this.maxOnEnterDepth,
-    );
+      async (hop) => {
+        const now = this.clock.now();
+        // A hop that stays put ends the chain in a state that was already
+        // entered: its declared context was applied then, before its onEnter
+        // commands ran, so re-applying it would overwrite what they wrote.
+        this.applyTransition(instance, definition, hop.toState, now, executionContext, {
+          applyDeclaredContext: hop.toState !== hop.fromState,
+        });
 
-    const allCommandResults: CommandResult[] = [];
-    let lastHistoryUuid: string | null = null;
+        await this.instanceStore.update(instance);
 
-    for (const hop of chainResult.hops) {
-      const now = this.clock.now();
-      this.applyTransition(instance, definition, hop.toState, now, executionContext);
+        const errorMessage = extractErrorMessage(hop.outcome, hop.commandResults);
 
-      await this.instanceStore.update(instance);
-
-      const errorMessage = extractErrorMessage(hop.outcome, hop.commandResults);
-
-      // Append history for this hop
-      lastHistoryUuid = await this.historyStore.append({
-        workflowInstanceUuid: instance.uuid,
-        fromState: hop.fromState,
-        eventName: "onEnter",
-        toState: hop.toState,
-        outcome: hop.outcome,
-        errorMessage,
-        commandResultsJson: hop.commandResults,
-        triggerMetadata: { source: "onEnter" },
-        definitionVersion: this.definitionVersionOf(definition),
-      });
-
-      eventsToFire.push(
-        buildStateEnterEvent(instance, {
+        lastHistoryUuid = await this.historyStore.append({
+          workflowInstanceUuid: instance.uuid,
           fromState: hop.fromState,
+          eventName: "onEnter",
           toState: hop.toState,
-          transitionUuid: hop.transitionUuid,
-          triggerEvent: "onEnter",
+          outcome: hop.outcome,
+          errorMessage,
+          commandResultsJson: hop.commandResults,
           triggerMetadata: { source: "onEnter" },
-          occurredAt: now,
-        }),
-      );
+          definitionVersion: this.definitionVersionOf(definition),
+        });
 
-      allCommandResults.push(...hop.commandResults);
-    }
+        eventsToFire.push(
+          buildStateEnterEvent(instance, {
+            fromState: hop.fromState,
+            toState: hop.toState,
+            transitionUuid: hop.transitionUuid,
+            triggerEvent: "onEnter",
+            triggerMetadata: { source: "onEnter" },
+            occurredAt: now,
+          }),
+        );
+
+        allCommandResults.push(...hop.commandResults);
+      },
+    );
 
     return { commandResults: allCommandResults, lastHistoryUuid, chainOutcome: chainResult.outcome };
   }

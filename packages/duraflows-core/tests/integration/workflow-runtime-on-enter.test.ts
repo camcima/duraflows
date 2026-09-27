@@ -1389,4 +1389,173 @@ describe("WorkflowRuntime onEnter integration", () => {
     expect(history[1].outcome).toBe("failure");
     expect(history[1].errorMessage).toBe("Command failed");
   });
+
+  describe("context at each onEnter hop", () => {
+    it("a later hop's commands see the declared context of the state they run in", async () => {
+      definitionRegistry.register({
+        name: "hop-context-read",
+        initialState: "start",
+        states: {
+          start: { events: { go: { targetState: "a" } } },
+          a: { context: { phase: "a" }, onEnter: { targetState: "b", commands: [{ name: "noop" }] } },
+          b: { context: { phase: "b" }, onEnter: { commands: [{ name: "readPhase" }] } },
+        },
+      });
+      const seen: unknown[] = [];
+      commandRegistry.register("noop", { execute: async () => ({ ok: true }) });
+      commandRegistry.register("readPhase", {
+        execute: async (_subject, ctx) => {
+          seen.push(ctx.context["phase"]);
+          return { ok: true };
+        },
+      });
+
+      const instance = await runtime.createInstance({ workflowName: "hop-context-read" });
+      await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "go" });
+
+      expect(seen).toEqual(["b"]);
+    });
+
+    it("an errorState hop's commands see the error state's declared context", async () => {
+      definitionRegistry.register({
+        name: "hop-context-error",
+        initialState: "start",
+        states: {
+          start: { events: { go: { targetState: "a" } } },
+          a: {
+            context: { phase: "a" },
+            onEnter: { targetState: "done", errorState: "err", commands: [{ name: "fail" }] },
+          },
+          err: { context: { phase: "err" }, onEnter: { commands: [{ name: "readPhase" }] } },
+          done: {},
+        },
+      });
+      const seen: unknown[] = [];
+      commandRegistry.register("fail", { execute: async () => ({ ok: false }) });
+      commandRegistry.register("readPhase", {
+        execute: async (_subject, ctx) => {
+          seen.push(ctx.context["phase"]);
+          return { ok: true };
+        },
+      });
+
+      const instance = await runtime.createInstance({ workflowName: "hop-context-error" });
+      await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "go" });
+
+      expect(seen).toEqual(["err"]);
+    });
+
+    it("an onEnter command's write to a key its own state declares is persisted (terminal state)", async () => {
+      definitionRegistry.register({
+        name: "hop-context-write-terminal",
+        initialState: "start",
+        states: {
+          start: { events: { go: { targetState: "a" } } },
+          a: { context: { phase: "a" }, onEnter: { commands: [{ name: "writePhase" }] } },
+        },
+      });
+      commandRegistry.register("writePhase", {
+        execute: async (_subject, ctx) => {
+          ctx.context["phase"] = "written-in-a";
+          return { ok: true };
+        },
+      });
+
+      const instance = await runtime.createInstance({ workflowName: "hop-context-write-terminal" });
+      await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "go" });
+
+      const stored = await instanceStore.findByUuid(instance.uuid);
+      expect(stored!.context["phase"]).toBe("written-in-a");
+    });
+
+    it("an onEnter command's write to a key its own state declares is persisted (later hop)", async () => {
+      definitionRegistry.register({
+        name: "hop-context-write-chain",
+        initialState: "start",
+        states: {
+          start: { events: { go: { targetState: "a" } } },
+          a: { onEnter: { targetState: "b", commands: [{ name: "noop" }] } },
+          b: { context: { phase: "b" }, onEnter: { targetState: "c", commands: [{ name: "writePhase" }] } },
+          c: {},
+        },
+      });
+      commandRegistry.register("noop", { execute: async () => ({ ok: true }) });
+      commandRegistry.register("writePhase", {
+        execute: async (_subject, ctx) => {
+          ctx.context["phase"] = "written-in-b";
+          return { ok: true };
+        },
+      });
+
+      const instance = await runtime.createInstance({ workflowName: "hop-context-write-chain" });
+      await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "go" });
+
+      const stored = await instanceStore.findByUuid(instance.uuid);
+      expect(stored!.currentState).toBe("c");
+      expect(stored!.context["phase"]).toBe("written-in-b");
+    });
+
+    it("the initial state's onEnter write to a key it declares survives createInstance", async () => {
+      definitionRegistry.register({
+        name: "hop-context-write-initial",
+        initialState: "a",
+        states: {
+          a: { context: { phase: "a" }, onEnter: { commands: [{ name: "writePhase" }] } },
+        },
+      });
+      commandRegistry.register("writePhase", {
+        execute: async (_subject, ctx) => {
+          ctx.context["phase"] = "written-in-a";
+          return { ok: true };
+        },
+      });
+
+      const instance = await runtime.createInstance({ workflowName: "hop-context-write-initial" });
+
+      const stored = await instanceStore.findByUuid(instance.uuid);
+      expect(stored!.context["phase"]).toBe("written-in-a");
+    });
+
+    it("each observer snapshot holds the context at its own entry, without later commands' writes", async () => {
+      definitionRegistry.register({
+        name: "hop-context-observers",
+        initialState: "start",
+        states: {
+          start: { events: { go: { targetState: "a" } } },
+          a: { context: { phase: "a" }, onEnter: { targetState: "b", commands: [{ name: "markA" }] } },
+          b: { context: { phase: "b" }, onEnter: { targetState: "c", commands: [{ name: "markB" }] } },
+          c: {},
+        },
+      });
+      commandRegistry.register("markA", {
+        execute: async (_subject, ctx) => {
+          ctx.context["markA"] = true;
+          return { ok: true };
+        },
+      });
+      commandRegistry.register("markB", {
+        execute: async (_subject, ctx) => {
+          ctx.context["markB"] = true;
+          return { ok: true };
+        },
+      });
+      const entries: Array<{ toState: string; context: Record<string, unknown> }> = [];
+      runtime.addObserver({
+        name: "recorder",
+        onEnter: (event) => {
+          entries.push({ toState: event.toState, context: { ...event.context } });
+        },
+      });
+
+      const instance = await runtime.createInstance({ workflowName: "hop-context-observers" });
+      entries.length = 0;
+      await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "go" });
+
+      expect(entries).toEqual([
+        { toState: "a", context: { phase: "a" } },
+        { toState: "b", context: { phase: "b", markA: true } },
+        { toState: "c", context: { phase: "b", markA: true, markB: true } },
+      ]);
+    });
+  });
 });
