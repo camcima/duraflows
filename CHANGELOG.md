@@ -1,5 +1,33 @@
 # Changelog
 
+## [6.0.0](https://github.com/camcima/duraflows/compare/v5.2.1...v6.0.0) (2026-09-27)
+
+A timeout that keeps failing no longer starves healthy instances. Failed timeout attempts are retried with exponential backoff and parked after too many consecutive failures, with an operator API to list and re-arm parked instances. This closes the last finding of the 5.1.0 architecture review.
+
+### ⚠ BREAKING CHANGES
+
+* **pg / kysely:** apply migration `005_timeout_retries.sql` **before** deploying. It adds `timeout_attempts`, `timeout_retry_at`, `timeout_last_error` and `timeout_parked_at` to `workflow_instances`, plus two partial indexes. The runtime reads and writes these columns on every operation. Fresh installs via `generateMigrationSql()` already include them. The migration is idempotent (`if not exists`); on large tables, see [docs/persistence.md](./docs/persistence.md) for building the indexes `CONCURRENTLY` in advance.
+* **core:** `WorkflowInstance.timeoutRetry` (`{ attempts, lastError, retryAt, parkedAt } | null`) is a new required field. Custom persistence adapters must map it, and code that builds `WorkflowInstance` literals (test mocks, for example) must add `timeoutRetry: null`.
+* **core:** `WorkflowInstanceStore.findExpired` must skip parked instances and retries that aren't due yet, and order by `coalesce(timeout_retry_at, expires_at)`. `WorkflowInstanceStore.findParkedTimeouts({ limit, workflowName? })` is a new required method.
+* **core:** `ProcessExpiredWorkflowsResult.parked` is a new required field. Hand-built result literals must add it.
+* **kysely:** hand-written database types must add `timeout_attempts: Generated<number>`, `timeout_retry_at`, `timeout_last_error` and `timeout_parked_at`. Types declared as `interface AppDb extends WorkflowDatabase` pick them up automatically.
+
+### Features
+
+* **core:** list parked timeouts and re-arm them ([479701d](https://github.com/camcima/duraflows/commit/479701d525f07deefce10f7307c75afd82896e33))
+* **core:** persist timeout retry state and list parked timeouts ([dd13aa4](https://github.com/camcima/duraflows/commit/dd13aa4d33811718fd172a7bdb42d63a5268bbcb))
+* **core:** retry failing timeouts with backoff and park them after maxAttempts ([77e42eb](https://github.com/camcima/duraflows/commit/77e42eb6ec970c6dfcc963adafa25f92d35b8e2f))
+* **nestjs:** expose findParkedTimeouts and rearmTimeout on WorkflowTimeoutService ([93b50db](https://github.com/camcima/duraflows/commit/93b50db2f3b8a63ca34a8f389ef1715ff404adb6))
+* **pg:** add migration 005 for timeout retry state ([f799090](https://github.com/camcima/duraflows/commit/f7990902618cc71997b66cf21e403cada2d85e77))
+
+### Notes
+
+* **Retry policy:** set with the new `timeoutRetry` runtime option. The defaults are 1 minute initially, doubling each time, capped at 1 hour, and parked after 10 consecutive failures, about 4 hours after the first failure. A failure is anything that makes the timeout transaction throw. A command that fails and routes to an `errorState` is still a successful transition.
+* **Visibility:** each failure is recorded in its own small transaction, so no history rows are written for failed attempts. The sweep result reports `failed[].attempts` / `failed[].retryAt` and the instances parked by that sweep. Error text is stored with NUL bytes replaced and truncated to 2000 characters.
+* **Operator API:** `runtime.findParkedTimeouts()` lists parked instances. `runtime.rearmTimeout(uuid)` clears the retry state so the next sweep tries again. Any successful transition, including a manual `triggerEvent()`, also clears it.
+* **Rollout:** finish rolling out to 6.0.0 promptly. 5.x workers don't write the new columns, so while old and new workers run side by side, a 5.x transition can leave stale retry state behind. Afterwards, review `findParkedTimeouts()` (see [docs/persistence.md](./docs/persistence.md)).
+* **NestJS:** `WorkflowModule` doesn't expose the `timeoutRetry` option yet, so NestJS apps use the defaults.
+
 ## [5.2.1](https://github.com/camcima/duraflows/compare/v5.2.0...v5.2.1) (2026-09-27)
 
 ### Bug Fixes
