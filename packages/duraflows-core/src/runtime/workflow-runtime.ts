@@ -46,8 +46,9 @@ const DEFAULT_MAX_ON_ENTER_DEPTH = 10;
  * Whether `instance`'s timeout should be processed at `now`: expired, not parked, and any scheduled retry reached.
  *
  * The boundary is inclusive, while `findExpired`'s scan is strict (`< now`). That is safe: the scan
- * decides what enters a sweep, and this re-check always runs at the same or a later `now`, so
- * anything the scan returned still passes here. It only has to reject instances another worker
+ * decides what enters a sweep, and this re-check runs at the same or a later `now` (given a
+ * non-decreasing clock), so anything the scan returned still passes here. If a clock steps back,
+ * the instance is merely skipped until the next sweep. It only has to reject instances another worker
  * moved, rescheduled, or parked in between.
  */
 function isTimeoutDue(instance: WorkflowInstance, now: Date): boolean {
