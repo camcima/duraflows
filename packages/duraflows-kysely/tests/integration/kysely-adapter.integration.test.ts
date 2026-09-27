@@ -234,7 +234,10 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       const result = await transactionRunner.runInTransaction(() => runtime.processExpiredWorkflows());
 
       expect(result.failed.map((f) => f.uuid)).toEqual([instance.uuid]);
-      expect((await runtime.getInstance(instance.uuid))!.currentState).toBe("start");
+      expect(result.failed[0]!.attempts).toBe(1);
+      const after = (await runtime.getInstance(instance.uuid))!;
+      expect(after.currentState).toBe("start");
+      expect(after.timeoutRetry).not.toBeNull();
       expect(await runtime.getHistory(instance.uuid)).toHaveLength(historyBefore.length);
     });
 

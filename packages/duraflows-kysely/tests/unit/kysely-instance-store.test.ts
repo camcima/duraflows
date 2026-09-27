@@ -333,7 +333,12 @@ describe("KyselyWorkflowInstanceStore", () => {
           },
         ],
       });
-      expect(calls).toContainEqual({ method: "orderBy", args: [{ coalesce: ["timeout_retry_at", "expires_at"] }] });
+      expect(calls).toContainEqual({
+        method: "where",
+        args: [{ ref: { coalesce: ["timeout_retry_at", "expires_at"] }, op: "<", value: now }],
+      });
+      const orderBys = calls.filter((c) => c.method === "orderBy").map((c) => c.args);
+      expect(orderBys).toEqual([[{ coalesce: ["timeout_retry_at", "expires_at"] }]]);
     });
 
     it("findParkedTimeouts reads without a transaction, unfiltered", async () => {

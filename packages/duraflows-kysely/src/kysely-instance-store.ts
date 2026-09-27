@@ -105,6 +105,10 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
       .where("expires_at", "<", now)
       .where("timeout_parked_at", "is", null)
       .where((eb) => eb.or([eb("timeout_retry_at", "is", null), eb("timeout_retry_at", "<", now)]))
+      // Redundant (every due row already satisfies it); it gives the planner a
+      // range condition so workflow_instances_timeout_due_idx is range-scanned
+      // instead of walked in order with every entry filtered against the heap.
+      .where((eb) => eb(eb.fn.coalesce("timeout_retry_at", "expires_at"), "<", now))
       .orderBy((eb) => eb.fn.coalesce("timeout_retry_at", "expires_at"))
       .forUpdate()
       .skipLocked()
