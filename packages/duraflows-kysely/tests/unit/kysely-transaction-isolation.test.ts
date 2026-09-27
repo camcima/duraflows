@@ -8,7 +8,7 @@ import type { WorkflowDatabase } from "../../src/kysely-database.js";
 type MockTransaction = Transaction<WorkflowDatabase>;
 
 function createMockDb() {
-  const mockTrx = {} as MockTransaction;
+  const mockTrx = { executeQuery: vi.fn().mockResolvedValue({ rows: [] }) } as unknown as MockTransaction;
   const db = {
     transaction: vi.fn().mockReturnValue({
       execute: vi.fn(async (callback: (trx: MockTransaction) => Promise<unknown>) => callback(mockTrx)),
@@ -46,7 +46,7 @@ describe("kysely transaction context isolation (AR-01)", () => {
 
   it("providers pre-bound to a transaction ignore an unrelated ambient transaction", async () => {
     const outer = createMockDb();
-    const boundTrx = {} as MockTransaction;
+    const boundTrx = { executeQuery: vi.fn().mockResolvedValue({ rows: [] }) } as unknown as MockTransaction;
     const providers = kyselyWorkflowProvidersFromTransaction(boundTrx);
     const outerRunner = new KyselyTransactionRunner(outer.db);
 

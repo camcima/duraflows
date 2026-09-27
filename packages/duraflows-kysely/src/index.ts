@@ -1,11 +1,12 @@
 import type { Kysely, Transaction } from "kysely";
-import type { WorkflowPersistenceProvider } from "@duraflows/core";
+import type { WorkflowPersistenceProvider, WorkflowTransactionRunner } from "@duraflows/core";
+import { runAfterCommitCallbacks } from "@duraflows/core";
 import type { WorkflowDatabase } from "./kysely-database.js";
 import { KyselyWorkflowInstanceStore } from "./kysely-instance-store.js";
 import { KyselyWorkflowHistoryStore } from "./kysely-history-store.js";
 import { KyselyWorkflowDefinitionStore } from "./kysely-definition-store.js";
 import { KyselyTransactionRunner, type KyselyTransactionRunnerOptions } from "./kysely-transaction-runner.js";
-import { KyselyTransactionContext } from "./kysely-transaction-context.js";
+import { executeRawStatement, kyselyTransactionScopes } from "./kysely-transaction-context.js";
 
 export { KyselyTransactionContext } from "./kysely-transaction-context.js";
 export { KyselyTransactionRunner } from "./kysely-transaction-runner.js";
@@ -55,14 +56,29 @@ export function kyselyWorkflowProvidersFromTransaction<DB extends WorkflowDataba
   trx: Transaction<DB>,
 ): WorkflowPersistenceProvider {
   const narrowed = trx as unknown as Kysely<WorkflowDatabase>;
-  const transactionRunner: WorkflowPersistenceProvider["transactionRunner"] = {
+  const boundTrx = trx as unknown as Transaction<WorkflowDatabase>;
+  const transactionRunner: WorkflowTransactionRunner = {
     async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
-      // Nested calls reuse the bound transaction; an unrelated ambient
-      // transaction from another provider must never supersede it.
-      if (KyselyTransactionContext.getTransaction(narrowed)) {
-        return callback();
+      // Scoped to the bound trx; an unrelated ambient transaction from another
+      // provider must never supersede it.
+      const scope = kyselyTransactionScopes.current(narrowed);
+      if (scope) {
+        return kyselyTransactionScopes.runInSavepoint(narrowed, scope, callback, (sql) =>
+          executeRawStatement(scope.connection, sql),
+        );
       }
-      return KyselyTransactionContext.run(narrowed, trx, callback);
+      // The caller owns `trx`, so even this outermost call is nested in their
+      // transaction: run it in a savepoint so a failure leaves no partial
+      // writes behind, and deliver its observers once it resolves.
+      const root = kyselyTransactionScopes.createRoot(boundTrx);
+      const result = await kyselyTransactionScopes.run(narrowed, root, () =>
+        kyselyTransactionScopes.runInSavepoint(narrowed, root, callback, (sql) => executeRawStatement(boundTrx, sql)),
+      );
+      await runAfterCommitCallbacks(root.callbacks);
+      return result;
+    },
+    afterCommit(callback) {
+      kyselyTransactionScopes.afterCommit(narrowed, callback);
     },
   };
   const instanceStore = new KyselyWorkflowInstanceStore(narrowed);

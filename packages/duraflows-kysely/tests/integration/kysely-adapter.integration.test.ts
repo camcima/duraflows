@@ -2,8 +2,19 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Kysely, PostgresDialect, sql } from "kysely";
 import { Pool } from "pg";
-import { runInstanceStoreConformance, runDefinitionStoreConformance } from "@duraflows/core/testing";
-import type { WorkflowInstance } from "@duraflows/core";
+import {
+  runInstanceStoreConformance,
+  runDefinitionStoreConformance,
+  runTransactionRunnerConformance,
+} from "@duraflows/core/testing";
+import {
+  type WorkflowInstance,
+  WorkflowRuntime,
+  InMemoryDefinitionRegistry,
+  InMemoryCommandRegistry,
+  WorkflowValidator,
+  WorkflowCompiler,
+} from "@duraflows/core";
 import { generateMigrationSql } from "@duraflows/pg";
 import {
   KyselyWorkflowInstanceStore,
@@ -11,6 +22,8 @@ import {
   KyselyWorkflowDefinitionStore,
   KyselyTransactionRunner,
   KyselyTransactionContext,
+  kyselyWorkflowProviders,
+  kyselyWorkflowProvidersFromTransaction,
   type WorkflowDatabase,
 } from "@duraflows/kysely";
 
@@ -109,6 +122,124 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
         await sql`TRUNCATE workflow_definitions`.execute(db);
       },
     }),
+  });
+
+  runTransactionRunnerConformance("kysely (real PostgreSQL)", {
+    setup: async () => ({
+      runner: transactionRunner,
+      store: instanceStore,
+      failWithDatabaseError: async () => {
+        await sql`SELECT 1/0`.execute(KyselyTransactionContext.getTransaction(db)!);
+      },
+      teardown: async () => {
+        await sql`TRUNCATE workflow_history, workflow_instances CASCADE`.execute(db);
+      },
+    }),
+  });
+
+  describe("kysely runtime inside an outer transaction", () => {
+    let now = new Date("2026-01-01T00:00:00Z").getTime();
+    const observed: string[] = [];
+
+    function registries() {
+      const definitionRegistry = new InMemoryDefinitionRegistry({
+        validator: new WorkflowValidator(),
+        compiler: new WorkflowCompiler(),
+      });
+      const commandRegistry = new InMemoryCommandRegistry();
+      definitionRegistry.register({
+        name: "flow",
+        initialState: "start",
+        states: {
+          start: {
+            events: {
+              go: { targetState: "done" },
+              explode: { targetState: "mid" },
+              expire: { targetState: "mid", timeout: { afterMinutes: 1 } },
+            },
+          },
+          mid: { onEnter: { commands: [{ name: "boom" }] } },
+          done: {},
+        },
+      });
+      commandRegistry.register("boom", {
+        execute: async () => {
+          throw new Error("js boom");
+        },
+      });
+      return { definitionRegistry, commandRegistry };
+    }
+
+    function buildRuntime(persistence = kyselyWorkflowProviders(db)): WorkflowRuntime {
+      return new WorkflowRuntime({
+        ...registries(),
+        ...persistence,
+        clock: { now: () => new Date(now) },
+        observers: [{ name: "recorder", onEnter: (event) => void observed.push(event.toState) }],
+      });
+    }
+
+    afterEach(async () => {
+      observed.length = 0;
+      await sql`TRUNCATE workflow_history, workflow_instances CASCADE`.execute(db);
+      await sql`TRUNCATE workflow_definitions`.execute(db);
+    });
+
+    it("fires no observer when the outer transaction rolls back", async () => {
+      const runtime = buildRuntime();
+      const instance = await runtime.createInstance({ workflowName: "flow" });
+      observed.length = 0;
+
+      await expect(
+        KyselyTransactionContext.transaction(db, async () => {
+          await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "go" });
+          throw new Error("outer rollback");
+        }),
+      ).rejects.toThrow("outer rollback");
+
+      expect(observed).toEqual([]);
+      expect((await runtime.getInstance(instance.uuid))!.currentState).toBe("start");
+    });
+
+    it("fires the observer once, after COMMIT, through KyselyTransactionContext.transaction", async () => {
+      const runtime = buildRuntime();
+      const instance = await runtime.createInstance({ workflowName: "flow" });
+      observed.length = 0;
+
+      await KyselyTransactionContext.transaction(db, async () => {
+        await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "go" });
+        expect(observed).toEqual([]);
+      });
+
+      expect(observed).toEqual(["done"]);
+    });
+
+    it("a nested sweep commits nothing for an instance whose onEnter throws", async () => {
+      const runtime = buildRuntime();
+      const instance = await runtime.createInstance({ workflowName: "flow" });
+      const historyBefore = await runtime.getHistory(instance.uuid);
+      now += 5 * 60_000;
+
+      const result = await transactionRunner.runInTransaction(() => runtime.processExpiredWorkflows());
+
+      expect(result.failed.map((f) => f.uuid)).toEqual([instance.uuid]);
+      expect((await runtime.getInstance(instance.uuid))!.currentState).toBe("start");
+      expect(await runtime.getHistory(instance.uuid)).toHaveLength(historyBefore.length);
+    });
+
+    it("kyselyWorkflowProvidersFromTransaction leaves no partial writes from a caught failure", async () => {
+      const setupRuntime = buildRuntime();
+      const instance = await setupRuntime.createInstance({ workflowName: "flow" });
+
+      await db.transaction().execute(async (trx) => {
+        const runtime = buildRuntime(kyselyWorkflowProvidersFromTransaction(trx));
+        await expect(
+          runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "explode" }),
+        ).rejects.toThrow("js boom");
+      });
+
+      expect((await setupRuntime.getInstance(instance.uuid))!.currentState).toBe("start");
+    });
   });
 
   describe("kysely adapter integration", () => {

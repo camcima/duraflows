@@ -31,10 +31,15 @@ function createMockDb() {
     val: (value: unknown) => value,
   };
 
+  const executedSql: string[] = [];
   const mockTrx = {
     selectNoFrom: vi.fn((callback: (eb: typeof expressionBuilder) => unknown) => {
       callback(expressionBuilder);
       return { executeTakeFirst: vi.fn().mockResolvedValue(undefined) };
+    }),
+    executeQuery: vi.fn(async (query: { sql: string }) => {
+      executedSql.push(query.sql);
+      return { rows: [] };
     }),
   } as unknown as MockTransaction;
 
@@ -44,7 +49,18 @@ function createMockDb() {
     }),
   } as unknown as Kysely<WorkflowDatabase>;
 
-  return { db, mockTrx, setConfigCalls };
+  return { db, mockTrx, setConfigCalls, executedSql };
+}
+
+function createExistingTrx() {
+  const executedSql: string[] = [];
+  const trx = {
+    executeQuery: vi.fn(async (query: { sql: string }) => {
+      executedSql.push(query.sql);
+      return { rows: [] };
+    }),
+  } as unknown as MockTransaction;
+  return { trx, executedSql };
 }
 
 describe("KyselyTransactionRunner", () => {
@@ -69,22 +85,94 @@ describe("KyselyTransactionRunner", () => {
     ).rejects.toThrow("boom");
   });
 
-  it("reuses existing transaction context (no nested transaction)", async () => {
+  it("runs a nested call in a savepoint on the existing transaction", async () => {
     const { db } = createMockDb();
     const runner = new KyselyTransactionRunner(db);
+    const existing = createExistingTrx();
 
-    const existingTrx = {} as MockTransaction;
-
-    const result = await KyselyTransactionContext.run(db, existingTrx, () =>
+    const result = await KyselyTransactionContext.run(db, existing.trx, () =>
       runner.runInTransaction(async () => {
-        expect(KyselyTransactionContext.getTransaction(db)).toBe(existingTrx);
+        expect(KyselyTransactionContext.getTransaction(db)).toBe(existing.trx);
         return "nested";
       }),
     );
 
     expect(result).toBe("nested");
-    // db.transaction should NOT be called — we reused the existing context
     expect(db.transaction).not.toHaveBeenCalled();
+    expect(existing.executedSql).toEqual(["SAVEPOINT duraflows_sp_1", "RELEASE SAVEPOINT duraflows_sp_1"]);
+  });
+
+  it("rolls a failed nested call back to its savepoint and rethrows", async () => {
+    const { db } = createMockDb();
+    const runner = new KyselyTransactionRunner(db);
+    const existing = createExistingTrx();
+
+    await expect(
+      KyselyTransactionContext.run(db, existing.trx, () =>
+        runner.runInTransaction(async () => {
+          throw new Error("inner boom");
+        }),
+      ),
+    ).rejects.toThrow("inner boom");
+
+    expect(existing.executedSql).toEqual([
+      "SAVEPOINT duraflows_sp_1",
+      "ROLLBACK TO SAVEPOINT duraflows_sp_1",
+      "RELEASE SAVEPOINT duraflows_sp_1",
+    ]);
+  });
+
+  it("runs afterCommit callbacks after the kysely transaction resolves", async () => {
+    const { db } = createMockDb();
+    const runner = new KyselyTransactionRunner(db);
+    const order: string[] = [];
+
+    await runner.runInTransaction(async () => {
+      runner.afterCommit(async () => {
+        order.push("callback");
+      });
+      order.push("body");
+    });
+
+    expect(order).toEqual(["body", "callback"]);
+  });
+
+  it("does not run afterCommit callbacks when the commit fails", async () => {
+    const { db, mockTrx } = createMockDb();
+    (db.transaction as ReturnType<typeof vi.fn>).mockReturnValue({
+      execute: vi.fn(async (callback: (trx: MockTransaction) => Promise<unknown>) => {
+        await callback(mockTrx);
+        throw new Error("could not serialize access");
+      }),
+    });
+    const runner = new KyselyTransactionRunner(db);
+    const callback = vi.fn(async () => {});
+
+    await expect(runner.runInTransaction(async () => runner.afterCommit(callback))).rejects.toThrow(
+      "could not serialize access",
+    );
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it("KyselyTransactionContext.transaction fires callbacks after the transaction resolves", async () => {
+    const { db, mockTrx, executedSql } = createMockDb();
+    const runner = new KyselyTransactionRunner(db);
+    const order: string[] = [];
+
+    const value = await KyselyTransactionContext.transaction(db, async (trx) => {
+      expect(trx).toBe(mockTrx);
+      await runner.runInTransaction(async () => {
+        runner.afterCommit(async () => {
+          order.push("callback");
+        });
+      });
+      order.push("body done");
+      return 7;
+    });
+
+    expect(value).toBe(7);
+    expect(order).toEqual(["body done", "callback"]);
+    expect(executedSql).toEqual(["SAVEPOINT duraflows_sp_1", "RELEASE SAVEPOINT duraflows_sp_1"]);
   });
 
   it("seeds KyselyTransactionContext inside the transaction callback", async () => {
@@ -156,9 +244,9 @@ describe("KyselyTransactionRunner timeouts", () => {
   it("does not re-apply timeouts when reusing an existing transaction", async () => {
     const { db, setConfigCalls } = createMockDb();
     const runner = new KyselyTransactionRunner(db, { lockTimeoutMs: 3000 });
-    const existingTrx = {} as MockTransaction;
+    const existing = createExistingTrx();
 
-    await KyselyTransactionContext.run(db, existingTrx, () => runner.runInTransaction(async () => "nested"));
+    await KyselyTransactionContext.run(db, existing.trx, () => runner.runInTransaction(async () => "nested"));
 
     expect(db.transaction).not.toHaveBeenCalled();
     expect(setConfigCalls).toEqual([]);

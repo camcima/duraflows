@@ -49,27 +49,38 @@ The primary use case for this package is running Duraflows workflow transitions 
 ```ts
 import { KyselyTransactionContext } from "@duraflows/kysely";
 
-// Seed the transaction context so Duraflows participates in your transaction
-await db.transaction().execute(async (trx) => {
-  await KyselyTransactionContext.run(db, trx, async () => {
-    // Your own writes -- uses trx
-    await trx.insertInto("orders").values({ id: "ORD-1", status: "paid" }).execute();
+await KyselyTransactionContext.transaction(db, async (trx) => {
+  // Your own writes -- uses trx
+  await trx.insertInto("orders").values({ id: "ORD-1", status: "paid" }).execute();
 
-    // Duraflows writes -- also uses trx (same transaction)
-    await runtime.triggerEvent({
-      workflowInstanceUuid: instanceUuid,
-      eventName: "PaymentReceived",
-    });
+  // Duraflows writes -- also uses trx (same transaction)
+  await runtime.triggerEvent({
+    workflowInstanceUuid: instanceUuid,
+    eventName: "PaymentReceived",
   });
 });
-// Both commit or both rollback -- no split-brain
+// Both commit or both roll back. Observers fire after COMMIT, never after a rollback.
 ```
+
+Each duraflows call inside runs in its own savepoint. If one fails, its writes are rolled back, and your transaction can carry on if you catch the error.
+
+If you already open the transaction yourself, you can still seed the context:
+
+```ts
+await db.transaction().execute((trx) =>
+  KyselyTransactionContext.run(db, trx, async () => {
+    await runtime.triggerEvent({ workflowInstanceUuid: instanceUuid, eventName: "PaymentReceived" });
+  }),
+);
+```
+
+Observers then fire when the seeded callback resolves, which is **before** kysely commits. Prefer `transaction()` when observers must never see a rolled-back write. Don't run duraflows calls concurrently (`Promise.all`) on one transaction.
 
 ### How It Works
 
 `KyselyTransactionContext` uses Node.js `AsyncLocalStorage` to propagate the active Kysely transaction through the async call chain. When Duraflows' internal `WorkflowTransactionRunner.runInTransaction()` is called, it checks for an existing transaction in the context:
 
-- **Found:** Reuses it (no nested transaction)
+- **Found:** Runs the call in a savepoint on it (`SAVEPOINT` … `RELEASE`, or `ROLLBACK TO` on failure)
 - **Not found:** Starts a new Kysely transaction and seeds the context
 
 This re-entrancy contract means your application code controls the transaction boundary.
@@ -127,7 +138,7 @@ Both are applied transaction-locally via `set_config(name, value, true)` — the
 
 ### `kyselyWorkflowProvidersFromTransaction(trx): WorkflowPersistenceProvider`
 
-Convenience factory for short-lived runtimes pre-bound to an existing transaction. The returned transaction runner seeds the context with the bound `trx` if no context already exists.
+Convenience factory for short-lived runtimes pre-bound to an existing transaction. Each workflow call runs in a savepoint on `trx`, so a failed call leaves no partial writes behind even if you catch its error. Observers fire when the call resolves, before your transaction commits. For strictly post-commit observers, use `KyselyTransactionContext.transaction(db, …)` with the long-lived providers instead.
 
 ### `KyselyTransactionContext`
 
@@ -135,6 +146,7 @@ The context is scoped per Kysely instance:
 
 - `getTransaction(db)` -- Returns the active `Transaction<WorkflowDatabase>` for the given `db` instance, or `undefined`
 - `run(db, trx, callback)` -- Executes `callback` with `trx` as the active transaction context for the given `db` instance
+- `transaction(db, callback)` -- Runs `callback(trx)` in a new transaction on `db` with `trx` active for workflow calls; observers fire after it commits
 
 ## Documentation
 
