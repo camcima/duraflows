@@ -1,5 +1,6 @@
 import type { CommandResult, WorkflowInstance } from "./runtime.js";
 import type { WorkflowDefinition } from "./definition.js";
+import type { AfterCommitCallback } from "../transaction/scoped-transaction-context.js";
 
 export interface WorkflowInstanceStore {
   /**
@@ -122,10 +123,27 @@ export interface WorkflowTransactionRunner {
    * subsequent `update` / `append` calls.
    *
    * If `runInTransaction` is called while a transaction is already active on
-   * the current async context, adapters should reuse the existing connection
-   * rather than opening a nested transaction.
+   * the current async context, adapters SHOULD run the callback in a savepoint
+   * on the existing connection: release it on success, and on failure roll
+   * back to it and rethrow, so a failed nested call leaves no partial writes
+   * and the outer transaction stays usable. An adapter that reuses the
+   * connection without a savepoint ("flat" nesting) still conforms but gives
+   * nested calls no failure isolation.
    */
   runInTransaction<T>(callback: () => Promise<T>): Promise<T>;
+
+  /**
+   * Optional. Queues `callback` to run after the transaction active on the
+   * current async context commits. It is discarded if its scope, or any
+   * savepoint enclosing it, rolls back. Callbacks run in order, outside the
+   * finished transaction, and a throwing callback never fails the committed
+   * operation. Throws `WorkflowError` when no transaction is active.
+   *
+   * Runners without it keep the earlier behaviour: the runtime fires observers
+   * as soon as its own `runInTransaction` call returns, even when that call
+   * was nested in an outer transaction that has not committed yet.
+   */
+  afterCommit?(callback: AfterCommitCallback): void;
 }
 
 export interface WorkflowClock {
