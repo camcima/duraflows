@@ -69,12 +69,15 @@ export function kyselyWorkflowProvidersFromTransaction<DB extends WorkflowDataba
       }
       // The caller owns `trx`, so even this outermost call is nested in their
       // transaction: run it in a savepoint so a failure leaves no partial
-      // writes behind, and deliver its observers once it resolves.
+      // writes behind, and deliver its observers once it resolves. `trx` is
+      // still open then, so the observers run inside the root scope: a
+      // duraflows call they make joins `trx` as a savepoint, and the
+      // callbacks it queues drain in the same pass.
       const root = kyselyTransactionScopes.createRoot(boundTrx);
       const result = await kyselyTransactionScopes.run(narrowed, root, () =>
         kyselyTransactionScopes.runInSavepoint(narrowed, root, callback, (sql) => executeRawStatement(boundTrx, sql)),
       );
-      await runAfterCommitCallbacks(root.callbacks);
+      await kyselyTransactionScopes.run(narrowed, root, () => runAfterCommitCallbacks(root.callbacks));
       return result;
     },
     afterCommit(callback) {

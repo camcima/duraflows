@@ -85,12 +85,28 @@ export const KyselyTransactionContext = {
    * with that transaction active for workflow calls. Observers of workflow
    * calls made inside fire after the transaction commits, and never if it
    * rolls back.
+   *
+   * Called while a transaction for `db` is already active (an outer
+   * `transaction()`, a workflow call, or a seeded `run()`), it joins that
+   * transaction instead: `callback` receives the existing transaction and runs
+   * in a savepoint, which is released on success (its observers then wait for
+   * the enclosing transaction) and rolled back on failure (its observers are
+   * dropped).
    */
   transaction<T, DB extends WorkflowDatabase = WorkflowDatabase>(
     db: Kysely<DB>,
     callback: (trx: Transaction<DB>) => Promise<T>,
   ): Promise<T> {
     const owner = db as unknown as Kysely<WorkflowDatabase>;
+    const scope = kyselyTransactionScopes.current(owner);
+    if (scope) {
+      return kyselyTransactionScopes.runInSavepoint(
+        owner,
+        scope,
+        () => callback(scope.connection as unknown as Transaction<DB>),
+        (sql) => executeRawStatement(scope.connection, sql),
+      );
+    }
     return runOwnedKyselyTransaction(
       owner,
       async () => {},

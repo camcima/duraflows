@@ -242,6 +242,144 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     });
   });
 
+  describe("kysely transaction sharing", () => {
+    // A dedicated pool whose every connection has `lock_timeout` set, so a
+    // regression that makes a call wait on a row lock held by its own caller's
+    // transaction fails within seconds instead of hanging the suite. It shares
+    // the throwaway kysely_it schema with the rest of the file.
+    const sharingDb = new Kysely<WorkflowDatabase>({
+      dialect: new PostgresDialect({
+        pool: new Pool({ connectionString: databaseUrl, options: "-c search_path=kysely_it -c lock_timeout=2000" }),
+      }),
+    });
+    const events: string[] = [];
+    const observerErrors: string[] = [];
+
+    /**
+     * `a --next--> b --next--> c`. With `relay`, an observer entering `b`
+     * triggers `next` on the same instance, so reaching `c` needs a duraflows
+     * call made from inside an observer.
+     */
+    function buildRuntime(
+      { relay }: { relay: boolean },
+      persistence = kyselyWorkflowProviders(sharingDb, { lockTimeoutMs: 2000 }),
+    ): WorkflowRuntime {
+      const definitionRegistry = new InMemoryDefinitionRegistry({
+        validator: new WorkflowValidator(),
+        compiler: new WorkflowCompiler(),
+      });
+      definitionRegistry.register({
+        name: "relay",
+        initialState: "a",
+        states: { a: { events: { next: { targetState: "b" } } }, b: { events: { next: { targetState: "c" } } }, c: {} },
+      });
+      const runtime = new WorkflowRuntime({
+        definitionRegistry,
+        commandRegistry: new InMemoryCommandRegistry(),
+        clock: { now: () => new Date() },
+        ...persistence,
+        onObserverError: (error) => void observerErrors.push(error instanceof Error ? error.message : String(error)),
+      });
+      runtime.addObserver({
+        name: "relayer",
+        onEnter: async (event) => {
+          events.push(event.toState);
+          if (relay && event.toState === "b") {
+            await runtime.triggerEvent({ workflowInstanceUuid: event.instanceUuid, eventName: "next" });
+          }
+        },
+      });
+      return runtime;
+    }
+
+    async function stateOf(runtime: WorkflowRuntime, uuid: string): Promise<string> {
+      return (await runtime.getInstance(uuid))!.currentState;
+    }
+
+    afterEach(async () => {
+      events.length = 0;
+      observerErrors.length = 0;
+      await sql`TRUNCATE workflow_history, workflow_instances CASCADE`.execute(db);
+    });
+
+    afterAll(async () => {
+      await sharingDb.destroy();
+    });
+
+    it("an observer of a bare-seeded call joins the caller's still-open transaction", { timeout: 15_000 }, async () => {
+      const runtime = buildRuntime({ relay: true });
+      const instance = await runtime.createInstance({ workflowName: "relay" });
+      events.length = 0;
+
+      await sharingDb
+        .transaction()
+        .execute((trx) =>
+          KyselyTransactionContext.run(sharingDb, trx, () =>
+            runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "next" }),
+          ),
+        );
+
+      expect(observerErrors).toEqual([]);
+      expect(events).toEqual(["b", "c"]);
+      expect(await stateOf(runtime, instance.uuid)).toBe("c");
+    });
+
+    it(
+      "an observer of a kyselyWorkflowProvidersFromTransaction call joins the caller's transaction",
+      { timeout: 15_000 },
+      async () => {
+        const setupRuntime = buildRuntime({ relay: false });
+        const instance = await setupRuntime.createInstance({ workflowName: "relay" });
+        events.length = 0;
+
+        await sharingDb.transaction().execute(async (trx) => {
+          const runtime = buildRuntime({ relay: true }, kyselyWorkflowProvidersFromTransaction(trx));
+          await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "next" });
+        });
+
+        expect(observerErrors).toEqual([]);
+        expect(events).toEqual(["b", "c"]);
+        expect(await stateOf(setupRuntime, instance.uuid)).toBe("c");
+      },
+    );
+
+    it("a helper transaction inside another joins it on the same instance", { timeout: 15_000 }, async () => {
+      const runtime = buildRuntime({ relay: false });
+      const instance = await runtime.createInstance({ workflowName: "relay" });
+      events.length = 0;
+
+      await KyselyTransactionContext.transaction(sharingDb, async (outer) => {
+        await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "next" });
+        await KyselyTransactionContext.transaction(sharingDb, async (inner) => {
+          expect(inner).toBe(outer);
+          await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "next" });
+        });
+        expect(events).toEqual([]);
+      });
+
+      expect(events).toEqual(["b", "c"]);
+      expect(await stateOf(runtime, instance.uuid)).toBe("c");
+    });
+
+    it("an outer helper failure rolls back the inner helper's writes", { timeout: 15_000 }, async () => {
+      const runtime = buildRuntime({ relay: false });
+      const instance = await runtime.createInstance({ workflowName: "relay" });
+      events.length = 0;
+
+      await expect(
+        KyselyTransactionContext.transaction(sharingDb, async () => {
+          await KyselyTransactionContext.transaction(sharingDb, async () => {
+            await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "next" });
+          });
+          throw new Error("outer failure");
+        }),
+      ).rejects.toThrow("outer failure");
+
+      expect(events).toEqual([]);
+      expect(await stateOf(runtime, instance.uuid)).toBe("a");
+    });
+  });
+
   describe("kysely adapter integration", () => {
     // Cleanup runs in afterEach (not at the end of each test body) so a
     // failing assertion cannot leak rows into the next test.

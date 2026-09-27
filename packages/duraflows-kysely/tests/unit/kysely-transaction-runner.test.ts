@@ -175,6 +175,55 @@ describe("KyselyTransactionRunner", () => {
     expect(executedSql).toEqual(["SAVEPOINT duraflows_sp_1", "RELEASE SAVEPOINT duraflows_sp_1"]);
   });
 
+  it("KyselyTransactionContext.transaction inside an active scope joins it in a savepoint", async () => {
+    const { db } = createMockDb();
+    const runner = new KyselyTransactionRunner(db);
+    const existing = createExistingTrx();
+    const order: string[] = [];
+
+    const value = await KyselyTransactionContext.run(db, existing.trx, async () => {
+      const inner = await KyselyTransactionContext.transaction(db, async (trx) => {
+        expect(trx).toBe(existing.trx);
+        runner.afterCommit(async () => {
+          order.push("callback");
+        });
+        return "inner";
+      });
+      expect(order).toEqual([]);
+      return inner;
+    });
+
+    expect(value).toBe("inner");
+    expect(db.transaction).not.toHaveBeenCalled();
+    expect(existing.trx.executeQuery).toHaveBeenCalledTimes(2);
+    expect(existing.executedSql).toEqual(["SAVEPOINT duraflows_sp_1", "RELEASE SAVEPOINT duraflows_sp_1"]);
+    expect(order).toEqual(["callback"]);
+  });
+
+  it("KyselyTransactionContext.transaction inside an active scope rolls back only its savepoint", async () => {
+    const { db } = createMockDb();
+    const runner = new KyselyTransactionRunner(db);
+    const existing = createExistingTrx();
+    const callback = vi.fn(async () => {});
+
+    await KyselyTransactionContext.run(db, existing.trx, async () => {
+      await expect(
+        KyselyTransactionContext.transaction(db, async () => {
+          runner.afterCommit(callback);
+          throw new Error("inner failure");
+        }),
+      ).rejects.toThrow("inner failure");
+    });
+
+    expect(db.transaction).not.toHaveBeenCalled();
+    expect(existing.executedSql).toEqual([
+      "SAVEPOINT duraflows_sp_1",
+      "ROLLBACK TO SAVEPOINT duraflows_sp_1",
+      "RELEASE SAVEPOINT duraflows_sp_1",
+    ]);
+    expect(callback).not.toHaveBeenCalled();
+  });
+
   it("seeds KyselyTransactionContext inside the transaction callback", async () => {
     const { db, mockTrx } = createMockDb();
     const runner = new KyselyTransactionRunner(db);
