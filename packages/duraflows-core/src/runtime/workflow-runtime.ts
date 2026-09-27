@@ -15,6 +15,7 @@ import type {
   TriggerWorkflowEventInput,
   ProcessExpiredWorkflowsInput,
   ProcessExpiredWorkflowsResult,
+  FindParkedTimeoutsInput,
   GetAvailableEventsInput,
   WorkflowInstance,
   WorkflowExecutionResult,
@@ -778,6 +779,40 @@ export class WorkflowRuntime {
 
   async getInstance(uuid: string): Promise<WorkflowInstance | null> {
     return this.instanceStore.findByUuid(uuid);
+  }
+
+  /**
+   * Instances parked after `timeoutRetry.maxAttempts` consecutive failed timeout
+   * attempts, oldest-parked first. Their `timeoutRetry` carries the attempt
+   * count, the last error, and when they were parked.
+   */
+  async findParkedTimeouts(input?: FindParkedTimeoutsInput): Promise<WorkflowInstance[]> {
+    const limit = input?.limit ?? 100;
+    assertPositiveSafeInteger(limit, "limit");
+    return this.instanceStore.findParkedTimeouts({ limit, workflowName: input?.workflowName });
+  }
+
+  /**
+   * Clears an instance's timeout retry state — un-parking it — so the next
+   * `processExpiredWorkflows` retries its timeout if the deadline has passed.
+   * An instance without retry state is returned unchanged.
+   */
+  async rearmTimeout(workflowInstanceUuid: string): Promise<WorkflowInstance> {
+    await this.initialize();
+    return this.transactionRunner.runInTransaction(async () => {
+      const instance = await this.instanceStore.lockByUuid(workflowInstanceUuid);
+      if (!instance) {
+        throw new WorkflowInstanceNotFoundError(workflowInstanceUuid);
+      }
+      if (instance.timeoutRetry === null) {
+        return instance;
+      }
+      instance.timeoutRetry = null;
+      instance.version++;
+      instance.updatedAt = this.clock.now();
+      await this.instanceStore.update(instance);
+      return instance;
+    });
   }
 
   async getHistory(

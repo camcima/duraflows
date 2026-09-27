@@ -4,7 +4,7 @@ import { InMemoryDefinitionRegistry } from "../../src/registry/definition-regist
 import { InMemoryCommandRegistry } from "../../src/registry/command-registry.js";
 import { WorkflowValidator } from "../../src/validation/workflow-validator.js";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
-import { InvalidArgumentError } from "../../src/errors/index.js";
+import { InvalidArgumentError, WorkflowInstanceNotFoundError } from "../../src/errors/index.js";
 import { createInMemoryPersistence } from "../helpers/in-memory-persistence.js";
 import type { WorkflowInstance } from "../../src/types/runtime.js";
 
@@ -231,5 +231,56 @@ describe("processExpiredWorkflows retry scheduling and parking", () => {
           timeoutRetry: { maxAttempts: 0 },
         }),
     ).toThrow(InvalidArgumentError);
+  });
+
+  describe("operator API", () => {
+    const parkBroken = async (): Promise<WorkflowInstance> => {
+      const instance = await runtime.createInstance({ workflowName: "broken" });
+      now += minutes(5);
+      for (const step of [0, minutes(1) + 1, minutes(2) + 1]) {
+        now += step;
+        await runtime.processExpiredWorkflows();
+      }
+      return instance;
+    };
+
+    it("findParkedTimeouts lists parked instances, filtered by workflow name", async () => {
+      const instance = await parkBroken();
+
+      expect((await runtime.findParkedTimeouts()).map((i) => i.uuid)).toEqual([instance.uuid]);
+      expect(await runtime.findParkedTimeouts({ workflowName: "healthy" })).toEqual([]);
+    });
+
+    it("findParkedTimeouts rejects an invalid limit", async () => {
+      await expect(runtime.findParkedTimeouts({ limit: 0 })).rejects.toThrow(InvalidArgumentError);
+    });
+
+    it("rearmTimeout clears a parked instance so the next sweep retries it", async () => {
+      const instance = await parkBroken();
+
+      const rearmed = await runtime.rearmTimeout(instance.uuid);
+
+      expect(rearmed.timeoutRetry).toBeNull();
+      expect(await runtime.findParkedTimeouts()).toEqual([]);
+      brokenFails = false;
+      const result = await runtime.processExpiredWorkflows();
+      expect(result.processed).toBe(1);
+      expect((await stored(instance.uuid)).currentState).toBe("done");
+    });
+
+    it("rearmTimeout leaves an instance without retry state untouched", async () => {
+      const instance = await runtime.createInstance({ workflowName: "healthy" });
+
+      const result = await runtime.rearmTimeout(instance.uuid);
+
+      expect(result.version).toBe(instance.version);
+      expect((await stored(instance.uuid)).version).toBe(instance.version);
+    });
+
+    it("rearmTimeout throws for an unknown instance", async () => {
+      await expect(runtime.rearmTimeout("00000000-0000-0000-0000-00000000dead")).rejects.toThrow(
+        WorkflowInstanceNotFoundError,
+      );
+    });
   });
 });

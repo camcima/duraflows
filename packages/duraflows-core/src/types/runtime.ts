@@ -114,6 +114,13 @@ export interface ProcessExpiredWorkflowsInput {
   limit?: number;
 }
 
+export interface FindParkedTimeoutsInput {
+  /** Maximum instances to return. Default 100. */
+  limit?: number;
+  /** Only instances of this workflow. */
+  workflowName?: string;
+}
+
 export interface ProcessExpiredWorkflowsResult {
   processed: number;
   rejected: number;

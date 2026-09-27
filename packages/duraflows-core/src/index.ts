@@ -24,6 +24,7 @@ export type {
   TriggerWorkflowEventInput,
   ProcessExpiredWorkflowsInput,
   ProcessExpiredWorkflowsResult,
+  FindParkedTimeoutsInput,
   GetAvailableEventsInput,
 } from "./types/runtime.js";
 
