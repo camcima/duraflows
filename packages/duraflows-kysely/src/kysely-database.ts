@@ -27,6 +27,10 @@ export interface WorkflowInstancesTable {
   metadata_json: JsonObjectColumn;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
+  timeout_attempts: Generated<number>;
+  timeout_retry_at: Date | null;
+  timeout_last_error: string | null;
+  timeout_parked_at: Date | null;
 }
 
 export interface WorkflowHistoryTable {

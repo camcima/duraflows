@@ -15,6 +15,7 @@ const sampleInstance: WorkflowInstance = {
   version: 0,
   definitionVersion: null,
   expiresAt: null,
+  timeoutRetry: null,
   lastTransitionAt: now,
   context: { status: "new" },
   metadata: { orderId: "ORD-1" },
@@ -35,6 +36,11 @@ const sampleRow = {
   created_at: now,
   updated_at: now,
 };
+
+const fakeEb = Object.assign((ref: string, op: string, value: unknown) => ({ ref, op, value }), {
+  or: (expressions: unknown[]) => ({ or: expressions }),
+  fn: { coalesce: (...refs: string[]) => ({ coalesce: refs }) },
+});
 
 // Creates a mock Kysely db that tracks method calls on the builder chain
 function createMockDb(queryResult: Record<string, unknown>[] = []) {
@@ -62,7 +68,9 @@ function createMockDb(queryResult: Record<string, unknown>[] = []) {
     ];
     for (const method of methods) {
       builder[method] = vi.fn((...args: unknown[]) => {
-        calls.push({ method, args });
+        // Query-builder callbacks (`where((eb) => …)`, `orderBy((eb) => …)`) are
+        // evaluated against a recording fake so their shape can be asserted.
+        calls.push({ method, args: args.map((arg) => (typeof arg === "function" ? arg(fakeEb) : arg)) });
         return builder;
       });
     }
@@ -269,6 +277,112 @@ describe("KyselyWorkflowInstanceStore", () => {
 
       expect(calls.some((c) => c.method === "forUpdate")).toBe(true);
       expect(calls.some((c) => c.method === "skipLocked")).toBe(true);
+    });
+  });
+
+  describe("timeout retry columns", () => {
+    const retrying = { attempts: 2, lastError: "boom", retryAt: now, parkedAt: null };
+
+    it("create writes the four timeout retry columns", async () => {
+      const { db, calls } = createMockDb();
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      await store.create({ ...sampleInstance, timeoutRetry: retrying });
+
+      const values = calls.find((c) => c.method === "values")!.args[0] as Record<string, unknown>;
+      expect(values).toMatchObject({
+        timeout_attempts: 2,
+        timeout_retry_at: now,
+        timeout_last_error: "boom",
+        timeout_parked_at: null,
+      });
+    });
+
+    it("update writes the four timeout retry columns", async () => {
+      const { db, calls, executeMock } = createMockDb();
+      executeMock.mockResolvedValue([{ numUpdatedRows: BigInt(1) }]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      await store.update({ ...sampleInstance, version: 1, timeoutRetry: retrying });
+
+      const set = calls.find((c) => c.method === "set")!.args[0] as Record<string, unknown>;
+      expect(set).toMatchObject({
+        timeout_attempts: 2,
+        timeout_retry_at: now,
+        timeout_last_error: "boom",
+        timeout_parked_at: null,
+      });
+    });
+
+    it("findExpired filters parked and not-yet-due rows and orders by due time", async () => {
+      const { db, calls } = createMockDb([sampleRow]);
+      const store = new KyselyWorkflowInstanceStore(db);
+      const trx = db as unknown as Transaction<WorkflowDatabase>;
+
+      await KyselyTransactionContext.run(db, trx, () => store.findExpired(10, now));
+
+      expect(calls).toContainEqual({ method: "where", args: ["timeout_parked_at", "is", null] });
+      expect(calls).toContainEqual({
+        method: "where",
+        args: [
+          {
+            or: [
+              { ref: "timeout_retry_at", op: "is", value: null },
+              { ref: "timeout_retry_at", op: "<", value: now },
+            ],
+          },
+        ],
+      });
+      expect(calls).toContainEqual({ method: "orderBy", args: [{ coalesce: ["timeout_retry_at", "expires_at"] }] });
+    });
+
+    it("findParkedTimeouts reads without a transaction, unfiltered", async () => {
+      const parkedRow = {
+        ...sampleRow,
+        timeout_attempts: 10,
+        timeout_retry_at: null,
+        timeout_last_error: "broken",
+        timeout_parked_at: now,
+      };
+      const { db, calls } = createMockDb([parkedRow]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      const results = await store.findParkedTimeouts({ limit: 5 });
+
+      expect(calls).toContainEqual({ method: "where", args: ["timeout_parked_at", "is not", null] });
+      expect(calls.some((c) => c.method === "where" && c.args[0] === "workflow_name")).toBe(false);
+      expect(calls).toContainEqual({ method: "limit", args: [5] });
+      expect(results[0].timeoutRetry).toEqual({ attempts: 10, lastError: "broken", retryAt: null, parkedAt: now });
+    });
+
+    it("findParkedTimeouts filters by workflow name and orders by parked time then uuid", async () => {
+      const { db, calls } = createMockDb([]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      await store.findParkedTimeouts({ limit: 5, workflowName: "order" });
+
+      expect(calls).toContainEqual({ method: "where", args: ["workflow_name", "=", "order"] });
+      const orderBys = calls.filter((c) => c.method === "orderBy").map((c) => c.args[0]);
+      expect(orderBys).toEqual(["timeout_parked_at", "uuid"]);
+    });
+
+    it("maps a retrying row, and a missing last error to an empty string", async () => {
+      const row = {
+        ...sampleRow,
+        timeout_attempts: 1,
+        timeout_retry_at: now,
+        timeout_last_error: null,
+        timeout_parked_at: null,
+      };
+      const { db } = createMockDb([row]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      expect((await store.findByUuid("inst-uuid"))!.timeoutRetry).toEqual({
+        attempts: 1,
+        lastError: "",
+        retryAt: now,
+        parkedAt: null,
+      });
     });
   });
 });

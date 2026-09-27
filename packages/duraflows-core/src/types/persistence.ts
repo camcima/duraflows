@@ -45,18 +45,23 @@ export interface WorkflowInstanceStore {
   update(instance: WorkflowInstance): Promise<void>;
 
   /**
-   * Find expired instances whose `expiresAt` is in the past (relative to the
-   * `now` parameter — not the database clock).
-   *
-   * **Transactional: REQUIRED.** Must use `SELECT ... FOR UPDATE SKIP LOCKED`
-   * (or equivalent) so concurrently sweeping workers skip rows another
-   * worker is currently scanning. The locks last only as long as the
-   * caller's transaction — the runtime intentionally runs this in a short
-   * transaction and re-locks each instance individually (via `lockByUuid`
-   * plus an `expiresAt` re-check) before processing, so cross-worker
-   * exclusivity comes from that re-lock, not from this scan.
+   * Find instances whose timeout is due, locked for update with skip-locked
+   * semantics (`FOR UPDATE SKIP LOCKED`). Due means all of: `expiresAt < now`;
+   * not parked (`timeoutRetry?.parkedAt` is null); and no retry scheduled or
+   * `timeoutRetry.retryAt < now`. Ordered by when each became due —
+   * `timeoutRetry.retryAt` when set, otherwise `expiresAt` — oldest first, so
+   * instances whose timeout keeps failing move behind healthy ones.
+   * Adapters must throw if called outside an active transaction.
    */
   findExpired(limit: number, now: Date): Promise<WorkflowInstance[]>;
+
+  /**
+   * List instances parked after too many failed timeout attempts
+   * (`timeoutRetry.parkedAt` set), oldest-parked first (ties by `uuid`),
+   * optionally filtered by workflow name, at most `limit`. A plain read: no
+   * transaction required.
+   */
+  findParkedTimeouts(options: { limit: number; workflowName?: string }): Promise<WorkflowInstance[]>;
 }
 
 export interface WorkflowHistoryStore {

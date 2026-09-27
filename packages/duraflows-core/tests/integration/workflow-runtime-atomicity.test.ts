@@ -267,6 +267,7 @@ describe("WorkflowRuntime transactional atomicity", () => {
           version: 1,
           definitionVersion: null,
           expiresAt: null,
+          timeoutRetry: null,
           lastTransitionAt: fixedDate,
           context: {},
           metadata: {},

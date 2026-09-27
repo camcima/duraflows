@@ -1,8 +1,18 @@
 import type { Kysely, Selectable } from "kysely";
-import type { WorkflowInstanceStore, WorkflowInstance } from "@duraflows/core";
+import type { WorkflowInstanceStore, WorkflowInstance, WorkflowTimeoutRetry } from "@duraflows/core";
 import { WorkflowError } from "@duraflows/core";
 import type { WorkflowDatabase, WorkflowInstancesTable } from "./kysely-database.js";
 import { KyselyTransactionContext } from "./kysely-transaction-context.js";
+
+/** The four timeout-retry column values for `retry` (`null` ⇒ never failed). */
+function timeoutRetryColumns(retry: WorkflowTimeoutRetry | null) {
+  return {
+    timeout_attempts: retry?.attempts ?? 0,
+    timeout_retry_at: retry?.retryAt ?? null,
+    timeout_last_error: retry?.lastError ?? null,
+    timeout_parked_at: retry?.parkedAt ?? null,
+  };
+}
 
 export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
   constructor(private readonly db: Kysely<WorkflowDatabase>) {}
@@ -27,6 +37,7 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
         metadata_json: JSON.stringify(instance.metadata),
         created_at: instance.createdAt,
         updated_at: instance.updatedAt,
+        ...timeoutRetryColumns(instance.timeoutRetry),
       })
       .execute();
   }
@@ -68,6 +79,7 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
         last_transition_at: instance.lastTransitionAt,
         context_json: JSON.stringify(instance.context),
         updated_at: instance.updatedAt,
+        ...timeoutRetryColumns(instance.timeoutRetry),
       })
       .where("uuid", "=", instance.uuid)
       .where("version", "=", expectedVersion)
@@ -91,12 +103,26 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
       .selectAll()
       .where("expires_at", "is not", null)
       .where("expires_at", "<", now)
-      .orderBy("expires_at")
+      .where("timeout_parked_at", "is", null)
+      .where((eb) => eb.or([eb("timeout_retry_at", "is", null), eb("timeout_retry_at", "<", now)]))
+      .orderBy((eb) => eb.fn.coalesce("timeout_retry_at", "expires_at"))
       .forUpdate()
       .skipLocked()
       .limit(limit)
       .execute();
 
+    return rows.map((row) => this.mapRow(row));
+  }
+
+  async findParkedTimeouts(options: { limit: number; workflowName?: string }): Promise<WorkflowInstance[]> {
+    let query = this.getExecutor()
+      .selectFrom("workflow_instances")
+      .selectAll()
+      .where("timeout_parked_at", "is not", null);
+    if (options.workflowName !== undefined) {
+      query = query.where("workflow_name", "=", options.workflowName);
+    }
+    const rows = await query.orderBy("timeout_parked_at").orderBy("uuid").limit(options.limit).execute();
     return rows.map((row) => this.mapRow(row));
   }
 
@@ -108,6 +134,15 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
       version: row.version,
       definitionVersion: row.definition_version ?? null,
       expiresAt: row.expires_at,
+      timeoutRetry:
+        row.timeout_attempts > 0
+          ? {
+              attempts: row.timeout_attempts,
+              lastError: row.timeout_last_error ?? "",
+              retryAt: row.timeout_retry_at,
+              parkedAt: row.timeout_parked_at,
+            }
+          : null,
       lastTransitionAt: row.last_transition_at,
       context: row.context_json,
       metadata: row.metadata_json,

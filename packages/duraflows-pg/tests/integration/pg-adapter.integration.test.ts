@@ -66,6 +66,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     version: 0,
     definitionVersion: null,
     expiresAt: null,
+    timeoutRetry: null,
     lastTransitionAt: new Date("2026-01-01T00:00:00Z"),
     context: {},
     metadata: {},

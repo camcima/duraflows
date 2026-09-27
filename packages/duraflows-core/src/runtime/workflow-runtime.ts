@@ -217,6 +217,7 @@ export class WorkflowRuntime {
       version: 0,
       definitionVersion: this.definitionVersionOf(definition),
       expiresAt,
+      timeoutRetry: null,
       lastTransitionAt: now,
       context,
       metadata: structuredClone(input.metadata ?? {}),

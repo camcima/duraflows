@@ -23,6 +23,22 @@ export interface WorkflowExecutionContext {
   readonly transitionUuid: string;
 }
 
+/**
+ * Retry state of an instance whose timeout processing has failed. The runtime
+ * owns it: `processExpiredWorkflows` sets it after a failed attempt, and any
+ * successful transition, `rearmTimeout`, or deadline clear resets it to `null`.
+ */
+export interface WorkflowTimeoutRetry {
+  /** Consecutive failed timeout attempts since the last success (>= 1). */
+  attempts: number;
+  /** Message of the most recent failure, truncated to 2000 characters. */
+  lastError: string;
+  /** When the sweep may try again; `null` once parked. */
+  retryAt: Date | null;
+  /** When the instance was parked after `maxAttempts` failures; `null` while retrying. */
+  parkedAt: Date | null;
+}
+
 export interface WorkflowInstance<TState extends string = string> {
   uuid: string;
   workflowName: string;
@@ -35,6 +51,11 @@ export interface WorkflowInstance<TState extends string = string> {
    */
   definitionVersion: number | null;
   expiresAt: Date | null;
+  /**
+   * Retry state after failed timeout processing; `null` when no timeout attempt
+   * has failed since the last success. See {@link WorkflowTimeoutRetry}.
+   */
+  timeoutRetry: WorkflowTimeoutRetry | null;
   lastTransitionAt: Date;
   context: Record<string, unknown>;
   metadata: Record<string, unknown>;

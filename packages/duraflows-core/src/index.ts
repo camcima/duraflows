@@ -16,6 +16,7 @@ export type {
   CommandResult,
   WorkflowExecutionContext,
   WorkflowInstance,
+  WorkflowTimeoutRetry,
   WorkflowExecutionResult,
   AvailableWorkflowEvent,
   CreateWorkflowInstanceInput,
