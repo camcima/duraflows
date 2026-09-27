@@ -210,7 +210,7 @@ Observers receive lifecycle events fired by the workflow runtime after a state t
 
 **Semantics:**
 
-- Fired post-commit — the database write has already committed before observers run, and nothing fires for a transaction that rolls back (see [Firing semantics](./core-runtime.md#firing-semantics) for calls nested in your own transaction)
+- Fired post-commit — the database write has already committed before observers run, and nothing fires for a transaction that rolls back, whenever duraflows or an owner helper (`PgTransactionContext.transaction`, `KyselyTransactionContext.transaction`) owns the `COMMIT`. Under a bare `run()` seed or `kyselyWorkflowProvidersFromTransaction`, observers fire before your `COMMIT` (see [Firing semantics](./core-runtime.md#firing-semantics))
 - At-most-once — an observer that throws does not retry
 - Sequential — observers run one after another in registration order
 - Error-contained — a thrown error is logged via `console.warn` and does not affect workflow correctness or the transaction result
