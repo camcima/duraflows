@@ -12,7 +12,9 @@
  * promise the whole runtime is built on — would have no core-level coverage.
  */
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { WorkflowError } from "../../src/errors/index.js";
+import { runAfterCommitCallbacks, type AfterCommitCallback } from "../../src/transaction/scoped-transaction-context.js";
 import type { WorkflowInstance } from "../../src/types/runtime.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
 import type {
@@ -117,30 +119,44 @@ export class InMemoryHistoryStore implements WorkflowHistoryStore, SnapshotableS
  * A transaction runner that actually simulates a transaction: it snapshots
  * every store it was given before running the callback and restores those
  * snapshots if the callback throws, so a partial failure leaves no trace.
+ *
+ * Nesting behaves like the SQL adapters' savepoints: a nested call snapshots
+ * on entry and restores only its own changes on failure, and its afterCommit
+ * callbacks move to the enclosing scope on success or are dropped on failure.
+ * The outermost call runs the queued callbacks once it has "committed".
  */
 export class InMemoryTransactionRunner implements WorkflowTransactionRunner {
-  private depth = 0;
+  private readonly scopes = new AsyncLocalStorage<{ callbacks: AfterCommitCallback[] }>();
 
   constructor(private readonly stores: readonly SnapshotableStore[]) {}
 
   async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
-    // Nesting is flat, exactly like the SQL adapters: an inner call joins the
-    // outer transaction rather than opening a savepoint, so only the outermost
-    // scope can roll anything back.
-    if (this.depth > 0) {
-      return callback();
-    }
-
+    const parent = this.scopes.getStore();
+    const scope = { callbacks: [] as AfterCommitCallback[] };
     const snapshots = this.stores.map((store) => store.snapshot());
-    this.depth++;
+
+    let result: T;
     try {
-      return await callback();
+      result = await this.scopes.run(scope, callback);
     } catch (error) {
       this.stores.forEach((store, index) => store.restore(snapshots[index]));
       throw error;
-    } finally {
-      this.depth--;
     }
+
+    if (parent) {
+      parent.callbacks.push(...scope.callbacks);
+    } else {
+      await runAfterCommitCallbacks(scope.callbacks);
+    }
+    return result;
+  }
+
+  afterCommit(callback: AfterCommitCallback): void {
+    const scope = this.scopes.getStore();
+    if (!scope) {
+      throw new WorkflowError("afterCommit requires an active transaction");
+    }
+    scope.callbacks.push(callback);
   }
 }
 

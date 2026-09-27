@@ -3,3 +3,6 @@ export type { InstanceStoreConformanceHarness } from "./instance-store-conforman
 
 export { runDefinitionStoreConformance } from "./definition-store-conformance.js";
 export type { DefinitionStoreConformanceHarness } from "./definition-store-conformance.js";
+
+export { runTransactionRunnerConformance } from "./transaction-runner-conformance.js";
+export type { TransactionRunnerConformanceHarness } from "./transaction-runner-conformance.js";
