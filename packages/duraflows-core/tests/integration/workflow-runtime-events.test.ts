@@ -5,7 +5,7 @@ import { InMemoryDefinitionRegistry } from "../../src/registry/definition-regist
 import { InMemoryCommandRegistry } from "../../src/registry/command-registry.js";
 import { WorkflowValidator } from "../../src/validation/workflow-validator.js";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
-import { WorkflowError } from "../../src/errors/index.js";
+import { InvalidEventError, WorkflowError } from "../../src/errors/index.js";
 import { createInMemoryPersistence, type InMemoryInstanceStore } from "../helpers/in-memory-persistence.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
 import type { WorkflowExecutionContext } from "../../src/types/runtime.js";
@@ -342,6 +342,46 @@ describe("WorkflowRuntime.getAvailableEvents", () => {
 
     expect(result.outcome).toBe("failure");
     expect(result.toState).toBe("failed");
+  });
+
+  it("triggerEvent rejects an inherited Object.prototype name without touching the instance", async () => {
+    const definition: WorkflowDefinition = {
+      name: "inherited-event-name",
+      initialState: "waiting",
+      states: {
+        waiting: {
+          onEnter: { commands: [{ name: "countEntry" }] },
+          events: {
+            finish: { targetState: "done", timeout: { afterHours: 1 } },
+          },
+        },
+        done: {},
+      },
+    };
+    definitionRegistry.register(definition);
+
+    let entryCount = 0;
+    commandRegistry.register("countEntry", {
+      execute: async () => {
+        entryCount++;
+        return { ok: true };
+      },
+    });
+
+    const instance = await runtime.createInstance({ workflowName: "inherited-event-name" });
+    const before = await instanceStore.findByUuid(instance.uuid);
+    const historyBefore = await runtime.getHistory(instance.uuid);
+    const entriesBefore = entryCount;
+
+    await expect(runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "toString" })).rejects.toThrow(
+      InvalidEventError,
+    );
+
+    const after = await instanceStore.findByUuid(instance.uuid);
+    expect(after!.version).toBe(before!.version);
+    expect(after!.expiresAt).toEqual(before!.expiresAt);
+    expect(entryCount).toBe(entriesBefore);
+    expect(await runtime.getHistory(instance.uuid)).toHaveLength(historyBefore.length);
   });
 
   it("command-only event stays in current state on success", async () => {

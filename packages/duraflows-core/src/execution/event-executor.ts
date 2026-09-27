@@ -30,9 +30,11 @@ export class EventExecutor {
     context: WorkflowExecutionContext,
   ): Promise<EventExecutionResult> {
     const definition = compiledWorkflow.definition;
-    const stateDef = definition.states[currentState];
+    // Own-property checks: a plain-object lookup would also match inherited
+    // Object.prototype members, letting a caller trigger "toString" et al.
+    const stateDef = Object.hasOwn(definition.states, currentState) ? definition.states[currentState] : undefined;
 
-    if (!stateDef?.events?.[eventName]) {
+    if (!stateDef?.events || !Object.hasOwn(stateDef.events, eventName)) {
       throw new InvalidEventError(instanceUuid, currentState, eventName);
     }
 
