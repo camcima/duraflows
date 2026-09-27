@@ -122,20 +122,21 @@ export class AppModule {}
 
 **WorkflowModuleOptions:**
 
-| Property            | Type                            | Required | Description                                                                                                    |
-| ------------------- | ------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------- |
-| `workflows`         | `WorkflowDefinition[]`          | Yes      | Workflow definitions to register                                                                               |
-| `commands`          | `WorkflowCommandRegistration[]` | No       | Explicit command handler registrations. Optional if using `@WorkflowCommand` decorator.                        |
-| `guards`            | `WorkflowGuard[]`               | No       | Guard implementations. Registered into an `InMemoryGuardRegistry` at module bootstrap. See [Guards](#guards).  |
-| `guardRegistry`     | `WorkflowGuardRegistry`         | No       | Prebuilt guard registry. Mutually exclusive with `guards`. Use when you need a custom registry implementation. |
-| `observers`         | `WorkflowObserver[]`            | No       | Lifecycle observers registered with the runtime. See [Observers](#observers).                                  |
-| `persistence`       | `WorkflowPersistenceProvider`   | Yes      | Persistence implementations (instance store, history store, transaction runner)                                |
-| `clock`             | `WorkflowClock`                 | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                                          |
-| `enableControllers` | `boolean`                       | No       | If `true`, registers REST controllers. Defaults to `false`                                                     |
+| Property            | Type                            | Required | Description                                                                                                                                                      |
+| ------------------- | ------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflows`         | `WorkflowDefinition[]`          | Yes      | Workflow definitions to register                                                                                                                                 |
+| `commands`          | `WorkflowCommandRegistration[]` | No       | Explicit command handler registrations. Optional if using `@WorkflowCommand` decorator.                                                                          |
+| `guards`            | `WorkflowGuard[]`               | No       | Guard implementations. Registered into an `InMemoryGuardRegistry` at module bootstrap. See [Guards](#guards).                                                    |
+| `guardRegistry`     | `WorkflowGuardRegistry`         | No       | Prebuilt guard registry. Mutually exclusive with `guards`. Use when you need a custom registry implementation.                                                   |
+| `observers`         | `WorkflowObserver[]`            | No       | Lifecycle observers registered with the runtime. See [Observers](#observers).                                                                                    |
+| `persistence`       | `WorkflowPersistenceProvider`   | Yes      | Persistence implementations (instance store, history store, transaction runner)                                                                                  |
+| `clock`             | `WorkflowClock`                 | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                                                                                            |
+| `timeoutRetry`      | `WorkflowTimeoutRetryOptions`   | No       | How timeout failures are retried and parked: `{ initialDelayMs?, maxDelayMs?, maxAttempts? }`. See [Retries and parking](./core-runtime.md#retries-and-parking). |
+| `enableControllers` | `boolean`                       | No       | If `true`, registers REST controllers. Defaults to `false`                                                                                                       |
 
 ### forRootAsync()
 
-Asynchronous module configuration for cases where options depend on other providers. The interface is split: `commands` and `enableControllers` are static fields on the options object (available at module-setup time), while `useFactory` returns the async-resolved config (`workflows`, `persistence`, `clock`, `observers`). Observers belong in `useFactory` so they can be composed from injected services.
+Asynchronous module configuration for cases where options depend on other providers. The interface is split: `commands` and `enableControllers` are static fields on the options object (available at module-setup time), while `useFactory` returns the async-resolved config (`workflows`, `persistence`, `clock`, `observers`, `timeoutRetry`). Observers belong in `useFactory` so they can be composed from injected services.
 
 ```ts
 @Module({

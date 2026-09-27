@@ -816,7 +816,7 @@ export class MyScheduler {
 - `findParkedTimeouts(input?: FindParkedTimeoutsInput): Promise<WorkflowInstance[]>` _(v6.0.0)_ — delegates to the runtime
 - `rearmTimeout(uuid): Promise<WorkflowInstance>` _(v6.0.0)_ — delegates to the runtime
 
-`WorkflowModule` builds the runtime with the default `timeoutRetry` options.
+`WorkflowModule` passes `timeoutRetry` to the runtime: from `WorkflowModuleOptions` (`forRoot`) or from the `useFactory` config (`forRootAsync`). Omit it to use the defaults.
 
 ### Injection Tokens
 
