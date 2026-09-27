@@ -146,6 +146,78 @@ describe("PgTransactionRunner", () => {
     expect(client.release).toHaveBeenCalled();
   });
 
+  it("rejects when PostgreSQL answers COMMIT with ROLLBACK, without running callbacks", async () => {
+    const { pool, client } = createMocks();
+    (client.query as ReturnType<typeof vi.fn>).mockImplementation(async (sql: string) =>
+      sql === "COMMIT" ? { command: "ROLLBACK", rows: [] } : { rows: [] },
+    );
+    const runner = new PgTransactionRunner(pool);
+    const callback = vi.fn(async () => {});
+
+    const outcome = runner.runInTransaction(async () => {
+      runner.afterCommit(callback);
+    });
+
+    await expect(outcome).rejects.toThrow(WorkflowError);
+    await expect(outcome).rejects.toThrow(
+      "COMMIT was rolled back by PostgreSQL because an earlier statement in the transaction failed",
+    );
+    expect(callback).not.toHaveBeenCalled();
+    expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it("PgTransactionContext.transaction inside an active transaction joins it in a savepoint", async () => {
+    const { pool, client } = createMocks();
+    const runner = new PgTransactionRunner(pool);
+    const order: string[] = [];
+
+    await runner.runInTransaction(async () => {
+      const value = await PgTransactionContext.transaction(pool, async (txClient) => {
+        expect(txClient).toBe(client);
+        runner.afterCommit(async () => {
+          order.push("callback");
+        });
+        return "inner";
+      });
+      expect(value).toBe("inner");
+      expect(order).toEqual([]);
+    });
+
+    expect(pool.connect).toHaveBeenCalledOnce();
+    expect(queriedSql(client)).toEqual([
+      "BEGIN",
+      "SAVEPOINT duraflows_sp_1",
+      "RELEASE SAVEPOINT duraflows_sp_1",
+      "COMMIT",
+    ]);
+    expect(order).toEqual(["callback"]);
+  });
+
+  it("PgTransactionContext.transaction inside an active transaction rolls back only its savepoint", async () => {
+    const { pool, client } = createMocks();
+    const runner = new PgTransactionRunner(pool);
+    const callback = vi.fn(async () => {});
+
+    await runner.runInTransaction(async () => {
+      await expect(
+        PgTransactionContext.transaction(pool, async () => {
+          runner.afterCommit(callback);
+          throw new Error("inner failure");
+        }),
+      ).rejects.toThrow("inner failure");
+    });
+
+    expect(pool.connect).toHaveBeenCalledOnce();
+    expect(queriedSql(client)).toEqual([
+      "BEGIN",
+      "SAVEPOINT duraflows_sp_1",
+      "ROLLBACK TO SAVEPOINT duraflows_sp_1",
+      "RELEASE SAVEPOINT duraflows_sp_1",
+      "COMMIT",
+    ]);
+    expect(callback).not.toHaveBeenCalled();
+  });
+
   it("PgTransactionContext.transaction owns BEGIN/COMMIT and fires callbacks after commit", async () => {
     const { pool, client } = createMocks();
     const runner = new PgTransactionRunner(pool);

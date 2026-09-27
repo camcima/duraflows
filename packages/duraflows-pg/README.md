@@ -104,9 +104,11 @@ await PgTransactionContext.transaction(pool, async (client) => {
 // Both commit or both roll back. Observers fire after COMMIT, never after a rollback.
 ```
 
-Each duraflows call inside runs in its own savepoint. If one fails, its writes are rolled back, and your transaction can carry on if you catch the error.
+Each duraflows call inside runs in its own savepoint. If one fails, its writes are rolled back, and your transaction can carry on if you catch the error. Calling `transaction()` inside one that is already active joins it as a savepoint instead of opening a second transaction, so composed service methods stay atomic. If a statement failed and you swallowed its error, PostgreSQL rolls back on `COMMIT`: `transaction()` then rejects with a `WorkflowError` and fires no observers.
 
-If you already manage `BEGIN`/`COMMIT` yourself, you can seed the context with `PgTransactionContext.run(pool, client, callback)` instead. Observers then fire when `callback`'s promise resolves, which is **before** your `COMMIT`. Prefer `transaction()` when observers must never see a rolled-back write. Don't run duraflows calls concurrently (`Promise.all`) on one transaction.
+The runner's `lockTimeoutMs` / `statementTimeoutMs` don't apply inside `transaction()` or a seeded `run()`: you own those transaction settings, and nested duraflows calls run under them (use `SET LOCAL` inside the callback if you need them).
+
+If you already manage `BEGIN`/`COMMIT` yourself, you can seed the context with `PgTransactionContext.run(pool, client, callback)` instead. Observers then fire when `callback`'s promise resolves, which is **before** your `COMMIT`, and duraflows calls they make join your still-open transaction. Prefer `transaction()` when observers must never see a rolled-back write. Don't run duraflows calls concurrently (`Promise.all`) on one transaction.
 
 ## API
 
