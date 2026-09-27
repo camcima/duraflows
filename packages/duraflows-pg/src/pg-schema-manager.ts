@@ -42,7 +42,11 @@ CREATE TABLE workflow_instances (
   context_json        jsonb NOT NULL DEFAULT '{}'::jsonb,
   metadata_json       jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at          timestamptz NOT NULL DEFAULT now(),
-  updated_at          timestamptz NOT NULL DEFAULT now()
+  updated_at          timestamptz NOT NULL DEFAULT now(),
+  timeout_attempts    integer NOT NULL DEFAULT 0,
+  timeout_retry_at    timestamptz NULL,
+  timeout_last_error  text NULL,
+  timeout_parked_at   timestamptz NULL
 );
 
 CREATE INDEX workflow_instances_workflow_name_idx
@@ -51,6 +55,14 @@ CREATE INDEX workflow_instances_workflow_name_idx
 CREATE INDEX workflow_instances_expires_at_idx
   ON workflow_instances (expires_at)
   WHERE expires_at IS NOT NULL;
+
+CREATE INDEX workflow_instances_timeout_due_idx
+  ON workflow_instances ((coalesce(timeout_retry_at, expires_at)))
+  WHERE expires_at IS NOT NULL AND timeout_parked_at IS NULL;
+
+CREATE INDEX workflow_instances_timeout_parked_idx
+  ON workflow_instances (timeout_parked_at)
+  WHERE timeout_parked_at IS NOT NULL;
 
 CREATE TABLE workflow_history (
   uuid                    uuid PRIMARY KEY DEFAULT ${uuidDefault},

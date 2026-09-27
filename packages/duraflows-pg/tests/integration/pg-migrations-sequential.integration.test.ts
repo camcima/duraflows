@@ -28,6 +28,7 @@ const MIGRATION_FILENAMES = [
   "002_replace_trigger_with_metadata.sql",
   "003_event_guards.sql",
   "004_definition_versions.sql",
+  "005_timeout_retries.sql",
 ];
 
 const dbmateDir = fileURLToPath(new URL("../../sql/dbmate/", import.meta.url));
@@ -47,6 +48,17 @@ function extractUpSql(filename: string): string {
     throw new Error(`${filename}: expected both "${upMarker}" and "${downMarker}" markers`);
   }
   return raw.slice(upIndex + upMarker.length, downIndex);
+}
+
+/** Extracts the `-- migrate:down` half of a dbmate migration file. */
+function extractDownSql(filename: string): string {
+  const raw = readFileSync(path.join(dbmateDir, filename), "utf8");
+  const downMarker = "-- migrate:down";
+  const downIndex = raw.indexOf(downMarker);
+  if (downIndex === -1) {
+    throw new Error(`${filename}: expected a "${downMarker}" marker`);
+  }
+  return raw.slice(downIndex + downMarker.length);
 }
 
 if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
@@ -100,7 +112,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     await pool.end();
   });
 
-  describe("pg sequential dbmate migrations (001 -> 004 applied in order)", () => {
+  describe("pg sequential dbmate migrations (001 -> 005 applied in order)", () => {
     it("produces a schema the instance store can write to, including definitionVersion", async () => {
       const instance = {
         uuid: randomUUID(),
@@ -176,6 +188,46 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       expect(found).not.toBeNull();
       expect(found!.contentHash).toBe(`sha256:${"cd".repeat(32)}`);
       expect(found!.definitionJson).toEqual(definitionJson);
+    });
+
+    it("gives existing and new rows the 'never failed' timeout retry defaults", async () => {
+      const uuid = randomUUID();
+      await pool.query(
+        `INSERT INTO workflow_instances (uuid, workflow_name, current_state) VALUES ($1, 'sequential-migration-test', 'initial')`,
+        [uuid],
+      );
+      const { rows } = await pool.query(
+        "SELECT timeout_attempts, timeout_retry_at, timeout_last_error, timeout_parked_at FROM workflow_instances WHERE uuid = $1",
+        [uuid],
+      );
+      expect(rows[0]).toEqual({
+        timeout_attempts: 0,
+        timeout_retry_at: null,
+        timeout_last_error: null,
+        timeout_parked_at: null,
+      });
+    });
+
+    it("005's down migration removes the timeout retry columns and indexes", async () => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(extractDownSql("005_timeout_retries.sql"));
+        const columns = await client.query(
+          `SELECT column_name FROM information_schema.columns
+           WHERE table_schema = 'duraflows_pg_it_migrations' AND table_name = 'workflow_instances'
+             AND column_name LIKE 'timeout_%'`,
+        );
+        const indexes = await client.query(
+          `SELECT indexname FROM pg_indexes
+           WHERE schemaname = 'duraflows_pg_it_migrations' AND indexname LIKE 'workflow_instances_timeout_%'`,
+        );
+        expect(columns.rows).toEqual([]);
+        expect(indexes.rows).toEqual([]);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
     });
   });
 }

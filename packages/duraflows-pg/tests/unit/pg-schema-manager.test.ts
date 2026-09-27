@@ -81,4 +81,21 @@ describe("generateMigrationSql", () => {
     const { up } = generateMigrationSql();
     expect(up).toMatch(/rejected_by\s+text\s*,?/i);
   });
+
+  it("adds the timeout retry columns to workflow_instances", () => {
+    const { up } = generateMigrationSql();
+    expect(up).toContain("timeout_attempts    integer NOT NULL DEFAULT 0");
+    expect(up).toContain("timeout_retry_at    timestamptz NULL");
+    expect(up).toContain("timeout_last_error  text NULL");
+    expect(up).toContain("timeout_parked_at   timestamptz NULL");
+  });
+
+  it("creates the timeout due and parked indexes", () => {
+    const { up } = generateMigrationSql();
+    expect(up).toContain("CREATE INDEX workflow_instances_timeout_due_idx");
+    expect(up).toContain("((coalesce(timeout_retry_at, expires_at)))");
+    expect(up).toContain("WHERE expires_at IS NOT NULL AND timeout_parked_at IS NULL");
+    expect(up).toContain("CREATE INDEX workflow_instances_timeout_parked_idx");
+    expect(up).toContain("WHERE timeout_parked_at IS NOT NULL");
+  });
 });
