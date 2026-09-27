@@ -41,6 +41,9 @@ function inMemoryPersistence(): WorkflowPersistenceProvider {
       async findExpired() {
         return [];
       },
+      async findParkedTimeouts() {
+        return [];
+      },
     },
     historyStore: {
       async append(entry) {

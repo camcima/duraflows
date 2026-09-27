@@ -42,6 +42,9 @@ const stubInstanceStore: WorkflowInstanceStore = {
   async findExpired(_limit: number, _now: Date): Promise<WorkflowInstance[]> {
     return [];
   },
+  async findParkedTimeouts(): Promise<WorkflowInstance[]> {
+    return [];
+  },
 };
 
 const stubHistoryStore: WorkflowHistoryStore = {

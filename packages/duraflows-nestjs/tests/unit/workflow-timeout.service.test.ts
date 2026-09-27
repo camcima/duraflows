@@ -6,6 +6,8 @@ import { WorkflowTimeoutService } from "../../src/services/workflow-timeout.serv
 function createMocks() {
   const runtime = {
     processExpiredWorkflows: vi.fn().mockResolvedValue({ processed: 5, rejected: 0, businessFailed: [], failed: [] }),
+    findParkedTimeouts: vi.fn().mockResolvedValue([{ uuid: "parked-1" }]),
+    rearmTimeout: vi.fn().mockResolvedValue({ uuid: "parked-1", timeoutRetry: null }),
   };
 
   const service = new WorkflowTimeoutService(runtime as unknown as WorkflowRuntime);
@@ -30,5 +32,23 @@ describe("WorkflowTimeoutService", () => {
     await service.processExpiredWorkflows();
 
     expect(runtime.processExpiredWorkflows).toHaveBeenCalledWith({ limit: undefined });
+  });
+
+  it("delegates findParkedTimeouts to the runtime", async () => {
+    const { service, runtime } = createMocks();
+
+    const result = await service.findParkedTimeouts({ limit: 10, workflowName: "order" });
+
+    expect(runtime.findParkedTimeouts).toHaveBeenCalledWith({ limit: 10, workflowName: "order" });
+    expect(result).toEqual([{ uuid: "parked-1" }]);
+  });
+
+  it("delegates rearmTimeout to the runtime", async () => {
+    const { service, runtime } = createMocks();
+
+    const result = await service.rearmTimeout("parked-1");
+
+    expect(runtime.rearmTimeout).toHaveBeenCalledWith("parked-1");
+    expect(result.timeoutRetry).toBeNull();
   });
 });
