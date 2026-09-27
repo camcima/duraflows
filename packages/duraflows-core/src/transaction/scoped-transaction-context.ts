@@ -34,7 +34,8 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 /**
  * Runs queued after-commit callbacks in order, each awaited. A callback that
  * throws is logged and skipped, so the rest still run and an operation whose
- * transaction already committed is never reported as failed.
+ * transaction already committed is never reported as failed. Callbacks
+ * appended to `callbacks` while it runs are run too, in order.
  */
 export async function runAfterCommitCallbacks(callbacks: readonly AfterCommitCallback[]): Promise<void> {
   for (const callback of callbacks) {
@@ -121,8 +122,12 @@ export class ScopedTransactionContext<K extends object, C> {
   /**
    * Makes `connection` the active transaction for `owner` while `callback`
    * runs, for a transaction the caller owns (and commits) itself. Queued
-   * callbacks run once `callback`'s promise resolves (outside the scope) and
-   * are dropped if it rejects. A synchronous callback cannot be awaited, so
+   * callbacks run once `callback`'s promise resolves, still inside the seeded
+   * scope: the caller's transaction is open (and may hold row locks), so a
+   * duraflows call made from one of them joins that transaction as a
+   * savepoint instead of waiting on it from a second connection. Callbacks
+   * such a call queues are appended and drained in the same pass. Nothing
+   * runs if `callback` rejects. A synchronous callback cannot be awaited, so
    * anything it queued is dropped with a warning.
    */
   runSeeded<T>(owner: K, connection: C, callback: () => T): T {
@@ -130,7 +135,7 @@ export class ScopedTransactionContext<K extends object, C> {
     const result = this.run(owner, root, callback);
     if (isPromiseLike(result)) {
       return Promise.resolve(result).then(async (value) => {
-        await runAfterCommitCallbacks(root.callbacks);
+        await this.run(owner, root, () => runAfterCommitCallbacks(root.callbacks));
         return value;
       }) as unknown as T;
     }

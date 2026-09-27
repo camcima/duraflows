@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { ScopedTransactionContext, runAfterCommitCallbacks } from "../../src/transaction/scoped-transaction-context.js";
+import {
+  ScopedTransactionContext,
+  runAfterCommitCallbacks,
+  type TransactionScope,
+} from "../../src/transaction/scoped-transaction-context.js";
 import { WorkflowError } from "../../src/errors/index.js";
 
 interface FakeConnection {
@@ -148,13 +152,14 @@ describe("ScopedTransactionContext", () => {
     ]);
   });
 
-  it("runSeeded runs callbacks after an async callback resolves, outside the scope", async () => {
+  it("runSeeded runs callbacks after an async callback resolves, inside the seeded scope", async () => {
     const ctx = new ScopedTransactionContext<object, FakeConnection>();
     const owner = {};
+    const connection = { name: "c" };
     const order: string[] = [];
-    let seenScopeInCallback: unknown = "unset";
+    let seenScopeInCallback: TransactionScope<FakeConnection> | undefined;
 
-    const value = await ctx.runSeeded(owner, { name: "c" }, async () => {
+    const value = await ctx.runSeeded(owner, connection, async () => {
       ctx.afterCommit(owner, async () => {
         seenScopeInCallback = ctx.current(owner);
         order.push("callback");
@@ -165,7 +170,30 @@ describe("ScopedTransactionContext", () => {
 
     expect(value).toBe(42);
     expect(order).toEqual(["body", "callback"]);
-    expect(seenScopeInCallback).toBeUndefined();
+    // The caller's transaction is still open, so duraflows calls made from the
+    // callback must join it rather than open a second connection.
+    expect(seenScopeInCallback).toBeDefined();
+    expect(seenScopeInCallback?.connection).toBe(connection);
+  });
+
+  it("runSeeded drains callbacks queued by a running callback in the same pass, in order", async () => {
+    const ctx = new ScopedTransactionContext<object, FakeConnection>();
+    const owner = {};
+    const order: string[] = [];
+
+    await ctx.runSeeded(owner, { name: "c" }, async () => {
+      ctx.afterCommit(owner, async () => {
+        order.push("first");
+        ctx.afterCommit(owner, async () => {
+          order.push("queued by first");
+        });
+      });
+      ctx.afterCommit(owner, async () => {
+        order.push("second");
+      });
+    });
+
+    expect(order).toEqual(["first", "second", "queued by first"]);
   });
 
   it("runSeeded drops callbacks when the async callback rejects", async () => {
