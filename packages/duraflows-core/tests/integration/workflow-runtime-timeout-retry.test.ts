@@ -165,6 +165,11 @@ describe("processExpiredWorkflows retry scheduling and parking", () => {
       }),
     ],
     ["the instance was deleted", (): WorkflowInstance | null => null],
+    [
+      // Still expired and still due, so only the deadline comparison can stop it.
+      "only the deadline changed",
+      (i: WorkflowInstance): WorkflowInstance | null => ({ ...i, expiresAt: new Date(i.expiresAt!.getTime() - 1000) }),
+    ],
   ])("records nothing when %s before the failure is recorded", async (_label, alter) => {
     const instance = await runtime.createInstance({ workflowName: "broken" });
     now += minutes(5);
@@ -183,18 +188,27 @@ describe("processExpiredWorkflows retry scheduling and parking", () => {
     expect((await stored(instance.uuid)).timeoutRetry).toBeNull();
   });
 
-  it("skips an instance whose retry another worker scheduled after this sweep's scan", async () => {
+  it.each([
+    [
+      "scheduled a later retry for",
+      (): WorkflowInstance["timeoutRetry"] => ({
+        attempts: 1,
+        lastError: "x",
+        retryAt: new Date(now + minutes(1)),
+        parkedAt: null,
+      }),
+    ],
+    [
+      "parked",
+      (): WorkflowInstance["timeoutRetry"] => ({ attempts: 3, lastError: "x", retryAt: null, parkedAt: new Date(now) }),
+    ],
+  ])("skips an instance another worker %s after this sweep's scan", async (_label, retryState) => {
     const instance = await runtime.createInstance({ workflowName: "broken" });
     now += minutes(5);
     const originalLock = persistence.instanceStore.lockByUuid.bind(persistence.instanceStore);
     vi.spyOn(persistence.instanceStore, "lockByUuid").mockImplementation(async (uuid) => {
       const found = await originalLock(uuid);
-      return (
-        found && {
-          ...found,
-          timeoutRetry: { attempts: 1, lastError: "x", retryAt: new Date(now + minutes(1)), parkedAt: null },
-        }
-      );
+      return found && { ...found, timeoutRetry: retryState() };
     });
 
     const result = await runtime.processExpiredWorkflows();
@@ -217,6 +231,23 @@ describe("processExpiredWorkflows retry scheduling and parking", () => {
 
     expect(result.failed).toEqual([{ uuid: instance.uuid, error: "js boom" }]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("database unavailable"));
+    warn.mockRestore();
+  });
+
+  it("warns with the thrown value when recording fails with a non-Error", async () => {
+    const instance = await runtime.createInstance({ workflowName: "broken" });
+    now += minutes(5);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const originalUpdate = persistence.instanceStore.update.bind(persistence.instanceStore);
+    vi.spyOn(persistence.instanceStore, "update").mockImplementation(async (i) => {
+      if (i.timeoutRetry) throw "connection reset";
+      return originalUpdate(i);
+    });
+
+    const result = await runtime.processExpiredWorkflows();
+
+    expect(result.failed).toEqual([{ uuid: instance.uuid, error: "js boom" }]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("connection reset"));
     warn.mockRestore();
   });
 
