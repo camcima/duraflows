@@ -241,8 +241,7 @@ async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<Pro
 3. A failure in one instance's transaction rolls back only that instance and
    is collected into `failed`; it does not stop the batch. Short lock duration
    and per-instance failure isolation are the reason for this two-phase model.
-4. After all per-instance transactions, fires observers post-commit for the
-   instances that committed.
+4. Fires each instance's observers after that instance's transaction commits (not batched at the end of the sweep); a failed instance fires none.
 
 **Returns:**
 
@@ -1033,7 +1032,10 @@ runtime.addObserver(auditObserver);
 
 ### Firing semantics
 
-- Observers fire **post-commit** — only after the state-entering transaction has committed successfully.
+- Observers fire **post-commit** — only after the transaction that wrote the state entry has committed, and never if it rolls back. When the runtime owns the transaction, that is right after its own call. When the call is nested in your transaction, delivery depends on how that transaction was opened:
+  - the runtime's own `transactionRunner.runInTransaction`, `PgTransactionContext.transaction` or `KyselyTransactionContext.transaction`: after your `COMMIT`;
+  - a bare `PgTransactionContext.run` / `KyselyTransactionContext.run` seed, or `kyselyWorkflowProvidersFromTransaction`: when the seeded scope's promise resolves, which is **before** your `COMMIT`. Nothing fires if it rejects;
+  - a custom transaction runner without `afterCommit`: when the runtime's call returns.
 - Observers fire **sequentially** in registration order.
 - Each state entry fires observers **at-most-once**. If the process crashes between commit and the observer call, the event is skipped (no outbox pattern; at-least-once delivery is deferred to a future version).
 - If an observer's `onEnter` throws, the error is caught and routed to

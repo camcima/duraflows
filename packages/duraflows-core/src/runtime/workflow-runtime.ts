@@ -224,10 +224,8 @@ export class WorkflowRuntime {
       updatedAt: now,
     };
 
-    const eventsToFire: StateEnterEvent[] = [];
-
     if (stateDef?.onEnter) {
-      const result = await this.transactionRunner.runInTransaction(async () => {
+      return this.runWithObservers(async (eventsToFire) => {
         await this.instanceStore.create(instance);
 
         const executionContext: WorkflowExecutionContext = {
@@ -256,41 +254,30 @@ export class WorkflowRuntime {
 
         return instance;
       });
-
-      for (const event of eventsToFire) {
-        await this.observerRegistry.fireOnEnter(event);
-      }
-
-      return result;
     }
 
-    await this.transactionRunner.runInTransaction(async () => {
+    return this.runWithObservers(async (eventsToFire) => {
       await this.instanceStore.create(instance);
+
+      eventsToFire.push(
+        buildStateEnterEvent(instance, {
+          fromState: null,
+          toState: definition.initialState,
+          transitionUuid: randomUUID(),
+          triggerEvent: null,
+          triggerMetadata: structuredClone(input.triggerMetadata ?? {}),
+          occurredAt: now,
+        }),
+      );
+
+      return instance;
     });
-
-    eventsToFire.push(
-      buildStateEnterEvent(instance, {
-        fromState: null,
-        toState: definition.initialState,
-        transitionUuid: randomUUID(),
-        triggerEvent: null,
-        triggerMetadata: structuredClone(input.triggerMetadata ?? {}),
-        occurredAt: now,
-      }),
-    );
-
-    for (const event of eventsToFire) {
-      await this.observerRegistry.fireOnEnter(event);
-    }
-
-    return instance;
   }
 
   async triggerEvent(input: TriggerWorkflowEventInput): Promise<WorkflowExecutionResult> {
     await this.initialize();
-    const eventsToFire: StateEnterEvent[] = [];
 
-    const result = await this.transactionRunner.runInTransaction(async () => {
+    return this.runWithObservers(async (eventsToFire) => {
       const instance = await this.instanceStore.lockByUuid(input.workflowInstanceUuid);
       if (!instance) {
         throw new WorkflowInstanceNotFoundError(input.workflowInstanceUuid);
@@ -400,12 +387,6 @@ export class WorkflowRuntime {
         historyUuid: lastHistoryUuid,
       };
     });
-
-    for (const event of eventsToFire) {
-      await this.observerRegistry.fireOnEnter(event);
-    }
-
-    return result;
   }
 
   async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<ProcessExpiredWorkflowsResult> {
@@ -413,7 +394,6 @@ export class WorkflowRuntime {
     const limit = input?.limit ?? 100;
     assertPositiveSafeInteger(limit, "limit");
     const now = this.clock.now();
-    const eventsToFire: StateEnterEvent[] = [];
     let processed = 0;
     let rejected = 0;
     const businessFailed: Array<{ uuid: string; finalState: string }> = [];
@@ -426,11 +406,10 @@ export class WorkflowRuntime {
 
     // Step 2: process each instance in its own transaction.
     for (const staleInstance of expired) {
-      const startIdx = eventsToFire.length;
       let outcome: "transitioned" | "business-failed" | "rejected" | null = null;
       let finalState: string | null = null;
       try {
-        await this.transactionRunner.runInTransaction(async () => {
+        await this.runWithObservers(async (eventsToFire) => {
           // Re-lock the instance fresh inside this transaction (locks from Step 1 were released).
           const instance = await this.instanceStore.lockByUuid(staleInstance.uuid);
           if (!instance) {
@@ -466,19 +445,51 @@ export class WorkflowRuntime {
         }
         if (outcome === "rejected") rejected++;
       } catch (error: unknown) {
-        // Per-instance transaction rolled back. Drop any events queued for this instance.
-        eventsToFire.length = startIdx;
+        // Per-instance transaction rolled back, taking its queued observer events with it.
         const message = error instanceof Error ? error.message : String(error);
         failed.push({ uuid: staleInstance.uuid, error: message });
       }
     }
 
-    // Step 3: fire observers post-commit (only for instances whose transaction committed).
-    for (const event of eventsToFire) {
+    return { processed, rejected, businessFailed, failed };
+  }
+
+  /**
+   * Runs `work` in a transaction and delivers the observer events it queues
+   * into `eventsToFire`: through the runner's `afterCommit` when it has one,
+   * so they fire only once the enclosing transaction commits, otherwise as
+   * soon as this `runInTransaction` call returns.
+   */
+  private async runWithObservers<T>(work: (eventsToFire: StateEnterEvent[]) => Promise<T>): Promise<T> {
+    let undelivered: StateEnterEvent[] = [];
+    const result = await this.transactionRunner.runInTransaction(async () => {
+      const eventsToFire: StateEnterEvent[] = [];
+      const value = await work(eventsToFire);
+      undelivered = this.deferObservers(eventsToFire);
+      return value;
+    });
+    for (const event of undelivered) {
       await this.observerRegistry.fireOnEnter(event);
     }
+    return result;
+  }
 
-    return { processed, rejected, businessFailed, failed };
+  /**
+   * Hands `events` to the runner's after-commit queue when it has one.
+   * Returns the events the caller must fire itself after the transaction call
+   * returns (all of them for a runner without `afterCommit`).
+   */
+  private deferObservers(events: StateEnterEvent[]): StateEnterEvent[] {
+    const runner = this.transactionRunner;
+    if (!runner.afterCommit || events.length === 0) {
+      return events;
+    }
+    runner.afterCommit(async () => {
+      for (const event of events) {
+        await this.observerRegistry.fireOnEnter(event);
+      }
+    });
+    return [];
   }
 
   private async processTimeoutEvent(
