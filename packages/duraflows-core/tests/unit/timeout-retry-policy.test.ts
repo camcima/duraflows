@@ -52,6 +52,13 @@ describe("TimeoutRetryPolicy", () => {
     expect(policy.next(null, "e".repeat(5000), now).lastError).toHaveLength(2000);
   });
 
+  it("replaces NUL characters, which PostgreSQL text columns reject, with U+FFFD", () => {
+    const policy = new TimeoutRetryPolicy();
+    const { lastError } = policy.next(null, "bad\u0000byte\u0000", now);
+    expect(lastError).toBe("bad�byte�");
+    expect(lastError).not.toContain("\u0000");
+  });
+
   it.each([
     ["initialDelayMs of 0", { initialDelayMs: 0 }],
     ["a negative maxDelayMs", { maxDelayMs: -1 }],

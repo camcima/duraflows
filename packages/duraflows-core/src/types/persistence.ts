@@ -52,6 +52,12 @@ export interface WorkflowInstanceStore {
    * `timeoutRetry.retryAt` when set, otherwise `expiresAt` — oldest first, so
    * instances whose timeout keeps failing move behind healthy ones.
    * Adapters must throw if called outside an active transaction.
+   *
+   * `SKIP LOCKED` only keeps concurrently sweeping workers from blocking on
+   * each other's scans; the locks last only as long as the caller's (short)
+   * transaction. Cross-worker exclusivity comes from the runtime, which
+   * re-locks each instance individually with `lockByUuid` and re-checks that
+   * it is still due before processing it — not from this scan.
    */
   findExpired(limit: number, now: Date): Promise<WorkflowInstance[]>;
 

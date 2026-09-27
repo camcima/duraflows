@@ -33,10 +33,15 @@ export class TimeoutRetryPolicy {
     return Math.min(this.maxDelayMs, this.initialDelayMs * 2 ** (attempts - 1));
   }
 
-  /** The retry state after one more failure on top of `previous`. */
+  /**
+   * The retry state after one more failure on top of `previous`. NUL
+   * characters in `error` become U+FFFD: PostgreSQL `text` rejects NUL, so an
+   * unsanitized message could never be recorded and the instance would keep
+   * its original priority on every sweep.
+   */
   next(previous: WorkflowTimeoutRetry | null, error: string, now: Date): WorkflowTimeoutRetry {
     const attempts = (previous?.attempts ?? 0) + 1;
-    const lastError = error.slice(0, MAX_LAST_ERROR_LENGTH);
+    const lastError = error.replaceAll("\u0000", "\uFFFD").slice(0, MAX_LAST_ERROR_LENGTH);
     if (attempts >= this.maxAttempts) {
       return { attempts, lastError, retryAt: null, parkedAt: now };
     }
