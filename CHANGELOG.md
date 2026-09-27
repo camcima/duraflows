@@ -1,5 +1,33 @@
 # Changelog
 
+## [5.2.0](https://github.com/camcima/duraflows/compare/v5.1.0...v5.2.0) (2026-09-27)
+
+### Features
+
+* **core:** add a transaction runner conformance suite with savepoint semantics ([600adc9](https://github.com/camcima/duraflows/commit/600adc9e29137ba1fd006f5c90a6adc0214be832))
+* **core:** add afterCommit to the transaction runner contract and ScopedTransactionContext ([f7cd84b](https://github.com/camcima/duraflows/commit/f7cd84b701d266e98cc534cc5ca53c46af0876cf))
+* **core:** fire observers after the enclosing transaction commits ([9c99c2c](https://github.com/camcima/duraflows/commit/9c99c2ce802443a260c6fdfb5f67ef575291cdf7))
+* **kysely:** run nested transactions in savepoints and deliver observers after commit ([e0ea547](https://github.com/camcima/duraflows/commit/e0ea547b71a09a71081017eafbb757f517f54b2d))
+* **pg:** run nested transactions in savepoints and deliver observers after commit ([81d0e18](https://github.com/camcima/duraflows/commit/81d0e1893301092c86f0ae38eda4ea36f1180a22))
+
+### Bug Fixes
+
+* **core:** apply each onEnter hop before running the next state's commands ([#95](https://github.com/camcima/duraflows/issues/95)) ([f2b563f](https://github.com/camcima/duraflows/commit/f2b563ff289ae1c04119c3e75d101a4cb0b10b5b))
+* **core:** reject inherited Object.prototype names as events and states ([#94](https://github.com/camcima/duraflows/issues/94)) ([3fb66a8](https://github.com/camcima/duraflows/commit/3fb66a8cdc8759c30da56e4accbd8637b7908566))
+* **deps:** upgrade @camcima/finita to ^4.3.0 ([#93](https://github.com/camcima/duraflows/issues/93)) ([6268cb9](https://github.com/camcima/duraflows/commit/6268cb9e95aac99937476efe4c53f31a1002d7ac))
+
+### Notes
+
+* **Observers fire after commit.** When the runtime or an owner helper owns the transaction, observers fire only after it commits, and never if it rolls back. Before, a call nested in an outer transaction fired them as soon as the call returned.
+* **New owner helpers:** `PgTransactionContext.transaction(pool, cb)` and `KyselyTransactionContext.transaction(db, cb)` share one transaction between your writes and duraflows, and fire observers after `COMMIT`. Called inside an already-active transaction, they join it as a savepoint instead of opening a second one.
+* **Nested calls run in savepoints.** A failed workflow call nested in another transaction now rolls back its own writes, and the outer transaction stays usable. Before, the writes either committed with the outer transaction or left it aborted. This includes `processExpiredWorkflows` run inside your transaction.
+* **Per-instance sweep observers.** `processExpiredWorkflows` fires each instance's observers after that instance commits, instead of all at once at the end of the sweep. This applies to every transaction runner.
+* **Seeded transactions.** Under `PgTransactionContext.run` / `KyselyTransactionContext.run` (and `kyselyWorkflowProvidersFromTransaction`), observers fire once the seeded callback resolves, which is before your `COMMIT`. Nothing fires if the callback rejects. A duraflows call made by such an observer joins your still-open transaction, as in 5.1.0.
+* **pg: seeded clients need `BEGIN`.** A client seeded with `PgTransactionContext.run` must be inside `BEGIN`, because nested calls now issue `SAVEPOINT`.
+* **pg: silently rolled-back COMMIT.** When an earlier statement failed and its error was swallowed, PostgreSQL answers `COMMIT` with `ROLLBACK`. pg transactions now reject with `WorkflowError` in that case and fire no observers.
+* **onEnter context.** Each onEnter hop is applied before the next state's commands run. Those commands see their own state's declared `context`, and a state's own onEnter command writes now win over its declared `context` values. Event commands are unchanged: the target state's declared context still wins over them.
+* **Custom persistence adapters.** `WorkflowTransactionRunner.afterCommit` is optional; a runner without it keeps the previous observer timing. `ScopedTransactionContext` and `runAfterCommitCallbacks` are exported for adapter authors, and `runTransactionRunnerConformance` (from `@duraflows/core/testing`) checks after-commit delivery and savepoint isolation.
+
 ## [5.1.0](https://github.com/camcima/duraflows/compare/v5.0.0...v5.1.0) (2026-09-26)
 
 ### Features
