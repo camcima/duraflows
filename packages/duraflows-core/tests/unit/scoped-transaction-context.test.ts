@@ -133,6 +133,26 @@ describe("ScopedTransactionContext", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("connection lost"));
   });
 
+  it("runInSavepoint propagates a failed SAVEPOINT without running the callback or rolling back", async () => {
+    const ctx = new ScopedTransactionContext<object, FakeConnection>();
+    const owner = {};
+    const root = ctx.createRoot({ name: "c" });
+    const statements: string[] = [];
+    const execute = async (sql: string): Promise<void> => {
+      statements.push(sql);
+      if (sql.startsWith("SAVEPOINT")) throw new Error("savepoint refused");
+    };
+    const callback = vi.fn();
+
+    await expect(ctx.run(owner, root, () => ctx.runInSavepoint(owner, root, callback, execute))).rejects.toThrow(
+      "savepoint refused",
+    );
+
+    expect(callback).not.toHaveBeenCalled();
+    expect(statements).toEqual(["SAVEPOINT duraflows_sp_1"]);
+    expect(root.callbacks).toEqual([]);
+  });
+
   it("gives sibling savepoints in one transaction distinct names", async () => {
     const ctx = new ScopedTransactionContext<object, FakeConnection>();
     const owner = {};

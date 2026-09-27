@@ -445,7 +445,9 @@ export class WorkflowRuntime {
         }
         if (outcome === "rejected") rejected++;
       } catch (error: unknown) {
-        // Per-instance transaction rolled back, taking its queued observer events with it.
+        // This instance's work threw, so its observer events were never handed
+        // over and none fire. Its writes are rolled back only if the runner
+        // isolates them — a savepoint when nested, or the transaction it owns.
         const message = error instanceof Error ? error.message : String(error);
         failed.push({ uuid: staleInstance.uuid, error: message });
       }
@@ -468,10 +470,15 @@ export class WorkflowRuntime {
       undelivered = this.deferObservers(eventsToFire);
       return value;
     });
-    for (const event of undelivered) {
+    await this.fireObservers(undelivered);
+    return result;
+  }
+
+  /** Fires `events` in order; the observer registry contains observer errors. */
+  private async fireObservers(events: readonly StateEnterEvent[]): Promise<void> {
+    for (const event of events) {
       await this.observerRegistry.fireOnEnter(event);
     }
-    return result;
   }
 
   /**
@@ -484,11 +491,7 @@ export class WorkflowRuntime {
     if (!runner.afterCommit || events.length === 0) {
       return events;
     }
-    runner.afterCommit(async () => {
-      for (const event of events) {
-        await this.observerRegistry.fireOnEnter(event);
-      }
-    });
+    runner.afterCommit(() => this.fireObservers(events));
     return [];
   }
 

@@ -148,6 +148,54 @@ describe("WorkflowRuntime inside an outer transaction", () => {
     expect(observed).toEqual(["command:healthy", "healthy:done"]);
   });
 
+  it("a nested sweep keeps a healthy instance's observers until the outer commit when a later instance fails", async () => {
+    const runtime = buildRuntime(persistence.transactionRunner);
+    const healthy = await runtime.createInstance({ workflowName: "healthy" });
+    now += 1000;
+    const failing = await runtime.createInstance({ workflowName: "flow" });
+    observed = [];
+    now += 5 * 60_000;
+
+    const result = await persistence.transactionRunner.runInTransaction(async () => {
+      const sweep = await runtime.processExpiredWorkflows();
+      // The healthy instance's savepoint was released before the failing
+      // sibling's was rolled back; its observers must still be pending.
+      expect(observed).toEqual(["command:healthy"]);
+      return sweep;
+    });
+
+    expect(result.failed.map((f) => f.uuid)).toEqual([failing.uuid]);
+    expect((await persistence.instanceStore.findByUuid(healthy.uuid))!.currentState).toBe("done");
+    expect((await persistence.instanceStore.findByUuid(failing.uuid))!.currentState).toBe("start");
+    expect(observed).toEqual(["command:healthy", "healthy:done"]);
+  });
+
+  it("defers createInstance observers until the outer transaction commits", async () => {
+    const runtime = buildRuntime(persistence.transactionRunner);
+
+    await persistence.transactionRunner.runInTransaction(async () => {
+      await runtime.createInstance({ workflowName: "flow" });
+      expect(observed).toEqual([]);
+    });
+
+    expect(observed).toEqual(["flow:start"]);
+  });
+
+  it("fires no createInstance observer and keeps no instance when the outer transaction rolls back", async () => {
+    const runtime = buildRuntime(persistence.transactionRunner);
+    let createdUuid = "";
+
+    await expect(
+      persistence.transactionRunner.runInTransaction(async () => {
+        createdUuid = (await runtime.createInstance({ workflowName: "flow" })).uuid;
+        throw new Error("outer rollback");
+      }),
+    ).rejects.toThrow("outer rollback");
+
+    expect(observed).toEqual([]);
+    expect(await persistence.instanceStore.findByUuid(createdUuid)).toBeNull();
+  });
+
   it("a top-level sweep fires each instance's observers after that instance commits", async () => {
     definitionRegistry.register({
       name: "healthy2",

@@ -144,6 +144,8 @@ Both are applied transaction-locally via `set_config(name, value, true)` — the
 
 Convenience factory for short-lived runtimes pre-bound to an existing transaction. Each workflow call runs in a savepoint on `trx`, so a failed call leaves no partial writes behind even if you catch its error. Observers fire when the call resolves, before your transaction commits, and duraflows calls they make join `trx`. For strictly post-commit observers, use `KyselyTransactionContext.transaction(db, …)` with the long-lived providers instead.
 
+Don't mix these providers with the long-lived `kyselyWorkflowProviders(db)` (or `KyselyTransactionContext.transaction(db, …)`) inside one transaction. The two track their active transaction separately, one per `trx` and the other per `db`, so a call through one doesn't see a transaction opened through the other. It starts a second transaction on another connection instead, which can wait on row locks the first one holds. Use one style per transaction.
+
 ### `KyselyTransactionContext`
 
 The context is scoped per Kysely instance:

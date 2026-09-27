@@ -11,7 +11,7 @@ type WorkflowTransaction = Transaction<WorkflowDatabase>;
 export const kyselyTransactionScopes = new ScopedTransactionContext<Kysely<WorkflowDatabase>, WorkflowTransaction>();
 
 /**
- * @internal Runs one fixed SQL statement (a savepoint command) on `trx`.
+ * Runs one fixed SQL statement (a savepoint command) on `trx`.
  *
  * `Transaction` has no savepoint API in kysely 0.29 (only `ControlledTransaction`
  * does), and this package imports kysely for types only, since kysely is
@@ -20,7 +20,7 @@ export const kyselyTransactionScopes = new ScopedTransactionContext<Kysely<Workf
  * shaped exactly like `CompiledQuery.raw(sql)`. `sql` is always an internally
  * generated `SAVEPOINT` / `RELEASE` / `ROLLBACK TO` statement, never user input.
  */
-export function executeRawStatement(trx: WorkflowTransaction, sql: string): Promise<unknown> {
+function executeRawStatement(trx: WorkflowTransaction, sql: string): Promise<unknown> {
   const query: CompiledQuery = {
     sql,
     parameters: [],
@@ -28,6 +28,21 @@ export function executeRawStatement(trx: WorkflowTransaction, sql: string): Prom
     queryId: { queryId: `duraflows_${randomUUID()}` },
   };
   return trx.executeQuery(query);
+}
+
+/**
+ * @internal Runs `callback` in a savepoint nested in `scope`, issuing the
+ * savepoint statements on that scope's own transaction. Every kysely entry
+ * point that nests (the runners and `transaction()`) goes through here.
+ */
+export function runInKyselySavepoint<T>(
+  owner: Kysely<WorkflowDatabase>,
+  scope: TransactionScope<WorkflowTransaction>,
+  callback: () => Promise<T>,
+): Promise<T> {
+  return kyselyTransactionScopes.runInSavepoint(owner, scope, callback, (sql) =>
+    executeRawStatement(scope.connection, sql),
+  );
 }
 
 /**
@@ -100,12 +115,7 @@ export const KyselyTransactionContext = {
     const owner = db as unknown as Kysely<WorkflowDatabase>;
     const scope = kyselyTransactionScopes.current(owner);
     if (scope) {
-      return kyselyTransactionScopes.runInSavepoint(
-        owner,
-        scope,
-        () => callback(scope.connection as unknown as Transaction<DB>),
-        (sql) => executeRawStatement(scope.connection, sql),
-      );
+      return runInKyselySavepoint(owner, scope, () => callback(scope.connection as unknown as Transaction<DB>));
     }
     return runOwnedKyselyTransaction(
       owner,

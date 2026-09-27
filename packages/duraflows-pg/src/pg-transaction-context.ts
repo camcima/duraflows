@@ -21,6 +21,9 @@ export async function runOwnedPgTransaction<T>(
 ): Promise<T> {
   const client = await pool.connect();
   const root = pgTransactionScopes.createRoot(client);
+  // Set when ROLLBACK itself fails: the connection's state is unknown, so it is
+  // released with the error, which makes pg destroy it instead of pooling it.
+  let brokenConnectionError: Error | undefined;
   let result: T;
   try {
     await client.query("BEGIN");
@@ -46,10 +49,11 @@ export async function runOwnedPgTransaction<T>(
       // Never mask the causative error with a rollback failure.
       const message = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
       console.warn(`[duraflows] ROLLBACK failed after transaction error: ${message}`);
+      brokenConnectionError = rollbackError instanceof Error ? rollbackError : new Error(message);
     }
     throw error;
   } finally {
-    client.release();
+    client.release(brokenConnectionError);
   }
   await runAfterCommitCallbacks(root.callbacks);
   return result;

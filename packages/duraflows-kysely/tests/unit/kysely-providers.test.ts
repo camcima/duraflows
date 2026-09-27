@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Kysely, Transaction } from "kysely";
+import { WorkflowError } from "@duraflows/core";
 import { kyselyWorkflowProviders, kyselyWorkflowProvidersFromTransaction } from "../../src/index.js";
 import { KyselyTransactionRunner } from "../../src/kysely-transaction-runner.js";
 import { KyselyWorkflowInstanceStore } from "../../src/kysely-instance-store.js";
@@ -193,6 +194,12 @@ describe("kyselyWorkflowProvidersFromTransaction()", () => {
       "ROLLBACK TO SAVEPOINT duraflows_sp_1",
       "RELEASE SAVEPOINT duraflows_sp_1",
     ]);
+  });
+
+  it("transactionRunner.afterCommit outside a call throws WorkflowError", () => {
+    const providers = kyselyWorkflowProvidersFromTransaction(createMockTransaction());
+
+    expect(() => providers.transactionRunner.afterCommit!(vi.fn())).toThrow(WorkflowError);
   });
 
   it("transactionRunner nests a call made inside another in a second savepoint on the bound trx", async () => {
