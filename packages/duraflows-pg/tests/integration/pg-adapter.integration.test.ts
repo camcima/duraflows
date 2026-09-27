@@ -153,6 +153,14 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
           done: {},
         },
       });
+      definitionRegistry.register({
+        name: "healthy",
+        initialState: "start",
+        states: {
+          start: { events: { expire: { targetState: "finished", timeout: { afterMinutes: 1 } } } },
+          finished: {},
+        },
+      });
       commandRegistry.register("boom", {
         execute: async () => {
           throw new Error("js boom");
@@ -215,6 +223,25 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       expect(await runtime.getHistory(instance.uuid)).toHaveLength(historyBefore.length);
     });
 
+    it("a nested sweep commits a healthy instance and fires its observer only after the outer commit", async () => {
+      const runtime = buildRuntime();
+      const failing = await runtime.createInstance({ workflowName: "flow" });
+      const healthy = await runtime.createInstance({ workflowName: "healthy" });
+      observed.length = 0;
+      now += 5 * 60_000;
+
+      const result = await transactionRunner.runInTransaction(async () => {
+        const sweep = await runtime.processExpiredWorkflows();
+        expect(observed).toEqual([]);
+        return sweep;
+      });
+
+      expect(result.failed.map((f) => f.uuid)).toEqual([failing.uuid]);
+      expect((await runtime.getInstance(healthy.uuid))!.currentState).toBe("finished");
+      expect((await runtime.getInstance(failing.uuid))!.currentState).toBe("start");
+      expect(observed).toEqual(["finished"]);
+    });
+
     it("a nested call that swallows a SQL error rejects instead of reporting success", async () => {
       await expect(
         transactionRunner.runInTransaction(async () => {
@@ -226,7 +253,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
             }
           });
         }),
-      ).rejects.toThrow();
+      ).rejects.toThrow(/current transaction is aborted/);
     });
   });
 

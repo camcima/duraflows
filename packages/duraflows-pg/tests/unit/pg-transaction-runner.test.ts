@@ -281,6 +281,20 @@ describe("PgTransactionRunner", () => {
     warnSpy.mockRestore();
   });
 
+  it("runs afterCommit callbacks outside the finished transaction (no active client)", async () => {
+    const { pool } = createMocks();
+    const runner = new PgTransactionRunner(pool);
+    let clientSeenByCallback: PoolClient | undefined | "unset" = "unset";
+
+    await runner.runInTransaction(async () => {
+      runner.afterCommit(async () => {
+        clientSeenByCallback = PgTransactionContext.getClient(pool);
+      });
+    });
+
+    expect(clientSeenByCallback).toBeUndefined();
+  });
+
   it("evicts the client from the pool when ROLLBACK fails, instead of returning it", async () => {
     const { pool, client } = createMocks();
     const rollbackError = new Error("rollback failed");
