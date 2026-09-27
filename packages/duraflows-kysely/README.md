@@ -104,6 +104,8 @@ interface MyDatabase extends WorkflowDatabase {
 const db = new Kysely<MyDatabase>({ ... });
 ```
 
+A database type declared as `interface AppDb extends WorkflowDatabase` picks up the `workflow_instances` columns automatically, including `timeout_attempts`, `timeout_retry_at`, `timeout_last_error` and `timeout_parked_at`. If you instead hand-write your own `workflow_instances` table type rather than extending `WorkflowDatabase`, it must declare all four: `timeout_attempts: Generated<number>`, `timeout_retry_at: Date | null`, `timeout_last_error: string | null`, `timeout_parked_at: Date | null`.
+
 ## Database Setup
 
 This package uses the same database schema as `@duraflows/pg`. Use the migration generator from `@duraflows/pg` or copy the reference migration:

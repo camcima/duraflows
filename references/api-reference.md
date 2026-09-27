@@ -9,7 +9,7 @@
 ### @duraflows/core
 
 **Types:**
-`WorkflowDefinition`, `WorkflowStateDefinition`, `WorkflowEventDefinition`, `WorkflowOnEnterDefinition`, `WorkflowCommandRef`, `WorkflowGuardRef`, `WorkflowTimeoutDefinition`, `WorkflowCommand`, `WorkflowGuard`, `CommandResult`, `WorkflowExecutionContext`, `WorkflowInstance`, `WorkflowExecutionResult`, `OnEnterChainResult`, `OnEnterHopResult`, `AvailableWorkflowEvent`, `WorkflowHistoryRecord`, `CreateWorkflowInstanceInput`, `TriggerWorkflowEventInput`, `ProcessExpiredWorkflowsInput`, `ProcessExpiredWorkflowsResult`, `GetAvailableEventsInput`, `WorkflowInstanceStore`, `WorkflowHistoryStore`, `WorkflowTransactionRunner`, `WorkflowClock`, `WorkflowPersistenceProvider`, `WorkflowDefinitionRegistry`, `WorkflowCommandRegistry`, `WorkflowGuardRegistry`, `WorkflowObserver`, `StateEnterEvent`, `ObserverErrorHandler`, `WorkflowRuntimeOptions`
+`WorkflowDefinition`, `WorkflowStateDefinition`, `WorkflowEventDefinition`, `WorkflowOnEnterDefinition`, `WorkflowCommandRef`, `WorkflowGuardRef`, `WorkflowTimeoutDefinition`, `WorkflowCommand`, `WorkflowGuard`, `CommandResult`, `WorkflowExecutionContext`, `WorkflowInstance`, `WorkflowTimeoutRetry` (v6.0.0), `WorkflowTimeoutRetryOptions` (v6.0.0), `WorkflowExecutionResult`, `OnEnterChainResult`, `OnEnterHopResult`, `AvailableWorkflowEvent`, `WorkflowHistoryRecord`, `CreateWorkflowInstanceInput`, `TriggerWorkflowEventInput`, `ProcessExpiredWorkflowsInput`, `ProcessExpiredWorkflowsResult`, `FindParkedTimeoutsInput` (v6.0.0), `GetAvailableEventsInput`, `WorkflowInstanceStore`, `WorkflowHistoryStore`, `WorkflowTransactionRunner`, `WorkflowClock`, `WorkflowPersistenceProvider`, `WorkflowDefinitionRegistry`, `WorkflowCommandRegistry`, `WorkflowGuardRegistry`, `WorkflowObserver`, `StateEnterEvent`, `ObserverErrorHandler`, `WorkflowRuntimeOptions`
 
 **Classes:**
 `WorkflowRuntime`, `WorkflowHandle`, `WorkflowValidator`, `WorkflowCompiler`, `CommandExecutor`, `EventExecutor`, `OnEnterExecutor`, `TimeoutResolver`, `InMemoryDefinitionRegistry`, `InMemoryCommandRegistry`, `InMemoryGuardRegistry`, `ObserverRegistry`
@@ -21,7 +21,7 @@
 `runInstanceStoreConformance(factory)` — shared conformance suite. Adapter authors run this against their `WorkflowInstanceStore` to verify the persistence contract (locking, optimistic concurrency, expiration).
 
 **Errors:**
-`WorkflowError`, `WorkflowDefinitionError`, `InvalidEventError`, `CommandFailureError`, `OnEnterDepthExceededError`
+`WorkflowError`, `WorkflowDefinitionError`, `InvalidArgumentError`, `WorkflowInstanceNotFoundError`, `InvalidEventError`, `CommandFailureError`, `OnEnterDepthExceededError`
 
 ### @duraflows/pg
 
@@ -189,14 +189,25 @@ interface WorkflowInstance {
   workflowName: string;
   currentState: string;
   version: number; // incremented on each transition
+  definitionVersion: number | null; // v5.0.0: definition version governing the instance; null on legacy rows
   expiresAt: Date | null; // timeout deadline
+  timeoutRetry: WorkflowTimeoutRetry | null; // v6.0.0: failed-timeout retry state; null = no failure since the last success
   lastTransitionAt: Date;
   context: Record<string, unknown>;
   metadata: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
 }
+
+interface WorkflowTimeoutRetry {
+  attempts: number; // consecutive failed timeout attempts since the last success (>= 1)
+  lastError: string; // most recent failure's message, truncated to 2000 characters, NUL replaced by U+FFFD
+  retryAt: Date | null; // when the sweep may try again; null once parked
+  parkedAt: Date | null; // when parked after maxAttempts failures; null while retrying
+}
 ```
+
+`timeoutRetry` is cleared by any successful transition (including a manual `triggerEvent()`) and by `rearmTimeout()`. `lastError` carries the raw error message, which may include internal details.
 
 ### WorkflowExecutionResult
 
@@ -318,11 +329,23 @@ interface ProcessExpiredWorkflowsResult {
   processed: number; // timeout fired and the instance transitioned
   rejected: number; // v1.1.0: timeout fired but a guard rejected — instance stays in place
   businessFailed: Array<{ uuid: string; finalState: string }>; // subset of processed whose event commands or on-enter chain failed
-  failed: Array<{ uuid: string; error: string }>;
+  failed: Array<{ uuid: string; error: string; attempts?: number; retryAt?: Date | null }>; // infrastructure failures (transaction rolled back)
+  parked: Array<{ uuid: string; error: string }>; // v6.0.0: subset of failed parked by this sweep
 }
 ```
 
+**v6.0.0 — retries and parking:** each `failed` instance's failure is recorded on its `timeoutRetry` in a second small transaction. When recording succeeded, `attempts` is the consecutive failure count and `retryAt` the next retry (`null` when this failure parked the instance); the sweep skips the instance until then. After `timeoutRetry.maxAttempts` consecutive failures the instance is parked, listed in `parked`, and no longer swept until `rearmTimeout()` clears it. Failed attempts write no history rows.
+
 **v1.1.0 — `rejected`:** when a timeout-driven event has a guard that returns `false`, the runtime additionally clears `expiresAt` so the next sweep won't re-pick the instance. The history row is still appended with `outcome: "guard-rejected"`. Track `rejected` separately from `processed` so observability dashboards don't conflate "timeout fired and progressed" with "timeout fired and was held back."
+
+### FindParkedTimeoutsInput (v6.0.0)
+
+```ts
+interface FindParkedTimeoutsInput {
+  limit?: number; // default: 100
+  workflowName?: string; // only instances of this workflow
+}
+```
 
 ### GetAvailableEventsInput
 
@@ -344,7 +367,8 @@ interface WorkflowInstanceStore {
   findByUuid(uuid: string): Promise<WorkflowInstance | null>;
   lockByUuid(uuid: string): Promise<WorkflowInstance | null>; // FOR UPDATE (REQUIRES active transaction)
   update(instance: WorkflowInstance): Promise<void>; // optimistic locking (checks version); MUST NOT update metadata
-  findExpired(limit: number, now: Date): Promise<WorkflowInstance[]>; // FOR UPDATE SKIP LOCKED (REQUIRES active transaction)
+  findExpired(limit: number, now: Date): Promise<WorkflowInstance[]>; // due instances, FOR UPDATE SKIP LOCKED (REQUIRES active transaction)
+  findParkedTimeouts(options: { limit: number; workflowName?: string }): Promise<WorkflowInstance[]>; // v6.0.0: parked only; no transaction required
 }
 ```
 
@@ -352,7 +376,13 @@ interface WorkflowInstanceStore {
 
 - `lockByUuid` / `findExpired` MUST throw if called outside a transaction.
 - `update` MUST NOT modify `metadata_json` — metadata is write-once after `create()`.
-- `findExpired` MUST honor `SKIP LOCKED` semantics (or the platform equivalent) so concurrent workers don't block each other.
+- `findExpired` MUST honor `SKIP LOCKED` semantics (or the platform equivalent) so concurrent workers don't block each other. `SKIP LOCKED` alone doesn't prevent double processing: the runtime re-locks each instance with `lockByUuid` and re-checks that it is still due before processing it.
+
+**v6.0.0 contract notes:**
+
+- `create` / `update` MUST persist `timeoutRetry` (see [Database Schema](#database-schema) for the column mapping).
+- `findExpired` returns only **due** instances: `expires_at < now AND timeout_parked_at IS NULL AND (timeout_retry_at IS NULL OR timeout_retry_at < now)`, ordered by `coalesce(timeout_retry_at, expires_at)`, oldest first. SQL adapters should also add the redundant `coalesce(timeout_retry_at, expires_at) < now` condition so `workflow_instances_timeout_due_idx` is range-scanned.
+- `findParkedTimeouts` returns only parked instances (`timeout_parked_at IS NOT NULL`, optionally filtered by `workflow_name`), ordered by `timeout_parked_at, uuid`, at most `limit`. It is a plain read and needs no transaction.
 
 ### WorkflowHistoryStore
 
@@ -402,18 +432,19 @@ interface WorkflowPersistenceProvider {
 new WorkflowRuntime(options: WorkflowRuntimeOptions)
 ```
 
-| Option               | Type                          | Description                                                                                          |
-| -------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                                     |
-| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                                         |
-| `instanceStore`      | `WorkflowInstanceStore`       | Instance persistence                                                                                 |
-| `historyStore`       | `WorkflowHistoryStore`        | History persistence                                                                                  |
-| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                                               |
-| `clock`              | `WorkflowClock`               | Clock for timestamps                                                                                 |
-| `maxOnEnterDepth`    | `number`                      | Max onEnter chain depth (default: 10). Throws `InvalidArgumentError` if not a positive safe integer. |
-| `observers`          | `readonly WorkflowObserver[]` | v1.0.0: lifecycle observers fired post-commit on every state entry                                   |
-| `onObserverError`    | `ObserverErrorHandler`        | v1.0.0: handler invoked when an observer throws (default logs via `console.warn`)                    |
-| `guardRegistry`      | `WorkflowGuardRegistry`       | v1.1.0: registry of guard implementations; required when any definition uses `guard`                 |
+| Option               | Type                          | Description                                                                                                                                                                                                                                                                                                                   |
+| -------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                                                                                                                                                                                                                                                              |
+| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                                                                                                                                                                                                                                                                  |
+| `instanceStore`      | `WorkflowInstanceStore`       | Instance persistence                                                                                                                                                                                                                                                                                                          |
+| `historyStore`       | `WorkflowHistoryStore`        | History persistence                                                                                                                                                                                                                                                                                                           |
+| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                                                                                                                                                                                                                                                                        |
+| `clock`              | `WorkflowClock`               | Clock for timestamps                                                                                                                                                                                                                                                                                                          |
+| `maxOnEnterDepth`    | `number`                      | Max onEnter chain depth (default: 10). Throws `InvalidArgumentError` if not a positive safe integer.                                                                                                                                                                                                                          |
+| `observers`          | `readonly WorkflowObserver[]` | v1.0.0: lifecycle observers fired post-commit on every state entry                                                                                                                                                                                                                                                            |
+| `onObserverError`    | `ObserverErrorHandler`        | v1.0.0: handler invoked when an observer throws (default logs via `console.warn`)                                                                                                                                                                                                                                             |
+| `guardRegistry`      | `WorkflowGuardRegistry`       | v1.1.0: registry of guard implementations; required when any definition uses `guard`                                                                                                                                                                                                                                          |
+| `timeoutRetry`       | `WorkflowTimeoutRetryOptions` | v6.0.0: `{ initialDelayMs?: 60000, maxDelayMs?: 3600000, maxAttempts?: 10 }`. Backoff before retry n is `min(maxDelayMs, initialDelayMs * 2^(n-1))`; parked at `maxAttempts` consecutive failures. Each must be a positive safe integer and `initialDelayMs <= maxDelayMs`, or the constructor throws `InvalidArgumentError`. |
 
 ### Methods
 
@@ -427,7 +458,15 @@ Within transaction: locks instance (FOR UPDATE), validates event, executes comma
 
 **`processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<ProcessExpiredWorkflowsResult>`**
 
-Scans for expired instances (FOR UPDATE SKIP LOCKED), then runs one transaction per instance to trigger its timeout event. `limit` is validated (throws `InvalidArgumentError` if not a positive safe integer) and defaults to 100. Per-instance technical failures are collected in `failed`, not thrown; per-instance business failures (timeout event or its onEnter chain routed to an `errorState`) are reported in `businessFailed`.
+Scans for due instances (expired, not parked, any scheduled retry reached; FOR UPDATE SKIP LOCKED), then runs one transaction per instance to trigger its timeout event, re-locking and re-checking each first. `limit` is validated (throws `InvalidArgumentError` if not a positive safe integer) and defaults to 100. Per-instance technical failures are collected in `failed`, not thrown, and recorded on the instance's `timeoutRetry` (retry with backoff, or parked — listed in `parked`); per-instance business failures (timeout event or its onEnter chain routed to an `errorState`) are reported in `businessFailed`.
+
+**`findParkedTimeouts(input?: FindParkedTimeoutsInput): Promise<WorkflowInstance[]>`** _(v6.0.0)_
+
+Instances parked after `timeoutRetry.maxAttempts` consecutive failed timeout attempts, oldest-parked first. `limit` defaults to 100 (throws `InvalidArgumentError` if not a positive safe integer).
+
+**`rearmTimeout(uuid: string): Promise<WorkflowInstance>`** _(v6.0.0)_
+
+Clears the instance's `timeoutRetry` (un-parking it) so the next `processExpiredWorkflows` retries its timeout if the deadline has passed. Throws `WorkflowInstanceNotFoundError` for an unknown UUID; returns an instance without retry state unchanged.
 
 **`getAvailableEvents(input: GetAvailableEventsInput): Promise<AvailableWorkflowEvent[]>`**
 
@@ -771,6 +810,14 @@ export class MyScheduler {
 }
 ```
 
+**Methods:**
+
+- `processExpiredWorkflows(limit?): Promise<ProcessExpiredWorkflowsResult>`
+- `findParkedTimeouts(input?: FindParkedTimeoutsInput): Promise<WorkflowInstance[]>` _(v6.0.0)_ — delegates to the runtime
+- `rearmTimeout(uuid): Promise<WorkflowInstance>` _(v6.0.0)_ — delegates to the runtime
+
+`WorkflowModule` builds the runtime with the default `timeoutRetry` options.
+
 ### Injection Tokens
 
 | Token                          | Type                             |
@@ -852,18 +899,25 @@ const { up, down } = generateMigrationSql({ uuidStrategy: "uuidv7" }); // PG 18+
 
 **workflow_instances:**
 
-| Column               | Type          | Notes                       |
-| -------------------- | ------------- | --------------------------- |
-| `uuid`               | `uuid`        | PK, supplied by application |
-| `workflow_name`      | `text`        | NOT NULL                    |
-| `current_state`      | `text`        | NOT NULL                    |
-| `version`            | `integer`     | NOT NULL, DEFAULT 0         |
-| `expires_at`         | `timestamptz` | NULL if no timeout          |
-| `last_transition_at` | `timestamptz` | NOT NULL                    |
-| `context_json`       | `jsonb`       | NOT NULL, DEFAULT '{}'      |
-| `metadata_json`      | `jsonb`       | NOT NULL, DEFAULT '{}'      |
-| `created_at`         | `timestamptz` | NOT NULL                    |
-| `updated_at`         | `timestamptz` | NOT NULL                    |
+| Column               | Type          | Notes                                                                              |
+| -------------------- | ------------- | ---------------------------------------------------------------------------------- |
+| `uuid`               | `uuid`        | PK, supplied by application                                                        |
+| `workflow_name`      | `text`        | NOT NULL                                                                           |
+| `current_state`      | `text`        | NOT NULL                                                                           |
+| `version`            | `integer`     | NOT NULL, DEFAULT 0                                                                |
+| `definition_version` | `integer`     | NULL on legacy rows (v5.0.0)                                                       |
+| `expires_at`         | `timestamptz` | NULL if no timeout                                                                 |
+| `last_transition_at` | `timestamptz` | NOT NULL                                                                           |
+| `context_json`       | `jsonb`       | NOT NULL, DEFAULT '{}'                                                             |
+| `metadata_json`      | `jsonb`       | NOT NULL, DEFAULT '{}'                                                             |
+| `created_at`         | `timestamptz` | NOT NULL                                                                           |
+| `updated_at`         | `timestamptz` | NOT NULL                                                                           |
+| `timeout_attempts`   | `integer`     | NOT NULL, DEFAULT 0 (v6.0.0) — `timeoutRetry.attempts`; `0` ⇔ `timeoutRetry: null` |
+| `timeout_retry_at`   | `timestamptz` | NULL (v6.0.0) — `timeoutRetry.retryAt`                                             |
+| `timeout_last_error` | `text`        | NULL (v6.0.0) — `timeoutRetry.lastError`; NULL with attempts > 0 reads as `""`     |
+| `timeout_parked_at`  | `timestamptz` | NULL (v6.0.0) — `timeoutRetry.parkedAt`                                            |
+
+Writing `timeoutRetry: null` stores `timeout_attempts = 0` and NULL in the other three `timeout_*` columns. The columns come from migration `005_timeout_retries.sql`, which must be applied before deploying 6.0.0.
 
 **workflow_history:**
 
@@ -879,12 +933,15 @@ const { up, down } = generateMigrationSql({ uuidStrategy: "uuidv7" }); // PG 18+
 | `rejected_by`            | `text`        | v1.1.0: declared `eventDef.guard.name` for guard-rejected rows; NULL otherwise (migration `003_event_guards.sql`) |
 | `command_results_json`   | `jsonb`       | NOT NULL, DEFAULT '[]'                                                                                            |
 | `trigger_metadata_json`  | `jsonb`       | NOT NULL, DEFAULT '{}'                                                                                            |
+| `definition_version`     | `integer`     | v5.0.0: definition version that governed the transition; NULL on legacy rows                                      |
 | `created_at`             | `timestamptz` | NOT NULL                                                                                                          |
 
 **Indexes:**
 
 - `workflow_instances_workflow_name_idx` on `(workflow_name)`
 - `workflow_instances_expires_at_idx` on `(expires_at)` WHERE `expires_at IS NOT NULL`
+- `workflow_instances_timeout_due_idx` on `(coalesce(timeout_retry_at, expires_at))` WHERE `expires_at IS NOT NULL AND timeout_parked_at IS NULL` (v6.0.0) — `findExpired`'s due scan
+- `workflow_instances_timeout_parked_idx` on `(timeout_parked_at)` WHERE `timeout_parked_at IS NOT NULL` (v6.0.0) — `findParkedTimeouts`
 - `workflow_history_instance_created_idx` on `(workflow_instance_uuid, created_at DESC)`
 
 ---
@@ -931,6 +988,7 @@ describe("MyInstanceStore conformance", () => {
 - `lockByUuid()` row-level locking and transaction-required behavior
 - `update()` optimistic locking on `version`
 - `findExpired()` ordering, limit, and `SKIP LOCKED` semantics
+- `timeoutRetry` round-trips through `create` / `update`; `findExpired()` skips parked and not-yet-due retries and orders by due time; `findParkedTimeouts()` filtering, ordering and limit (v6.0.0)
 - `metadata` write-once enforcement (v1.0.0 contract)
 - Nested-transaction reuse via `transactionRunner`
 
@@ -968,7 +1026,7 @@ class InvalidArgumentError extends WorkflowError {
 }
 ```
 
-Thrown when: a caller passes an invalid numeric argument — `processExpiredWorkflows`'s `limit`, `getHistory`'s `limit`/`offset`, or the `WorkflowRuntime` constructor's `maxOnEnterDepth` — that isn't a positive (or, for `offset`, non-negative) safe integer.
+Thrown when: a caller passes an invalid numeric argument — `processExpiredWorkflows`'s `limit`, `findParkedTimeouts`'s `limit`, `getHistory`'s `limit`/`offset`, or the `WorkflowRuntime` constructor's `maxOnEnterDepth` or `timeoutRetry` options — that isn't a positive (or, for `offset`, non-negative) safe integer.
 
 ### InvalidEventError
 

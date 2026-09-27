@@ -10,6 +10,8 @@ How to implement custom persistence adapters for duraflows. The core runtime is 
 > **v1.0.0 — verify with the conformance suite.** `@duraflows/core/testing` ships `runInstanceStoreConformance(factory)`, the canonical test suite for `WorkflowInstanceStore` implementations. It exercises locking, optimistic concurrency, expiration ordering, the metadata-write-once contract, and nested transactions. Reference adapters: `@duraflows/pg` and `@duraflows/kysely` (v0.4.0+) — both pass it in CI. See [Testing Your Adapter](#testing-your-adapter).
 >
 > **Definition versioning — `WorkflowDefinitionStore` is now part of the contract.** Every `WorkflowDefinition` carries an explicit `version` (defaulting to `1`), and `WorkflowRuntime.initialize()` snapshots each registered definition into a `WorkflowDefinitionStore` so it can fail fast when a version's content drifts from what was previously registered. Implement `WorkflowDefinitionStore` and add `definition_version` columns to `workflow_instances` and `workflow_history` so instances and history rows record the definition version that governed them. It's optional on `WorkflowPersistenceProvider` — an adapter that omits it still compiles and runs, it just leaves definition versioning inert. `@duraflows/core/testing` ships `runDefinitionStoreConformance(label, harness)` to verify your implementation; both reference adapters pass it in CI. **Resolution is unchanged by any of this: instances still execute the currently registered definition regardless of the version they were stamped with.** See [WorkflowDefinitionStore](#4-workflowdefinitionstore-optional) and [Testing Your Adapter](#testing-your-adapter).
+>
+> **v6.0.0 — timeout retry state is part of the instance contract (breaking).** `WorkflowInstance.timeoutRetry: WorkflowTimeoutRetry | null` is required and must round-trip through four columns (`timeout_attempts`, `timeout_retry_at`, `timeout_last_error`, `timeout_parked_at`); `findExpired` must skip parked and not-yet-due rows and order by `coalesce(timeout_retry_at, expires_at)`; and `WorkflowInstanceStore.findParkedTimeouts({ limit, workflowName? })` is a new required method. `@duraflows/pg` ships the schema change as `005_timeout_retries.sql`. See [findExpired](#findexpired----concurrent-batch-processing), [findParkedTimeouts](#findparkedtimeouts----operator-listing), [WorkflowInstance Fields](#workflowinstance-fields) and [Adding timeout retries to an existing schema](#v600--adding-timeout-retries-to-an-existing-schema).
 
 ---
 
@@ -24,6 +26,7 @@ interface WorkflowInstanceStore {
   lockByUuid(uuid: string): Promise<WorkflowInstance | null>;
   update(instance: WorkflowInstance): Promise<void>;
   findExpired(limit: number, now: Date): Promise<WorkflowInstance[]>;
+  findParkedTimeouts(options: { limit: number; workflowName?: string }): Promise<WorkflowInstance[]>; // v6.0.0
 }
 ```
 
@@ -132,26 +135,58 @@ if (affectedRows === 0) {
 
 ### findExpired -- Concurrent Batch Processing
 
-Called by `processExpiredWorkflows()` to find instances whose timeout has passed.
+Called by `processExpiredWorkflows()` to find instances whose timeout is due.
 
 **Requirements:**
 
 - **Must require an active transaction**
 - **Must skip rows locked by other processes** (e.g., `FOR UPDATE SKIP LOCKED`)
-- Filter: `expires_at IS NOT NULL AND expires_at <= now`
+- **(v6.0.0)** Due filter: `expires_at IS NOT NULL AND expires_at < now AND timeout_parked_at IS NULL AND (timeout_retry_at IS NULL OR timeout_retry_at < now)` -- parked instances and instances whose next retry is still in the future are excluded
+- **(v6.0.0)** Order by `coalesce(timeout_retry_at, expires_at)`, oldest first, so instances whose timeout keeps failing move behind healthy ones
 - Respect `limit` parameter
+- `now` is the parameter (the application clock), never the database's `now()`
 
 **SQL pattern:**
 
 ```sql
 SELECT * FROM workflow_instances
-WHERE expires_at IS NOT NULL AND expires_at <= $2
-ORDER BY expires_at
+WHERE expires_at IS NOT NULL AND expires_at < $2
+  AND timeout_parked_at IS NULL
+  AND (timeout_retry_at IS NULL OR timeout_retry_at < $2)
+  -- Redundant (every due row already satisfies it), but it gives the planner a
+  -- range condition on the coalesce index instead of filtering every entry.
+  AND coalesce(timeout_retry_at, expires_at) < $2
+ORDER BY coalesce(timeout_retry_at, expires_at)
 FOR UPDATE SKIP LOCKED
 LIMIT $1
 ```
 
-**Why SKIP LOCKED?** Multiple workers can call `processExpiredWorkflows()` concurrently. Without SKIP LOCKED, they'd block each other. With it, each worker picks up different expired instances.
+Back it with a partial expression index -- `CREATE INDEX workflow_instances_timeout_due_idx ON workflow_instances ((coalesce(timeout_retry_at, expires_at))) WHERE expires_at IS NOT NULL AND timeout_parked_at IS NULL` -- and keep the redundant `coalesce(...) < now` condition: without it, PostgreSQL walks the whole index in order and filters every entry against the heap once many rows carry retry state.
+
+**Why SKIP LOCKED?** Multiple workers can call `processExpiredWorkflows()` concurrently. Without SKIP LOCKED, they'd block each other on the same rows. `SKIP LOCKED` does not by itself prevent double processing: the scan runs in a short transaction and its locks end with it. The runtime then re-locks each instance with `lockByUuid` and re-checks that it is still due before processing it; that re-lock is what gives each instance's timeout a single worker.
+
+### findParkedTimeouts -- Operator Listing
+
+**(v6.0.0)** Backs `WorkflowRuntime.findParkedTimeouts()`: lists instances parked after `timeoutRetry.maxAttempts` consecutive failed timeout attempts, so an operator can inspect them and `rearmTimeout()` them.
+
+**Requirements:**
+
+- Filter: `timeout_parked_at IS NOT NULL`, plus `workflow_name = workflowName` when `workflowName` is given
+- Order by `timeout_parked_at, uuid` (oldest-parked first, ties by `uuid`)
+- Return at most `limit` rows
+- A plain read: **no transaction required** (use the transaction's connection when one is active, the pool otherwise)
+
+**SQL pattern:**
+
+```sql
+SELECT * FROM workflow_instances
+WHERE timeout_parked_at IS NOT NULL
+  AND ($2::text IS NULL OR workflow_name = $2)
+ORDER BY timeout_parked_at, uuid
+LIMIT $1
+```
+
+Back it with `CREATE INDEX workflow_instances_timeout_parked_idx ON workflow_instances (timeout_parked_at) WHERE timeout_parked_at IS NOT NULL`.
 
 ### runInTransaction -- Nested Transaction Support
 
@@ -246,19 +281,49 @@ const [stored] = await db
 
 All fields must be persisted and restored correctly:
 
-| Field               | Type                      | Storage Notes                                                                                                                                                                                                                                                               |
-| ------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `uuid`              | `string`                  | PK, application-generated (not DB-generated)                                                                                                                                                                                                                                |
-| `workflowName`      | `string`                  | Text column                                                                                                                                                                                                                                                                 |
-| `currentState`      | `string`                  | Text column                                                                                                                                                                                                                                                                 |
-| `version`           | `number`                  | Integer, starts at 0, incremented on each update                                                                                                                                                                                                                            |
-| `definitionVersion` | `number \| null`          | Nullable integer. The definition version currently governing this instance. `null` on legacy rows created before definition versioning existed; the runtime stamps a real value on the instance's next transition. `update()` must persist it like any other mutable field. |
-| `expiresAt`         | `Date \| null`            | Nullable timestamp                                                                                                                                                                                                                                                          |
-| `lastTransitionAt`  | `Date`                    | Timestamp                                                                                                                                                                                                                                                                   |
-| `context`           | `Record<string, unknown>` | JSON/JSONB column                                                                                                                                                                                                                                                           |
-| `metadata`          | `Record<string, unknown>` | JSON/JSONB column                                                                                                                                                                                                                                                           |
-| `createdAt`         | `Date`                    | Timestamp                                                                                                                                                                                                                                                                   |
-| `updatedAt`         | `Date`                    | Timestamp                                                                                                                                                                                                                                                                   |
+| Field               | Type                           | Storage Notes                                                                                                                                                                                                                                                               |
+| ------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `uuid`              | `string`                       | PK, application-generated (not DB-generated)                                                                                                                                                                                                                                |
+| `workflowName`      | `string`                       | Text column                                                                                                                                                                                                                                                                 |
+| `currentState`      | `string`                       | Text column                                                                                                                                                                                                                                                                 |
+| `version`           | `number`                       | Integer, starts at 0, incremented on each update                                                                                                                                                                                                                            |
+| `definitionVersion` | `number \| null`               | Nullable integer. The definition version currently governing this instance. `null` on legacy rows created before definition versioning existed; the runtime stamps a real value on the instance's next transition. `update()` must persist it like any other mutable field. |
+| `expiresAt`         | `Date \| null`                 | Nullable timestamp                                                                                                                                                                                                                                                          |
+| `timeoutRetry`      | `WorkflowTimeoutRetry \| null` | **(v6.0.0)** Failed-timeout retry state (`{ attempts, lastError, retryAt, parkedAt }`), stored in four columns -- see [Timeout retry mapping](#timeout-retry-mapping) below. `create()` and `update()` must write it on every call.                                         |
+| `lastTransitionAt`  | `Date`                         | Timestamp                                                                                                                                                                                                                                                                   |
+| `context`           | `Record<string, unknown>`      | JSON/JSONB column                                                                                                                                                                                                                                                           |
+| `metadata`          | `Record<string, unknown>`      | JSON/JSONB column                                                                                                                                                                                                                                                           |
+| `createdAt`         | `Date`                         | Timestamp                                                                                                                                                                                                                                                                   |
+| `updatedAt`         | `Date`                         | Timestamp                                                                                                                                                                                                                                                                   |
+
+### Timeout retry mapping
+
+**(v6.0.0)** `timeoutRetry` maps to four columns on `workflow_instances`:
+
+| `WorkflowTimeoutRetry` field | Column               | Type                         |
+| ---------------------------- | -------------------- | ---------------------------- |
+| `attempts`                   | `timeout_attempts`   | `integer NOT NULL DEFAULT 0` |
+| `retryAt`                    | `timeout_retry_at`   | `timestamptz NULL`           |
+| `lastError`                  | `timeout_last_error` | `text NULL`                  |
+| `parkedAt`                   | `timeout_parked_at`  | `timestamptz NULL`           |
+
+- `timeout_attempts = 0` ⇔ `timeoutRetry: null` ("never failed", or cleared by a successful transition or `rearmTimeout`).
+- Writing `timeoutRetry: null`: `timeout_attempts = 0` and the other three columns `NULL`.
+- Reading `timeout_attempts > 0`: build the object; a `NULL` `timeout_last_error` reads as `lastError: ""`.
+- `lastError` arrives truncated to 2000 characters with NUL characters already replaced by U+FFFD (PostgreSQL `text` rejects NUL), so store it as-is.
+
+```ts
+// On read
+timeoutRetry:
+  row.timeout_attempts > 0
+    ? {
+        attempts: row.timeout_attempts,
+        lastError: row.timeout_last_error ?? "",
+        retryAt: row.timeout_retry_at ? new Date(row.timeout_retry_at) : null,
+        parkedAt: row.timeout_parked_at ? new Date(row.timeout_parked_at) : null,
+      }
+    : null,
+```
 
 ### Date Handling
 
@@ -327,7 +392,12 @@ CREATE TABLE workflow_instances (
   context_json        jsonb NOT NULL DEFAULT '{}'::jsonb,
   metadata_json       jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at          timestamptz NOT NULL DEFAULT now(),
-  updated_at          timestamptz NOT NULL DEFAULT now()
+  updated_at          timestamptz NOT NULL DEFAULT now(),
+  -- v6.0.0: timeout retry state (WorkflowInstance.timeoutRetry); 0 attempts = null.
+  timeout_attempts    integer NOT NULL DEFAULT 0,
+  timeout_retry_at    timestamptz,
+  timeout_last_error  text,
+  timeout_parked_at   timestamptz
 );
 
 CREATE TABLE workflow_history (
@@ -363,6 +433,11 @@ CREATE TABLE workflow_definitions (
 CREATE INDEX workflow_instances_workflow_name_idx ON workflow_instances (workflow_name);
 CREATE INDEX workflow_instances_expires_at_idx ON workflow_instances (expires_at)
   WHERE expires_at IS NOT NULL;
+-- v6.0.0: findExpired's due scan and findParkedTimeouts' listing.
+CREATE INDEX workflow_instances_timeout_due_idx ON workflow_instances ((coalesce(timeout_retry_at, expires_at)))
+  WHERE expires_at IS NOT NULL AND timeout_parked_at IS NULL;
+CREATE INDEX workflow_instances_timeout_parked_idx ON workflow_instances (timeout_parked_at)
+  WHERE timeout_parked_at IS NOT NULL;
 CREATE INDEX workflow_history_instance_created_idx ON workflow_history (workflow_instance_uuid, created_at DESC);
 ```
 
@@ -412,6 +487,28 @@ ALTER TABLE workflow_history ADD COLUMN definition_version integer;
 `@duraflows/pg` ships this as `004_definition_versions.sql`; `@duraflows/kysely` bootstraps its test schema from `@duraflows/pg`'s `generateMigrationSql()`, so both adapters share one schema definition. If you wrap a different ORM, mirror the three operations in the migration tool of your choice. There's no backfill for either column — pre-existing rows keep `definition_version IS NULL`, which maps to `definitionVersion: null` on `WorkflowInstance` and `definitionVersion: undefined` on `WorkflowHistoryRecord`. Instances pick up a real version stamp the next time they transition; history rows written before the upgrade stay `null`/`undefined` forever, since history is immutable.
 
 Implementing the schema alone isn't enough — you also need a `WorkflowDefinitionStore` implementation (see [4. WorkflowDefinitionStore (optional)](#4-workflowdefinitionstore-optional) and [ensure -- Insert-If-Absent, Never Overwrite](#ensure----insert-if-absent-never-overwrite) above) and to wire it into your `WorkflowPersistenceProvider`'s `definitionStore` field, or the new table and columns will sit unused.
+
+### v6.0.0 — Adding timeout retries to an existing schema
+
+Upgrading an existing adapter to 6.0.0 needs four columns and two partial indexes on `workflow_instances`:
+
+```sql
+ALTER TABLE workflow_instances
+  ADD COLUMN IF NOT EXISTS timeout_attempts   integer     NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS timeout_retry_at   timestamptz NULL,
+  ADD COLUMN IF NOT EXISTS timeout_last_error text        NULL,
+  ADD COLUMN IF NOT EXISTS timeout_parked_at  timestamptz NULL;
+
+CREATE INDEX IF NOT EXISTS workflow_instances_timeout_due_idx
+  ON workflow_instances ((coalesce(timeout_retry_at, expires_at)))
+  WHERE expires_at IS NOT NULL AND timeout_parked_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS workflow_instances_timeout_parked_idx
+  ON workflow_instances (timeout_parked_at)
+  WHERE timeout_parked_at IS NOT NULL;
+```
+
+`@duraflows/pg` ships this as `005_timeout_retries.sql`, and it must be applied **before** deploying 6.0.0: `create()` and `update()` write these columns on every call. Existing rows get `timeout_attempts = 0`, which maps to `timeoutRetry: null`. On large tables, set `lock_timeout` for the migration, and consider pre-building both indexes with `CREATE INDEX CONCURRENTLY` (same names and definitions) after adding the columns; the `IF NOT EXISTS` clauses then skip them. The schema alone isn't enough -- the adapter must also map `timeoutRetry` (see [Timeout retry mapping](#timeout-retry-mapping)), apply the new `findExpired` filter and ordering, and implement `findParkedTimeouts`.
 
 ---
 
@@ -475,13 +572,16 @@ WorkflowModule.forRootAsync({
 - [ ] **(v1.0.0)** `update()` does NOT modify `metadata_json` — metadata is write-once after `create()`
 - [ ] `findExpired()` uses `SKIP LOCKED` or equivalent to avoid blocking concurrent workers
 - [ ] `findExpired()` throws if called outside a transaction
+- [ ] **(v6.0.0)** `findExpired()` excludes parked rows and rows whose `timeout_retry_at` is still in the future, adds the redundant `coalesce(timeout_retry_at, expires_at) < now` condition, and orders by `coalesce(timeout_retry_at, expires_at)`
+- [ ] **(v6.0.0)** `findParkedTimeouts({ limit, workflowName? })` returns only parked rows (optionally filtered by `workflow_name`), ordered by `timeout_parked_at, uuid`, at most `limit`, without requiring a transaction
+- [ ] **(v6.0.0)** The four `timeout_*` columns exist; `create()`/`update()` persist `timeoutRetry` (`null` ⇔ `timeout_attempts = 0` and the other three `NULL`); a `NULL` `timeout_last_error` with attempts > 0 reads as `lastError: ""`
 - [ ] `runInTransaction()` supports nesting (reuses existing transaction)
 - [ ] `runInTransaction()` rolls back on error
 - [ ] `append()` returns a generated UUID string
 - [ ] `findByInstanceUuid()` supports `limit`/`offset` pagination, returns newest-first (`created_at DESC, uuid DESC` -- see the ordering contract above)
 - [ ] All Date fields are stored and retrieved as `Date` objects
 - [ ] JSON fields (`context`, `metadata`, `commandResults`, `triggerMetadata`) survive round-trips
-- [ ] `null` handling for `expiresAt`, `fromState`, `errorMessage`
+- [ ] `null` handling for `expiresAt`, `timeoutRetry`, `fromState`, `errorMessage`
 - [ ] **(v1.0.0)** `runInstanceStoreConformance` from `@duraflows/core/testing` passes against your adapter
 - [ ] **(v1.1.0)** `workflow_history.outcome` CHECK constraint accepts `'guard-rejected'` (in addition to `'success'`/`'failure'`)
 - [ ] **(v1.1.0)** `rejected_by` column exists on `workflow_history`; persisted on `append()` for guard-rejected rows; mapped `NULL → undefined` on read (same convention as `errorMessage`)
@@ -526,7 +626,7 @@ describe("MyInstanceStore (conformance)", () => {
 });
 ```
 
-The suite verifies the persistence contract end-to-end: row-level locking, transaction-required behavior, optimistic concurrency on `version`, the `metadata` write-once contract, expiration ordering + limit + `SKIP LOCKED`, and nested-transaction reuse.
+The suite verifies the persistence contract end-to-end: row-level locking, transaction-required behavior, optimistic concurrency on `version`, the `metadata` write-once contract, expiration ordering + limit + `SKIP LOCKED`, the `timeoutRetry` round-trip, retry/parked filtering and due-time ordering in `findExpired`, `findParkedTimeouts` filtering and ordering, and nested-transaction reuse.
 
 ### Definition Versioning — Use the Definition-Store Conformance Suite
 

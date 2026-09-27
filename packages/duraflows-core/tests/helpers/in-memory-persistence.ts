@@ -65,16 +65,39 @@ export class InMemoryInstanceStore implements WorkflowInstanceStore, Snapshotabl
     this.instances.set(instance.uuid, structuredClone({ ...instance, metadata: existing.metadata }));
   }
 
-  /** Mirrors the adapters' `expires_at < now` predicate (strictly in the past). */
+  /**
+   * Mirrors the SQL adapters: due means expired (strictly in the past), not
+   * parked, and any scheduled retry reached; ordered by retryAt ?? expiresAt.
+   */
   async findExpired(limit: number, now: Date): Promise<WorkflowInstance[]> {
-    const results: WorkflowInstance[] = [];
-    for (const instance of this.instances.values()) {
-      if (instance.expiresAt && instance.expiresAt < now) {
-        results.push(structuredClone(instance));
-        if (results.length >= limit) break;
-      }
-    }
-    return results;
+    const dueAt = (instance: WorkflowInstance): number =>
+      (instance.timeoutRetry?.retryAt ?? instance.expiresAt!).getTime();
+    return [...this.instances.values()]
+      .filter(
+        (instance) =>
+          instance.expiresAt !== null &&
+          instance.expiresAt < now &&
+          !instance.timeoutRetry?.parkedAt &&
+          (!instance.timeoutRetry?.retryAt || instance.timeoutRetry.retryAt < now),
+      )
+      .sort((a, b) => dueAt(a) - dueAt(b))
+      .slice(0, limit)
+      .map((instance) => structuredClone(instance));
+  }
+
+  async findParkedTimeouts(options: { limit: number; workflowName?: string }): Promise<WorkflowInstance[]> {
+    return [...this.instances.values()]
+      .filter(
+        (instance) =>
+          instance.timeoutRetry?.parkedAt &&
+          (options.workflowName === undefined || instance.workflowName === options.workflowName),
+      )
+      .sort(
+        (a, b) =>
+          a.timeoutRetry!.parkedAt!.getTime() - b.timeoutRetry!.parkedAt!.getTime() || a.uuid.localeCompare(b.uuid),
+      )
+      .slice(0, options.limit)
+      .map((instance) => structuredClone(instance));
   }
 
   snapshot(): unknown {

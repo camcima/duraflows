@@ -23,6 +23,32 @@ export interface WorkflowExecutionContext {
   readonly transitionUuid: string;
 }
 
+/**
+ * Retry state of an instance whose timeout processing has failed. The runtime
+ * owns it: `processExpiredWorkflows` sets it after a failed attempt, and any
+ * successful transition, `rearmTimeout`, or deadline clear resets it to `null`.
+ */
+export interface WorkflowTimeoutRetry {
+  /** Consecutive failed timeout attempts since the last success (>= 1). */
+  attempts: number;
+  /** Message of the most recent failure, truncated to 2000 characters. */
+  lastError: string;
+  /** When the sweep may try again; `null` once parked. */
+  retryAt: Date | null;
+  /** When the instance was parked after `maxAttempts` failures; `null` while retrying. */
+  parkedAt: Date | null;
+}
+
+/** How `processExpiredWorkflows` retries an instance whose timeout processing fails. */
+export interface WorkflowTimeoutRetryOptions {
+  /** Delay before the first retry, in ms. Default 60 000 (1 minute). */
+  initialDelayMs?: number;
+  /** Upper bound on the delay between retries, in ms. Default 3 600 000 (1 hour). */
+  maxDelayMs?: number;
+  /** Consecutive failures after which the instance is parked. Default 10. */
+  maxAttempts?: number;
+}
+
 export interface WorkflowInstance<TState extends string = string> {
   uuid: string;
   workflowName: string;
@@ -35,6 +61,11 @@ export interface WorkflowInstance<TState extends string = string> {
    */
   definitionVersion: number | null;
   expiresAt: Date | null;
+  /**
+   * Retry state after failed timeout processing; `null` when no timeout attempt
+   * has failed since the last success. See {@link WorkflowTimeoutRetry}.
+   */
+  timeoutRetry: WorkflowTimeoutRetry | null;
   lastTransitionAt: Date;
   context: Record<string, unknown>;
   metadata: Record<string, unknown>;
@@ -83,6 +114,13 @@ export interface ProcessExpiredWorkflowsInput {
   limit?: number;
 }
 
+export interface FindParkedTimeoutsInput {
+  /** Maximum instances to return. Default 100. */
+  limit?: number;
+  /** Only instances of this workflow. */
+  workflowName?: string;
+}
+
 export interface ProcessExpiredWorkflowsResult {
   processed: number;
   rejected: number;
@@ -92,8 +130,14 @@ export interface ProcessExpiredWorkflowsResult {
    * `errorState`). These instances transitioned, but to a failure state.
    */
   businessFailed: Array<{ uuid: string; finalState: string }>;
-  /** Infrastructure failures: the per-instance transaction rolled back. */
-  failed: Array<{ uuid: string; error: string }>;
+  /**
+   * Infrastructure failures: the instance's timeout transaction rolled back.
+   * When the failure was recorded, `attempts` is the consecutive failure count
+   * and `retryAt` the next retry (`null` when this failure parked it).
+   */
+  failed: Array<{ uuid: string; error: string; attempts?: number; retryAt?: Date | null }>;
+  /** Subset of `failed` parked by this sweep after reaching `maxAttempts`. */
+  parked: Array<{ uuid: string; error: string }>;
 }
 
 export interface GetAvailableEventsInput {

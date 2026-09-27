@@ -27,6 +27,7 @@ const sampleInstance: WorkflowInstance = {
   version: 0,
   definitionVersion: null,
   expiresAt: null,
+  timeoutRetry: null,
   lastTransitionAt: now,
   context: { status: "new" },
   metadata: { orderId: "ORD-1" },
@@ -165,9 +166,9 @@ describe("PgWorkflowInstanceStore", () => {
       const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("UPDATE workflow_instances");
       expect(sql).toContain("definition_version = $8");
-      expect(sql).toContain("AND version = $9");
+      expect(sql).toContain("AND version = $13");
       expect(params[7]).toBe(2); // definitionVersion
-      expect(params[8]).toBe(0); // expectedVersion = version - 1
+      expect(params[12]).toBe(0); // expectedVersion = version - 1
     });
 
     it("throws WorkflowError on optimistic lock failure", async () => {
@@ -213,6 +214,110 @@ describe("PgWorkflowInstanceStore", () => {
       const sql = (txClient.query as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(sql).toContain("FOR UPDATE SKIP LOCKED");
       expect(sql).toContain("LIMIT $1");
+    });
+  });
+
+  describe("timeout retry columns", () => {
+    const retrying = { attempts: 2, lastError: "boom", retryAt: now, parkedAt: null };
+
+    it("create writes the four timeout retry columns", async () => {
+      const pool = createMockPool();
+      const store = new PgWorkflowInstanceStore(pool);
+
+      await store.create({ ...sampleInstance, timeoutRetry: retrying });
+
+      const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain("timeout_attempts, timeout_retry_at, timeout_last_error, timeout_parked_at");
+      expect(params.slice(11)).toEqual([2, now, "boom", null]);
+    });
+
+    it("create writes 'never failed' for a null timeoutRetry", async () => {
+      const pool = createMockPool();
+      const store = new PgWorkflowInstanceStore(pool);
+
+      await store.create(sampleInstance);
+
+      const params = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(params.slice(11)).toEqual([0, null, null, null]);
+    });
+
+    it("update writes the four timeout retry columns before the version check", async () => {
+      const pool = createMockPool({ rows: [], rowCount: 1 });
+      const store = new PgWorkflowInstanceStore(pool);
+
+      await store.update({ ...sampleInstance, version: 1, timeoutRetry: retrying });
+
+      const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain("timeout_attempts = $9");
+      expect(sql).toContain("timeout_parked_at = $12");
+      expect(sql).toContain("version = $13");
+      expect(params.slice(8)).toEqual([2, now, "boom", null, 0]);
+    });
+
+    it("findExpired filters parked and not-yet-due rows and orders by due time", async () => {
+      const pool = createMockPool();
+      const txClient = createMockClient();
+      const store = new PgWorkflowInstanceStore(pool);
+
+      await PgTransactionContext.run(pool, txClient, () => store.findExpired(10, now));
+
+      const sql = (txClient.query as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(sql).toContain("timeout_parked_at IS NULL");
+      expect(sql).toContain("(timeout_retry_at IS NULL OR timeout_retry_at < $2)");
+      expect(sql).toContain("AND coalesce(timeout_retry_at, expires_at) < $2");
+      expect(sql).toContain("ORDER BY coalesce(timeout_retry_at, expires_at)");
+    });
+
+    it("findParkedTimeouts reads without a transaction, unfiltered", async () => {
+      const parkedRow = {
+        ...sampleRow,
+        timeout_attempts: 10,
+        timeout_retry_at: null,
+        timeout_last_error: "broken",
+        timeout_parked_at: now.toISOString(),
+      };
+      const pool = createMockPool({ rows: [parkedRow], rowCount: 1 });
+      const store = new PgWorkflowInstanceStore(pool);
+
+      const results = await store.findParkedTimeouts({ limit: 5 });
+
+      const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain("timeout_parked_at IS NOT NULL");
+      expect(sql).toContain("ORDER BY timeout_parked_at, uuid");
+      expect(params).toEqual([5, null]);
+      expect(results[0].timeoutRetry).toEqual({ attempts: 10, lastError: "broken", retryAt: null, parkedAt: now });
+    });
+
+    it("findParkedTimeouts filters by workflow name", async () => {
+      const pool = createMockPool();
+      const store = new PgWorkflowInstanceStore(pool);
+
+      await store.findParkedTimeouts({ limit: 5, workflowName: "order" });
+
+      expect((pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual([5, "order"]);
+    });
+
+    it("maps a retrying row, and a missing last error to an empty string", async () => {
+      const row = {
+        ...sampleRow,
+        timeout_attempts: 1,
+        timeout_retry_at: now.toISOString(),
+        timeout_last_error: null,
+        timeout_parked_at: null,
+      };
+      const pool = createMockPool({ rows: [row], rowCount: 1 });
+      const store = new PgWorkflowInstanceStore(pool);
+
+      const found = await store.findByUuid("inst-uuid");
+
+      expect(found!.timeoutRetry).toEqual({ attempts: 1, lastError: "", retryAt: now, parkedAt: null });
+    });
+
+    it("maps a row without retry state to a null timeoutRetry", async () => {
+      const pool = createMockPool({ rows: [{ ...sampleRow, timeout_attempts: 0 }], rowCount: 1 });
+      const store = new PgWorkflowInstanceStore(pool);
+
+      expect((await store.findByUuid("inst-uuid"))!.timeoutRetry).toBeNull();
     });
   });
 });

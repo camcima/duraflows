@@ -1,7 +1,23 @@
 import type { Pool, PoolClient } from "pg";
-import type { WorkflowInstanceStore, WorkflowInstance } from "@duraflows/core";
+import type { WorkflowInstanceStore, WorkflowInstance, WorkflowTimeoutRetry } from "@duraflows/core";
 import { WorkflowError } from "@duraflows/core";
 import { PgTransactionContext } from "./pg-transaction-context.js";
+
+/** The four timeout-retry column values for `retry`, in column order (`null` ⇒ never failed). */
+function timeoutRetryParams(retry: WorkflowTimeoutRetry | null): [number, Date | null, string | null, Date | null] {
+  return [retry?.attempts ?? 0, retry?.retryAt ?? null, retry?.lastError ?? null, retry?.parkedAt ?? null];
+}
+
+function mapTimeoutRetry(row: Record<string, unknown>): WorkflowTimeoutRetry | null {
+  const attempts = (row.timeout_attempts as number | null | undefined) ?? 0;
+  if (attempts === 0) return null;
+  return {
+    attempts,
+    lastError: (row.timeout_last_error as string | null | undefined) ?? "",
+    retryAt: row.timeout_retry_at ? new Date(row.timeout_retry_at as string) : null,
+    parkedAt: row.timeout_parked_at ? new Date(row.timeout_parked_at as string) : null,
+  };
+}
 
 export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
   constructor(private readonly pool: Pool) {}
@@ -16,8 +32,9 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
       `INSERT INTO workflow_instances (
         uuid, workflow_name, current_state, version, expires_at,
         last_transition_at, context_json, metadata_json,
-        created_at, updated_at, definition_version
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        created_at, updated_at, definition_version,
+        timeout_attempts, timeout_retry_at, timeout_last_error, timeout_parked_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
         instance.uuid,
         instance.workflowName,
@@ -30,6 +47,7 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
         instance.createdAt,
         instance.updatedAt,
         instance.definitionVersion,
+        ...timeoutRetryParams(instance.timeoutRetry),
       ],
     );
   }
@@ -64,8 +82,12 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
         last_transition_at = $5,
         context_json = $6,
         updated_at = $7,
-        definition_version = $8
-      WHERE uuid = $1 AND version = $9`,
+        definition_version = $8,
+        timeout_attempts = $9,
+        timeout_retry_at = $10,
+        timeout_last_error = $11,
+        timeout_parked_at = $12
+      WHERE uuid = $1 AND version = $13`,
       [
         instance.uuid,
         instance.currentState,
@@ -75,6 +97,7 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
         JSON.stringify(instance.context),
         instance.updatedAt,
         instance.definitionVersion,
+        ...timeoutRetryParams(instance.timeoutRetry),
         expectedVersion,
       ],
     );
@@ -93,10 +116,29 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
     const result = await client.query(
       `SELECT * FROM workflow_instances
        WHERE expires_at IS NOT NULL AND expires_at < $2
-       ORDER BY expires_at
+         AND timeout_parked_at IS NULL
+         AND (timeout_retry_at IS NULL OR timeout_retry_at < $2)
+         -- Redundant (every due row already satisfies it); it gives the planner
+         -- a range condition so workflow_instances_timeout_due_idx is range-scanned
+         -- instead of walked in order with every entry filtered against the heap.
+         AND coalesce(timeout_retry_at, expires_at) < $2
+       ORDER BY coalesce(timeout_retry_at, expires_at)
        FOR UPDATE SKIP LOCKED
        LIMIT $1`,
       [limit, now],
+    );
+    return result.rows.map((row: Record<string, unknown>) => this.mapRow(row));
+  }
+
+  async findParkedTimeouts(options: { limit: number; workflowName?: string }): Promise<WorkflowInstance[]> {
+    const client = this.getClient();
+    const result = await client.query(
+      `SELECT * FROM workflow_instances
+       WHERE timeout_parked_at IS NOT NULL
+         AND ($2::text IS NULL OR workflow_name = $2)
+       ORDER BY timeout_parked_at, uuid
+       LIMIT $1`,
+      [options.limit, options.workflowName ?? null],
     );
     return result.rows.map((row: Record<string, unknown>) => this.mapRow(row));
   }
@@ -109,6 +151,7 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
       version: row.version as number,
       definitionVersion: (row.definition_version as number | null | undefined) ?? null,
       expiresAt: row.expires_at ? new Date(row.expires_at as string) : null,
+      timeoutRetry: mapTimeoutRetry(row),
       lastTransitionAt: new Date(row.last_transition_at as string),
       context: row.context_json as Record<string, unknown>,
       metadata: row.metadata_json as Record<string, unknown>,

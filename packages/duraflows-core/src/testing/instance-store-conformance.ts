@@ -42,6 +42,7 @@ export function runInstanceStoreConformance(label: string, harness: InstanceStor
       version: 0,
       definitionVersion: null,
       expiresAt: null,
+      timeoutRetry: null,
       lastTransitionAt: new Date("2026-01-01T00:00:00Z"),
       context: {},
       metadata: {},
@@ -188,6 +189,103 @@ export function runInstanceStoreConformance(label: string, harness: InstanceStor
 
         const found = await transactionRunner.runInTransaction(() => store.findExpired(3, now));
         expect(found.length).toBeLessThanOrEqual(3);
+      } finally {
+        await teardown();
+      }
+    });
+
+    it("round-trips timeoutRetry through create, update and findByUuid", async () => {
+      const { store, transactionRunner, teardown } = await harness.setup();
+      try {
+        const retrying = {
+          attempts: 2,
+          lastError: "boom",
+          retryAt: new Date("2026-01-01T01:00:00Z"),
+          parkedAt: null,
+        };
+        const instance = makeInstance({ uuid: "00000000-0000-0000-0000-000000000030", timeoutRetry: retrying });
+        await transactionRunner.runInTransaction(() => store.create(instance));
+        expect((await store.findByUuid(instance.uuid))!.timeoutRetry).toEqual(retrying);
+
+        await transactionRunner.runInTransaction(() => store.update({ ...instance, version: 1, timeoutRetry: null }));
+        expect((await store.findByUuid(instance.uuid))!.timeoutRetry).toBeNull();
+
+        const parked = {
+          attempts: 3,
+          lastError: "still broken",
+          retryAt: null,
+          parkedAt: new Date("2026-01-01T02:00:00Z"),
+        };
+        await transactionRunner.runInTransaction(() => store.update({ ...instance, version: 2, timeoutRetry: parked }));
+        expect((await store.findByUuid(instance.uuid))!.timeoutRetry).toEqual(parked);
+      } finally {
+        await teardown();
+      }
+    });
+
+    it("findExpired skips parked and not-yet-due retries and orders by when each became due", async () => {
+      const { store, transactionRunner, teardown } = await harness.setup();
+      try {
+        const now = new Date("2026-01-01T00:00:00Z");
+        const retryDueJune = makeInstance({
+          uuid: "00000000-0000-0000-0000-000000000040",
+          expiresAt: new Date("2025-01-01T00:00:00Z"),
+          timeoutRetry: { attempts: 1, lastError: "x", retryAt: new Date("2025-06-01T00:00:00Z"), parkedAt: null },
+        });
+        const deadlineMarch = makeInstance({
+          uuid: "00000000-0000-0000-0000-000000000041",
+          expiresAt: new Date("2025-03-01T00:00:00Z"),
+        });
+        const retryInFuture = makeInstance({
+          uuid: "00000000-0000-0000-0000-000000000042",
+          expiresAt: new Date("2025-02-01T00:00:00Z"),
+          timeoutRetry: { attempts: 1, lastError: "x", retryAt: new Date("2026-06-01T00:00:00Z"), parkedAt: null },
+        });
+        const parked = makeInstance({
+          uuid: "00000000-0000-0000-0000-000000000043",
+          expiresAt: new Date("2025-01-15T00:00:00Z"),
+          timeoutRetry: { attempts: 10, lastError: "x", retryAt: null, parkedAt: new Date("2025-12-01T00:00:00Z") },
+        });
+        for (const inst of [retryDueJune, deadlineMarch, retryInFuture, parked]) {
+          await transactionRunner.runInTransaction(() => store.create(inst));
+        }
+
+        const found = await transactionRunner.runInTransaction(() => store.findExpired(10, now));
+
+        expect(found.map((i) => i.uuid)).toEqual([deadlineMarch.uuid, retryDueJune.uuid]);
+      } finally {
+        await teardown();
+      }
+    });
+
+    it("findParkedTimeouts lists parked instances oldest-parked first, filtered and limited", async () => {
+      const { store, transactionRunner, teardown } = await harness.setup();
+      try {
+        const park = (uuid: string, workflowName: string, parkedAt: string) =>
+          makeInstance({
+            uuid,
+            workflowName,
+            timeoutRetry: { attempts: 10, lastError: "x", retryAt: null, parkedAt: new Date(parkedAt) },
+          });
+        const a1 = park("00000000-0000-0000-0000-000000000050", "wf-a", "2025-05-01T00:00:00Z");
+        const b1 = park("00000000-0000-0000-0000-000000000051", "wf-b", "2025-04-01T00:00:00Z");
+        const a2 = park("00000000-0000-0000-0000-000000000052", "wf-a", "2025-06-01T00:00:00Z");
+        const retrying = makeInstance({
+          uuid: "00000000-0000-0000-0000-000000000053",
+          workflowName: "wf-a",
+          timeoutRetry: { attempts: 1, lastError: "x", retryAt: new Date("2025-07-01T00:00:00Z"), parkedAt: null },
+        });
+        const healthy = makeInstance({ uuid: "00000000-0000-0000-0000-000000000054", workflowName: "wf-a" });
+        for (const inst of [a1, b1, a2, retrying, healthy]) {
+          await transactionRunner.runInTransaction(() => store.create(inst));
+        }
+
+        expect((await store.findParkedTimeouts({ limit: 10 })).map((i) => i.uuid)).toEqual([b1.uuid, a1.uuid, a2.uuid]);
+        expect((await store.findParkedTimeouts({ limit: 10, workflowName: "wf-a" })).map((i) => i.uuid)).toEqual([
+          a1.uuid,
+          a2.uuid,
+        ]);
+        expect((await store.findParkedTimeouts({ limit: 1 })).map((i) => i.uuid)).toEqual([b1.uuid]);
       } finally {
         await teardown();
       }

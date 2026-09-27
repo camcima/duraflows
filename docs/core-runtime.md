@@ -18,18 +18,19 @@ new WorkflowRuntime(options: WorkflowRuntimeOptions)
 
 **WorkflowRuntimeOptions:**
 
-| Property             | Type                          | Description                                                                                                                                                                                |
-| -------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                                                                                                                           |
-| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                                                                                                                               |
-| `instanceStore`      | `WorkflowInstanceStore`       | Persistence for workflow instances                                                                                                                                                         |
-| `historyStore`       | `WorkflowHistoryStore`        | Persistence for history records                                                                                                                                                            |
-| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                                                                                                                                     |
-| `clock`              | `WorkflowClock`               | Clock for timestamps (injectable for testing)                                                                                                                                              |
-| `maxOnEnterDepth`    | `number`                      | Maximum depth for onEnter auto-transition chains (default: 10)                                                                                                                             |
-| `observers`          | `readonly WorkflowObserver[]` | Optional observers notified post-commit on every state entry                                                                                                                               |
-| `guardRegistry`      | `WorkflowGuardRegistry`       | Optional registry of guard implementations; required when any workflow definition references a `guard`                                                                                     |
-| `definitionStore`    | `WorkflowDefinitionStore`     | Optional store for definition snapshots; when present, `initialize()` syncs registered definitions into it and enforces the version-bump guard. Omit to leave definition versioning inert. |
+| Property             | Type                          | Description                                                                                                                                                                                                                                                                                                                         |
+| -------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                                                                                                                                                                                                                                                                    |
+| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                                                                                                                                                                                                                                                                        |
+| `instanceStore`      | `WorkflowInstanceStore`       | Persistence for workflow instances                                                                                                                                                                                                                                                                                                  |
+| `historyStore`       | `WorkflowHistoryStore`        | Persistence for history records                                                                                                                                                                                                                                                                                                     |
+| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                                                                                                                                                                                                                                                                              |
+| `clock`              | `WorkflowClock`               | Clock for timestamps (injectable for testing)                                                                                                                                                                                                                                                                                       |
+| `maxOnEnterDepth`    | `number`                      | Maximum depth for onEnter auto-transition chains (default: 10)                                                                                                                                                                                                                                                                      |
+| `timeoutRetry`       | `WorkflowTimeoutRetryOptions` | How `processExpiredWorkflows()` retries an instance whose timeout processing fails: `{ initialDelayMs?: 60000, maxDelayMs?: 3600000, maxAttempts?: 10 }`. Delays double from `initialDelayMs` up to `maxDelayMs`; after `maxAttempts` consecutive failures the instance is parked. See [Retries and parking](#retries-and-parking). |
+| `observers`          | `readonly WorkflowObserver[]` | Optional observers notified post-commit on every state entry                                                                                                                                                                                                                                                                        |
+| `guardRegistry`      | `WorkflowGuardRegistry`       | Optional registry of guard implementations; required when any workflow definition references a `guard`                                                                                                                                                                                                                              |
+| `definitionStore`    | `WorkflowDefinitionStore`     | Optional store for definition snapshots; when present, `initialize()` syncs registered definitions into it and enforces the version-bump guard. Omit to leave definition versioning inert.                                                                                                                                          |
 
 ### initialize()
 
@@ -225,22 +226,21 @@ async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<Pro
 
 **Behavior:**
 
-1. Opens a short-lived scan transaction that finds up to `limit` expired
-   instances via `instanceStore.findExpired(limit, now)` (uses
-   `FOR UPDATE SKIP LOCKED` in PostgreSQL). The scan's row locks are released
-   when this transaction ends; `now` comes from the injected clock rather than
-   the database's `now()`.
+1. Opens a short-lived scan transaction that finds up to `limit` instances
+   whose timeout is due (expired, not parked, and any scheduled retry
+   reached), oldest-due first, via `instanceStore.findExpired(limit, now)`
+   (uses `FOR UPDATE SKIP LOCKED` in PostgreSQL). The scan's row locks are
+   released when this transaction ends; `now` comes from the injected clock
+   rather than the database's `now()`.
 2. Processes each expired instance in its **own transaction**:
-   - Re-locks the instance with `lockByUuid` and re-checks `expiresAt` — the
-     scan's locks were released, so another worker may have processed the
-     instance in between. Instances no longer expired are skipped.
+   - Re-locks the instance with `lockByUuid` and re-checks that its timeout is
+     still due — the scan's locks were released, so another worker may have
+     processed the instance in between. Instances no longer due are skipped.
    - Resolves the timeout event name from the freshly locked state. If the
      definition changed and no timeout event exists, clears `expiresAt`.
    - Triggers the event with `triggerMetadata: { source: "timeout" }` and runs
      the destination state's on-enter chain.
-3. A failure in one instance's transaction rolls back only that instance and
-   is collected into `failed`; it does not stop the batch. Short lock duration
-   and per-instance failure isolation are the reason for this two-phase model.
+3. A failure in one instance's transaction rolls back only that instance and does not stop the batch. The failure is then recorded on the instance in a second, small transaction: the next retry is scheduled with exponential backoff, or, after `timeoutRetry.maxAttempts` consecutive failures, the instance is **parked**. Instances whose timeout keeps failing therefore move behind healthy ones instead of filling every batch. See [Retries and parking](#retries-and-parking).
 4. Fires each instance's observers after that instance's transaction commits (not batched at the end of the sweep); a failed instance fires none.
 
 **Returns:**
@@ -250,16 +250,18 @@ interface ProcessExpiredWorkflowsResult {
   processed: number;
   rejected: number;
   businessFailed: Array<{ uuid: string; finalState: string }>;
-  failed: Array<{ uuid: string; error: string }>;
+  failed: Array<{ uuid: string; error: string; attempts?: number; retryAt?: Date | null }>;
+  parked: Array<{ uuid: string; error: string }>;
 }
 ```
 
-| Property         | Type                                          | Description                                                                                                     |
-| ---------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `processed`      | `number`                                      | Instances whose timeout event transitioned — including those that ended on an error path (see `businessFailed`) |
-| `rejected`       | `number`                                      | Instances whose timeout event was short-circuited by a guard returning `false`                                  |
-| `businessFailed` | `Array<{ uuid: string; finalState: string }>` | Subset of `processed` whose event commands or on-enter chain failed and routed to an `errorState`               |
-| `failed`         | `Array<{ uuid: string; error: string }>`      | Infrastructure failures: the instance's transaction rolled back                                                 |
+| Property         | Type                                          | Description                                                                                                                                                  |
+| ---------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `processed`      | `number`                                      | Instances whose timeout event transitioned — including those that ended on an error path (see `businessFailed`)                                              |
+| `rejected`       | `number`                                      | Instances whose timeout event was short-circuited by a guard returning `false`                                                                               |
+| `businessFailed` | `Array<{ uuid: string; finalState: string }>` | Subset of `processed` whose event commands or on-enter chain failed and routed to an `errorState`                                                            |
+| `failed`         | `Array<{ uuid, error, attempts?, retryAt? }>` | Infrastructure failures: the instance's transaction rolled back. `attempts`/`retryAt` are set when the failure was recorded (`retryAt: null` when it parked) |
+| `parked`         | `Array<{ uuid: string; error: string }>`      | Subset of `failed` parked by this sweep after reaching `timeoutRetry.maxAttempts`                                                                            |
 
 **Example:**
 
@@ -273,6 +275,33 @@ if (result.failed.length > 0) {
   console.warn(`Infrastructure failures: ${result.failed.map((f) => f.uuid).join(", ")}`);
 }
 ```
+
+#### Retries and parking
+
+An instance's timeout **fails** when its timeout transaction throws, for example:
+
+- a command throws;
+- a command returns `ok: false` with no `errorState` (`CommandFailureError`);
+- the workflow definition is missing;
+- a database error occurs.
+
+A timeout whose command fails and routes to an `errorState` is a successful transition, not a failure.
+
+After each failure, `instance.timeoutRetry` records the consecutive attempt count, the last error, and either the next `retryAt` or `parkedAt`. With the defaults, the waits between attempts are 1, 2, 4, 8, 16, 32, 60, 60 and 60 minutes, and the 10th consecutive failure parks the instance, about 4 hours after the first failure. A parked instance keeps its state and deadline, and the sweep no longer picks it up.
+
+Any successful transition clears `timeoutRetry`, including a manual `triggerEvent()`. So does `rearmTimeout()`.
+
+```ts
+// Operators: list parked instances, fix the cause, then re-arm them.
+const parked = await runtime.findParkedTimeouts({ workflowName: "order", limit: 50 });
+for (const instance of parked) {
+  console.warn(instance.uuid, instance.timeoutRetry?.attempts, instance.timeoutRetry?.lastError);
+}
+await runtime.rearmTimeout(parked[0].uuid); // the next sweep retries it
+```
+
+- `findParkedTimeouts(input?: { limit?: number; workflowName?: string })` returns parked instances oldest-parked first (`limit` defaults to 100).
+- `rearmTimeout(uuid)` clears the retry state and returns the instance. It throws `WorkflowInstanceNotFoundError` for an unknown UUID, and leaves an instance without retry state unchanged.
 
 ### getAvailableEvents()
 

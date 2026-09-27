@@ -421,9 +421,11 @@ import { WorkflowTimeoutService } from "@duraflows/nestjs";
 
 **Methods:**
 
-| Method                            | Parameters          | Returns                                  | Description                                                                          |
-| --------------------------------- | ------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------ |
-| `processExpiredWorkflows(limit?)` | `number` (optional) | `Promise<ProcessExpiredWorkflowsResult>` | Process expired instances. Returns `{ processed, rejected, businessFailed, failed }` |
+| Method                            | Parameters                                  | Returns                                  | Description                                                           |
+| --------------------------------- | ------------------------------------------- | ---------------------------------------- | --------------------------------------------------------------------- |
+| `processExpiredWorkflows(limit?)` | `number` (optional)                         | `Promise<ProcessExpiredWorkflowsResult>` | Returns `{ processed, rejected, businessFailed, failed, parked }`     |
+| `findParkedTimeouts(input?)`      | `{ limit?: number; workflowName?: string }` | `Promise<WorkflowInstance[]>`            | Instances parked after repeated timeout failures, oldest-parked first |
+| `rearmTimeout(uuid)`              | `string`                                    | `Promise<WorkflowInstance>`              | Clear an instance's timeout retry state so the next sweep retries it  |
 
 **Example with @nestjs/schedule:**
 
@@ -479,7 +481,9 @@ Response: `WorkflowInstance`
   "workflowName": "order",
   "currentState": "new",
   "version": 0,
+  "definitionVersion": 1,
   "expiresAt": null,
+  "timeoutRetry": null,
   "lastTransitionAt": "2026-03-27T00:00:00.000Z",
   "context": {},
   "metadata": { "orderId": "ORD-123" },
@@ -495,6 +499,8 @@ GET /workflows/:uuid
 ```
 
 Response: `WorkflowInstance` (same shape as above). Returns `404` if not found.
+
+Once a timeout attempt has failed, `timeoutRetry` is `{ attempts, lastError, retryAt, parkedAt }` instead of `null`. `timeoutRetry.lastError` carries the raw error message, which may include internal details, so consider that before exposing these endpoints publicly.
 
 ### WorkflowEventController
 

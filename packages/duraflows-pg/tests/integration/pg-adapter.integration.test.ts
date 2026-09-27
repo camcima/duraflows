@@ -66,6 +66,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     version: 0,
     definitionVersion: null,
     expiresAt: null,
+    timeoutRetry: null,
     lastTransitionAt: new Date("2026-01-01T00:00:00Z"),
     context: {},
     metadata: {},
@@ -219,7 +220,10 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       const result = await transactionRunner.runInTransaction(() => runtime.processExpiredWorkflows());
 
       expect(result.failed.map((f) => f.uuid)).toEqual([instance.uuid]);
-      expect((await runtime.getInstance(instance.uuid))!.currentState).toBe("start");
+      expect(result.failed[0]!.attempts).toBe(1);
+      const after = (await runtime.getInstance(instance.uuid))!;
+      expect(after.currentState).toBe("start");
+      expect(after.timeoutRetry).not.toBeNull();
       expect(await runtime.getHistory(instance.uuid)).toHaveLength(historyBefore.length);
     });
 
@@ -254,6 +258,117 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
           });
         }),
       ).rejects.toThrow(/current transaction is aborted/);
+    });
+  });
+
+  describe("pg timeout retry scheduling", () => {
+    const start = new Date("2026-01-01T00:00:00Z").getTime();
+    let now = start;
+
+    function buildRuntime(): WorkflowRuntime {
+      const definitionRegistry = new InMemoryDefinitionRegistry({
+        validator: new WorkflowValidator(),
+        compiler: new WorkflowCompiler(),
+      });
+      const commandRegistry = new InMemoryCommandRegistry();
+      definitionRegistry.register({
+        name: "broken",
+        initialState: "start",
+        states: {
+          start: {
+            events: { expire: { targetState: "done", commands: [{ name: "boom" }], timeout: { afterMinutes: 1 } } },
+          },
+          done: {},
+        },
+      });
+      definitionRegistry.register({
+        name: "healthy",
+        initialState: "start",
+        states: { start: { events: { expire: { targetState: "done", timeout: { afterMinutes: 1 } } } }, done: {} },
+      });
+      definitionRegistry.register({
+        name: "nul-error",
+        initialState: "start",
+        states: {
+          start: {
+            events: {
+              expire: { targetState: "done", commands: [{ name: "nulBoom" }], timeout: { afterMinutes: 1 } },
+            },
+          },
+          done: {},
+        },
+      });
+      commandRegistry.register("boom", {
+        execute: async () => {
+          throw new Error("js boom");
+        },
+      });
+      commandRegistry.register("nulBoom", {
+        execute: async () => {
+          throw new Error("bad\u0000byte");
+        },
+      });
+      return new WorkflowRuntime({
+        definitionRegistry,
+        commandRegistry,
+        ...pgWorkflowProviders(pool),
+        clock: { now: () => new Date(now) },
+        timeoutRetry: { initialDelayMs: 60_000, maxDelayMs: 240_000, maxAttempts: 2 },
+      });
+    }
+
+    afterEach(async () => {
+      now = start;
+      await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
+      await pool.query("TRUNCATE workflow_definitions");
+    });
+
+    it("lets healthy instances progress past failing ones", async () => {
+      const runtime = buildRuntime();
+      for (let i = 0; i < 3; i++) await runtime.createInstance({ workflowName: "broken" });
+      now += 1000;
+      const healthy = [
+        await runtime.createInstance({ workflowName: "healthy" }),
+        await runtime.createInstance({ workflowName: "healthy" }),
+      ];
+      now += 5 * 60_000;
+
+      for (let sweep = 0; sweep < 3; sweep++) await runtime.processExpiredWorkflows({ limit: 2 });
+
+      for (const h of healthy) expect((await runtime.getInstance(h.uuid))!.currentState).toBe("done");
+    });
+
+    it("keeps retry scheduling and parking across a worker restart", async () => {
+      const first = buildRuntime();
+      const instance = await first.createInstance({ workflowName: "broken" });
+      now += 5 * 60_000;
+      await first.processExpiredWorkflows();
+
+      const restarted = buildRuntime();
+      expect((await restarted.processExpiredWorkflows()).failed).toEqual([]);
+
+      now += 60_000 + 1;
+      const parkedSweep = await restarted.processExpiredWorkflows();
+      expect(parkedSweep.parked.map((p) => p.uuid)).toEqual([instance.uuid]);
+
+      const another = buildRuntime();
+      expect((await another.findParkedTimeouts()).map((i) => i.uuid)).toEqual([instance.uuid]);
+      now += 600 * 60_000;
+      expect((await another.processExpiredWorkflows()).failed).toEqual([]);
+    });
+
+    it("records a failure whose error message contains a NUL character", async () => {
+      const runtime = buildRuntime();
+      const instance = await runtime.createInstance({ workflowName: "nul-error" });
+      now += 5 * 60_000;
+
+      const { failed } = await runtime.processExpiredWorkflows();
+
+      expect(failed.map((f) => f.uuid)).toEqual([instance.uuid]);
+      expect(failed[0]!.attempts).toBe(1);
+      const lastError = (await runtime.getInstance(instance.uuid))!.timeoutRetry!.lastError;
+      expect(lastError).toContain("\uFFFD");
+      expect(lastError).not.toContain("\u0000");
     });
   });
 

@@ -16,12 +16,15 @@ export type {
   CommandResult,
   WorkflowExecutionContext,
   WorkflowInstance,
+  WorkflowTimeoutRetry,
+  WorkflowTimeoutRetryOptions,
   WorkflowExecutionResult,
   AvailableWorkflowEvent,
   CreateWorkflowInstanceInput,
   TriggerWorkflowEventInput,
   ProcessExpiredWorkflowsInput,
   ProcessExpiredWorkflowsResult,
+  FindParkedTimeoutsInput,
   GetAvailableEventsInput,
 } from "./types/runtime.js";
 

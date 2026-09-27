@@ -354,8 +354,9 @@ events: {
 
 - At most **one timeout event per state**
 - Requires an external poller calling `processExpiredWorkflows()` (cron, NestJS `@Cron`)
-- Uses `FOR UPDATE SKIP LOCKED` in PostgreSQL for concurrent worker safety
+- Uses `FOR UPDATE SKIP LOCKED` in PostgreSQL so concurrent sweeps don't block each other; each instance is then re-locked with `lockByUuid` and re-checked before it's processed
 - Timeout events fire with `triggerMetadata: { source: "timeout" }`
+- **(v6.0.0)** A failing timeout is retried with exponential backoff and **parked** after `timeoutRetry.maxAttempts` consecutive failures -- see [Timeout Processing](#timeout-processing)
 
 ---
 
@@ -509,7 +510,7 @@ const { up, down } = generateMigrationSql(); // PG 13+ (gen_random_uuid)
 const { up, down } = generateMigrationSql({ uuidStrategy: "uuidv7" }); // PG 18+ (time-ordered)
 ```
 
-Or copy the reference migration from `node_modules/@duraflows/pg/sql/dbmate/001_workflow_core.sql`.
+Or copy **all** the reference migrations from `node_modules/@duraflows/pg/sql/dbmate/` (`001` through `005`) and apply them in order. `005_timeout_retries.sql` adds the `timeout_*` columns and **must be applied before deploying 6.0.0**: the runtime reads and writes them on every operation.
 
 ---
 
@@ -550,7 +551,41 @@ async handleTimeouts() {
 await runtime.processExpiredWorkflows({ limit: 100 });
 ```
 
-Returns `{ processed: number, rejected: number (v1.1.0), failed: Array<{ uuid, error }> }`. v1.1.0: a timeout-driven event whose guard returns `false` is counted as `rejected` (not `processed`); the runtime clears `expiresAt` so the next sweep won't re-pick the instance until something else updates the deadline.
+Returns:
+
+```ts
+interface ProcessExpiredWorkflowsResult {
+  processed: number;
+  rejected: number; // v1.1.0
+  businessFailed: Array<{ uuid: string; finalState: string }>;
+  failed: Array<{ uuid: string; error: string; attempts?: number; retryAt?: Date | null }>; // attempts/retryAt: v6.0.0
+  parked: Array<{ uuid: string; error: string }>; // v6.0.0
+}
+```
+
+v1.1.0: a timeout-driven event whose guard returns `false` is counted as `rejected` (not `processed`); the runtime clears `expiresAt` so the next sweep won't re-pick the instance until something else updates the deadline. `businessFailed` lists processed instances whose commands failed and routed to an `errorState` -- a successful transition, not a timeout failure.
+
+### Retries and parking (v6.0.0)
+
+`failed` lists instances whose timeout transaction threw (a command threw, `CommandFailureError`, a missing definition, a database error) and rolled back. The runtime records each failure on `instance.timeoutRetry` (`{ attempts, lastError, retryAt, parkedAt }`) in a second small transaction: `attempts` and `retryAt` on the `failed` entry report it (`retryAt: null` when this failure parked the instance). Sweeps skip the instance until `retryAt`, so failing instances move behind healthy ones. After `maxAttempts` consecutive failures the instance is **parked**: it keeps its state and deadline, appears in `parked`, and no sweep picks it up again. Any successful transition (including a manual `triggerEvent()`) clears `timeoutRetry`. Failed attempts write no history rows.
+
+Tune the backoff with the `timeoutRetry` runtime option (every value a positive safe integer, `initialDelayMs <= maxDelayMs`, or the constructor throws `InvalidArgumentError`):
+
+```ts
+new WorkflowRuntime({
+  // ...
+  timeoutRetry: { initialDelayMs: 60_000, maxDelayMs: 3_600_000, maxAttempts: 10 }, // the defaults
+});
+```
+
+Operators list parked instances, fix the cause, then re-arm them:
+
+```ts
+const parked = await runtime.findParkedTimeouts({ workflowName: "order", limit: 50 }); // oldest-parked first; limit defaults to 100
+await runtime.rearmTimeout(parked[0].uuid); // clears timeoutRetry; the next sweep retries it
+```
+
+In NestJS, `WorkflowTimeoutService` exposes the same `findParkedTimeouts(input?)` and `rearmTimeout(uuid)`. `rearmTimeout` throws `WorkflowInstanceNotFoundError` for an unknown UUID and returns an instance without retry state unchanged. `timeoutRetry.lastError` holds the raw error message (truncated to 2000 characters), which may include internal details.
 
 ---
 

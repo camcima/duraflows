@@ -223,7 +223,7 @@ describe("WorkflowRuntime transactional atomicity", () => {
     createSpy.mockRestore();
   });
 
-  it("processExpiredWorkflows reports the failure and leaves the instance untouched", async () => {
+  it("processExpiredWorkflows reports the failure, records retry state, and leaves state and context untouched", async () => {
     const instance = await runtime.createInstance({ workflowName: "atomicity-timeout" });
 
     // Force the deadline into the past (the clock is fixed at 12:00).
@@ -236,12 +236,16 @@ describe("WorkflowRuntime transactional atomicity", () => {
     const result = await runtime.processExpiredWorkflows({ limit: 10 });
 
     expect(result.processed).toBe(0);
-    expect(result.failed).toEqual([{ uuid: instance.uuid, error: "command exploded" }]);
+    // The failing attempt's own transaction rolled back, but the *separate*
+    // failure-recording transaction commits the first retry attempt.
+    const retryAt = new Date("2025-06-15T12:01:00.000Z");
+    expect(result.failed).toEqual([{ uuid: instance.uuid, error: "command exploded", attempts: 1, retryAt }]);
 
     const after = await instanceStore.findByUuid(instance.uuid);
     expect(after!.currentState).toBe("waiting");
     expect(after!.context).toEqual({ step: "initial" });
-    expect(after!.version).toBe(before!.version);
+    expect(after!.version).toBe(before!.version + 1);
+    expect(after!.timeoutRetry).toEqual({ attempts: 1, lastError: "command exploded", retryAt, parkedAt: null });
     expect(await historyStore.findByInstanceUuid(instance.uuid)).toHaveLength(0);
   });
 
@@ -267,6 +271,7 @@ describe("WorkflowRuntime transactional atomicity", () => {
           version: 1,
           definitionVersion: null,
           expiresAt: null,
+          timeoutRetry: null,
           lastTransitionAt: fixedDate,
           context: {},
           metadata: {},
