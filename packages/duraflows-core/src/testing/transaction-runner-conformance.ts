@@ -8,8 +8,9 @@ export interface TransactionRunnerConformanceHarness {
    * Build a fresh runner + instance store pair for a single test. The runner
    * must implement `afterCommit`. `failWithDatabaseError`, when provided, must
    * run a statement that fails with a database error on the active
-   * transaction's connection (e.g. `SELECT 1/0`); omit it for runners with no
-   * database. `teardown` is always called in a `finally` block.
+   * transaction's connection (e.g. `SELECT 1/0`); a runner with no database can
+   * simulate one by throwing. When omitted, the database-error case is skipped.
+   * `teardown` is always called in a `finally` block.
    */
   setup(): Promise<{
     runner: WorkflowTransactionRunner;
@@ -90,7 +91,7 @@ export function runTransactionRunnerConformance(label: string, harness: Transact
       const { runner, store, teardown } = await harness.setup();
       try {
         const afterCommit = requireAfterCommit(runner);
-        const callback = vi.fn(async () => {});
+        const callback = vi.fn();
         const instance = makeInstance();
 
         await expect(
@@ -113,6 +114,7 @@ export function runTransactionRunnerConformance(label: string, harness: Transact
       try {
         const afterCommit = requireAfterCommit(runner);
         const fired: string[] = [];
+        const innerCallback = vi.fn();
         const kept = makeInstance();
         const discarded = makeInstance();
 
@@ -124,9 +126,7 @@ export function runTransactionRunnerConformance(label: string, harness: Transact
           await expect(
             runner.runInTransaction(async () => {
               await store.create(discarded);
-              afterCommit(async () => {
-                fired.push("inner");
-              });
+              afterCommit(innerCallback);
               throw new Error("inner boom");
             }),
           ).rejects.toThrow("inner boom");
@@ -135,6 +135,7 @@ export function runTransactionRunnerConformance(label: string, harness: Transact
         expect(await store.findByUuid(kept.uuid)).not.toBeNull();
         expect(await store.findByUuid(discarded.uuid)).toBeNull();
         expect(fired).toEqual(["outer"]);
+        expect(innerCallback).not.toHaveBeenCalled();
       } finally {
         await teardown();
       }
@@ -194,7 +195,7 @@ export function runTransactionRunnerConformance(label: string, harness: Transact
       try {
         const afterCommit = requireAfterCommit(runner);
 
-        expect(() => afterCommit(async () => {})).toThrow(WorkflowError);
+        expect(() => afterCommit(vi.fn())).toThrow(WorkflowError);
       } finally {
         await teardown();
       }

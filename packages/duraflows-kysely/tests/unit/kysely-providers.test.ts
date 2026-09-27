@@ -194,4 +194,23 @@ describe("kyselyWorkflowProvidersFromTransaction()", () => {
       "RELEASE SAVEPOINT duraflows_sp_1",
     ]);
   });
+
+  it("transactionRunner nests a call made inside another in a second savepoint on the bound trx", async () => {
+    const trx = createMockTransaction();
+    const providers = kyselyWorkflowProvidersFromTransaction(trx);
+
+    await providers.transactionRunner.runInTransaction(() =>
+      providers.transactionRunner.runInTransaction(async () => {}),
+    );
+
+    const sqls = (trx.executeQuery as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call) => (call[0] as { sql: string }).sql,
+    );
+    expect(sqls).toEqual([
+      "SAVEPOINT duraflows_sp_1",
+      "SAVEPOINT duraflows_sp_2",
+      "RELEASE SAVEPOINT duraflows_sp_2",
+      "RELEASE SAVEPOINT duraflows_sp_1",
+    ]);
+  });
 });
