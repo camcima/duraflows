@@ -117,6 +117,8 @@ The key contract: when `runInTransaction` is active, `lockByUuid()` and `findExp
 
 **Don't run duraflows calls concurrently on one transaction.** `Promise.all` of two workflow calls sharing one transaction is not supported: their savepoints interleave on the one connection, and row locks don't separate callers that share a transaction anyway. Run them one after another, or in separate transactions.
 
+**Don't start duraflows calls from detached async work inside a transaction.** The active transaction travels with Node's `AsyncLocalStorage`, which also carries it into timers and promises started inside the transaction, even ones that outlive it. A duraflows call made later from such detached work still sees the finished transaction as active and tries to join it, on a connection that has already been released. Start such work after the transaction resolves, or run it in its own transaction.
+
 **Each nested call is a subtransaction.** Every savepoint is a PostgreSQL subtransaction. A nested `processExpiredWorkflows()` with the default `limit: 100` opens about 100 of them in one transaction, and past the 64 subtransactions PostgreSQL caches per backend this can degrade performance on busy primaries and their replicas. Prefer running sweeps in their own transactions, or pass a smaller `limit` when you nest one.
 
 **Conformance.** `runTransactionRunnerConformance` from `@duraflows/core/testing` checks a runner's `afterCommit` delivery and nested-failure isolation, next to `runInstanceStoreConformance` and `runDefinitionStoreConformance`.
