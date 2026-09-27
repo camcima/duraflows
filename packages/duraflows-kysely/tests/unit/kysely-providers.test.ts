@@ -13,7 +13,7 @@ function createMockDb(): Kysely<WorkflowDatabase> {
 }
 
 function createMockTransaction(): Transaction<WorkflowDatabase> {
-  return {} as unknown as Transaction<WorkflowDatabase>;
+  return { executeQuery: vi.fn().mockResolvedValue({ rows: [] }) } as unknown as Transaction<WorkflowDatabase>;
 }
 
 /** A `set_config(...)` call captured off the fake expression builder. */
@@ -154,5 +154,63 @@ describe("kyselyWorkflowProvidersFromTransaction()", () => {
     // The pre-bound trx must remain the active context — the ambient
     // outer transaction from another provider can never supersede it.
     expect(observed).toBe(innerTrx);
+  });
+
+  it("transactionRunner runs every call in a savepoint on the bound trx and delivers afterCommit on resolve", async () => {
+    const trx = createMockTransaction();
+    const providers = kyselyWorkflowProvidersFromTransaction(trx);
+    const order: string[] = [];
+
+    await providers.transactionRunner.runInTransaction(async () => {
+      providers.transactionRunner.afterCommit!(async () => {
+        order.push("callback");
+      });
+      order.push("body");
+    });
+
+    const sqls = (trx.executeQuery as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call) => (call[0] as { sql: string }).sql,
+    );
+    expect(sqls).toEqual(["SAVEPOINT duraflows_sp_1", "RELEASE SAVEPOINT duraflows_sp_1"]);
+    expect(order).toEqual(["body", "callback"]);
+  });
+
+  it("transactionRunner rolls a failed call back to its savepoint on the bound trx", async () => {
+    const trx = createMockTransaction();
+    const providers = kyselyWorkflowProvidersFromTransaction(trx);
+
+    await expect(
+      providers.transactionRunner.runInTransaction(async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+
+    const sqls = (trx.executeQuery as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call) => (call[0] as { sql: string }).sql,
+    );
+    expect(sqls).toEqual([
+      "SAVEPOINT duraflows_sp_1",
+      "ROLLBACK TO SAVEPOINT duraflows_sp_1",
+      "RELEASE SAVEPOINT duraflows_sp_1",
+    ]);
+  });
+
+  it("transactionRunner nests a call made inside another in a second savepoint on the bound trx", async () => {
+    const trx = createMockTransaction();
+    const providers = kyselyWorkflowProvidersFromTransaction(trx);
+
+    await providers.transactionRunner.runInTransaction(() =>
+      providers.transactionRunner.runInTransaction(async () => {}),
+    );
+
+    const sqls = (trx.executeQuery as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call) => (call[0] as { sql: string }).sql,
+    );
+    expect(sqls).toEqual([
+      "SAVEPOINT duraflows_sp_1",
+      "SAVEPOINT duraflows_sp_2",
+      "RELEASE SAVEPOINT duraflows_sp_2",
+      "RELEASE SAVEPOINT duraflows_sp_1",
+    ]);
   });
 });

@@ -37,6 +37,10 @@ export type {
   WorkflowDefinitionStore,
 } from "./types/persistence.js";
 
+// Transaction scopes (for persistence adapters)
+export { ScopedTransactionContext, runAfterCommitCallbacks } from "./transaction/scoped-transaction-context.js";
+export type { AfterCommitCallback, TransactionScope } from "./transaction/scoped-transaction-context.js";
+
 // Errors
 export {
   WorkflowError,

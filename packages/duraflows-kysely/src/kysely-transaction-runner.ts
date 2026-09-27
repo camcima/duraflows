@@ -1,8 +1,12 @@
 import type { Kysely, Transaction } from "kysely";
-import type { WorkflowTransactionRunner } from "@duraflows/core";
+import type { AfterCommitCallback, WorkflowTransactionRunner } from "@duraflows/core";
 import { WorkflowError } from "@duraflows/core";
 import type { WorkflowDatabase } from "./kysely-database.js";
-import { KyselyTransactionContext } from "./kysely-transaction-context.js";
+import {
+  executeRawStatement,
+  kyselyTransactionScopes,
+  runOwnedKyselyTransaction,
+} from "./kysely-transaction-context.js";
 
 /**
  * Transaction-scoped PostgreSQL timeouts.
@@ -72,15 +76,23 @@ export class KyselyTransactionRunner implements WorkflowTransactionRunner {
   }
 
   async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
-    const existing = KyselyTransactionContext.getTransaction(this.db);
-    if (existing) {
-      return callback();
+    const scope = kyselyTransactionScopes.current(this.db);
+    if (scope) {
+      // Nested: a savepoint on the outer transaction, so a failure rolls back
+      // only this call. The outer transaction's timeouts stay in force.
+      return kyselyTransactionScopes.runInSavepoint(this.db, scope, callback, (sql) =>
+        executeRawStatement(scope.connection, sql),
+      );
     }
+    return runOwnedKyselyTransaction(
+      this.db,
+      (trx) => this.applyTimeouts(trx),
+      () => callback(),
+    );
+  }
 
-    return this.db.transaction().execute(async (trx) => {
-      await this.applyTimeouts(trx);
-      return KyselyTransactionContext.run(this.db, trx, callback);
-    });
+  afterCommit(callback: AfterCommitCallback): void {
+    kyselyTransactionScopes.afterCommit(this.db, callback);
   }
 
   /**

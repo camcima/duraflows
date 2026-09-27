@@ -100,16 +100,26 @@ Wraps operations in a database transaction.
 ```ts
 interface WorkflowTransactionRunner {
   runInTransaction<T>(callback: () => Promise<T>): Promise<T>;
+  afterCommit?(callback: () => Promise<void>): void;
 }
 ```
 
-| Method                       | Description                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runInTransaction(callback)` | Execute the callback within a transaction. Commit on success, rollback on error. The transaction-scoped connection must be propagated (e.g. via `AsyncLocalStorage`) so that store methods called within the callback automatically use the same connection. If already within an active transaction on the current async context, adapters should reuse the existing connection rather than opening a nested transaction. |
+| Method                       | Description                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runInTransaction(callback)` | Execute the callback within a transaction. Commit on success, rollback on error. The transaction-scoped connection must be propagated (e.g. via `AsyncLocalStorage`) so that store methods called within the callback automatically use the same connection. If a transaction is already active on the current async context, adapters should run the callback in a **savepoint** on that connection (see below). |
+| `afterCommit(callback)`      | Optional. Queue `callback` to run after the transaction active on the current async context commits; discard it if that scope, or a savepoint enclosing it, rolls back. The runtime uses it to fire observers strictly post-commit. Without it, the runtime fires observers when its own `runInTransaction` call returns.                                                                                         |
 
 The key contract: when `runInTransaction` is active, `lockByUuid()` and `findExpired()` must use the **same database connection** as the transaction — this is what makes row locks (`FOR UPDATE`) work correctly. Both methods **must throw** if called outside an active transaction. This is typically achieved via `AsyncLocalStorage` or a similar mechanism.
 
-**Nesting is flat, not nested.** Because a nested `runInTransaction` reuses the outer connection instead of opening a savepoint, there is no inner scope to roll back independently: a failure anywhere inside the callback aborts the **whole** transaction. Catching that error does not recover it — PostgreSQL puts the connection in a failed state and rejects every subsequent statement with `current transaction is aborted` until the outermost transaction rolls back. Do not write code that catches an error from an inner `runInTransaction` and carries on issuing queries; let the error propagate to the outermost caller.
+**Nested calls run in savepoints.** The bundled adapters run a `runInTransaction` that is nested in an active transaction inside `SAVEPOINT duraflows_sp_<n>`. On success they `RELEASE` it; on failure they `ROLLBACK TO` it and rethrow. So a failed nested workflow call leaves none of its writes behind, even when the caller catches the error and goes on to commit, and the outer transaction stays usable, even after a SQL error. (Without a savepoint this is not true: a JavaScript exception does not abort a PostgreSQL transaction, so a caught failure's partial writes would commit with the outer transaction.) A custom adapter that reuses the connection without a savepoint still works, but it gives nested calls no failure isolation.
+
+**`afterCommit` and savepoints work together.** Callbacks queued inside a savepoint move to the enclosing scope when it is released and are dropped when it is rolled back. When duraflows or an owner helper (`PgTransactionContext.transaction`, `KyselyTransactionContext.transaction`) owns the root, it runs them in order after `COMMIT`, outside the finished transaction and after its connection is released. When you seed a transaction you commit yourself (`PgTransactionContext.run`, `KyselyTransactionContext.run`, `kyselyWorkflowProvidersFromTransaction`), they run in order once the seeded callback resolves, still inside your open transaction, so a duraflows call made from one of them joins it as a savepoint. A throwing callback is logged and does not affect the others.
+
+**Don't run duraflows calls concurrently on one transaction.** `Promise.all` of two workflow calls sharing one transaction is not supported: their savepoints interleave on the one connection, and row locks don't separate callers that share a transaction anyway. Run them one after another, or in separate transactions.
+
+**Each nested call is a subtransaction.** Every savepoint is a PostgreSQL subtransaction. A nested `processExpiredWorkflows()` with the default `limit: 100` opens about 100 of them in one transaction, and past the 64 subtransactions PostgreSQL caches per backend this can degrade performance on busy primaries and their replicas. Prefer running sweeps in their own transactions, or pass a smaller `limit` when you nest one.
+
+**Conformance.** `runTransactionRunnerConformance` from `@duraflows/core/testing` checks a runner's `afterCommit` delivery and nested-failure isolation, next to `runInstanceStoreConformance` and `runDefinitionStoreConformance`.
 
 ### WorkflowDefinitionStore
 
@@ -208,6 +218,8 @@ const persistence = pgWorkflowProviders(pool, { lockTimeoutMs: 3000 });
 
 Both adapters accept two optional, transaction-scoped PostgreSQL timeouts. They are applied with `SET LOCAL` (the Kysely adapter uses the equivalent `set_config(..., is_local => true)`) immediately after the transaction opens, so they are reverted on `COMMIT`/`ROLLBACK` and never leak to other users of the shared pool.
 
+They apply only to transactions the runner opens itself. Inside `PgTransactionContext.transaction()` / `KyselyTransactionContext.transaction()`, a seeded `run()` or `kyselyWorkflowProvidersFromTransaction()`, you own the transaction's settings, and nested duraflows calls run under them.
+
 | Option               | PostgreSQL setting  | What it bounds                                                  | Default |
 | -------------------- | ------------------- | --------------------------------------------------------------- | ------- |
 | `lockTimeoutMs`      | `lock_timeout`      | How long a statement **waits for a row lock** before it aborts. | unset   |
@@ -252,10 +264,11 @@ import {
 class PgTransactionRunner implements WorkflowTransactionRunner {
   constructor(pool: Pool, options?: { lockTimeoutMs?: number; statementTimeoutMs?: number });
   async runInTransaction<T>(callback: () => Promise<T>): Promise<T>;
+  afterCommit(callback: () => Promise<void>): void;
 }
 ```
 
-Acquires a `PoolClient`, runs `BEGIN`, emits any configured [`SET LOCAL` timeouts](#transaction-timeouts), stores the client in `PgTransactionContext` (via `AsyncLocalStorage`), executes the callback, then `COMMIT` or `ROLLBACK`. If already within an active transaction (detected via `PgTransactionContext`), the existing client is reused and the callback runs without opening a nested transaction — the outer transaction's timeouts stay in force and are not re-applied.
+Acquires a `PoolClient`, runs `BEGIN`, emits any configured [`SET LOCAL` timeouts](#transaction-timeouts), stores the client in `PgTransactionContext` (via `AsyncLocalStorage`), executes the callback, then `COMMIT` or `ROLLBACK`, and runs the `afterCommit` callbacks after `COMMIT`. If already within an active transaction (detected via `PgTransactionContext`), the callback runs in `SAVEPOINT duraflows_sp_<n>` on the existing client, which is released on success or rolled back to on failure. The outer transaction's timeouts stay in force, and nothing is re-applied.
 
 **PgWorkflowInstanceStore**
 
@@ -300,10 +313,11 @@ An `AsyncLocalStorage`-based mechanism for propagating the transaction-scoped `P
 const PgTransactionContext = {
   getClient(pool: Pool): PoolClient | undefined;
   run<T>(pool: Pool, client: PoolClient, callback: () => T): T;
+  transaction<T>(pool: Pool, callback: (client: PoolClient) => Promise<T>): Promise<T>;
 };
 ```
 
-This is an implementation detail -- you typically don't interact with it directly.
+`transaction()` is the recommended way to share a transaction with duraflows: it owns `BEGIN`/`COMMIT`, observers fire after `COMMIT`, and inside an already-active transaction it joins it as a savepoint. `run()` seeds a transaction you manage yourself: observers fire when the callback resolves, before your `COMMIT`, and duraflows calls they make join your transaction. `getClient()` is for store implementations.
 
 ## Writing a Custom Adapter
 

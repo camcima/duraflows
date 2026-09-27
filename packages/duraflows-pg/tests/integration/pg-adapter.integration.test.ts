@@ -1,14 +1,27 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
-import { runInstanceStoreConformance, runDefinitionStoreConformance } from "@duraflows/core/testing";
+import {
+  runInstanceStoreConformance,
+  runDefinitionStoreConformance,
+  runTransactionRunnerConformance,
+} from "@duraflows/core/testing";
 import type { WorkflowInstance, WorkflowHistoryRecord } from "@duraflows/core";
+import {
+  WorkflowRuntime,
+  InMemoryDefinitionRegistry,
+  InMemoryCommandRegistry,
+  WorkflowValidator,
+  WorkflowCompiler,
+  WorkflowError,
+} from "@duraflows/core";
 import {
   PgWorkflowInstanceStore,
   PgWorkflowHistoryStore,
   PgTransactionRunner,
   PgTransactionContext,
   generateMigrationSql,
+  pgWorkflowProviders,
 } from "@duraflows/pg";
 import { PgWorkflowDefinitionStore } from "../../src/pg-definition-store.js";
 
@@ -104,6 +117,260 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
         await pool.query("TRUNCATE workflow_definitions");
       },
     }),
+  });
+
+  runTransactionRunnerConformance("pg (real PostgreSQL)", {
+    setup: async () => ({
+      runner: transactionRunner,
+      store: instanceStore,
+      failWithDatabaseError: async () => {
+        await PgTransactionContext.getClient(pool)!.query("SELECT 1/0");
+      },
+      teardown: async () => {
+        await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
+      },
+    }),
+  });
+
+  describe("pg runtime inside an outer transaction", () => {
+    let now = new Date("2026-01-01T00:00:00Z").getTime();
+    const observed: string[] = [];
+
+    function buildRuntime(): WorkflowRuntime {
+      const definitionRegistry = new InMemoryDefinitionRegistry({
+        validator: new WorkflowValidator(),
+        compiler: new WorkflowCompiler(),
+      });
+      const commandRegistry = new InMemoryCommandRegistry();
+      definitionRegistry.register({
+        name: "flow",
+        initialState: "start",
+        states: {
+          start: {
+            events: { go: { targetState: "done" }, expire: { targetState: "mid", timeout: { afterMinutes: 1 } } },
+          },
+          mid: { onEnter: { commands: [{ name: "boom" }] } },
+          done: {},
+        },
+      });
+      commandRegistry.register("boom", {
+        execute: async () => {
+          throw new Error("js boom");
+        },
+      });
+      return new WorkflowRuntime({
+        definitionRegistry,
+        commandRegistry,
+        ...pgWorkflowProviders(pool),
+        clock: { now: () => new Date(now) },
+        observers: [{ name: "recorder", onEnter: (event) => void observed.push(event.toState) }],
+      });
+    }
+
+    afterEach(async () => {
+      observed.length = 0;
+      await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
+      await pool.query("TRUNCATE workflow_definitions");
+    });
+
+    it("fires no observer when the outer transaction rolls back", async () => {
+      const runtime = buildRuntime();
+      const instance = await runtime.createInstance({ workflowName: "flow" });
+      observed.length = 0;
+
+      await expect(
+        PgTransactionContext.transaction(pool, async () => {
+          await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "go" });
+          throw new Error("outer rollback");
+        }),
+      ).rejects.toThrow("outer rollback");
+
+      expect(observed).toEqual([]);
+      expect((await runtime.getInstance(instance.uuid))!.currentState).toBe("start");
+    });
+
+    it("fires the observer once, after COMMIT, through PgTransactionContext.transaction", async () => {
+      const runtime = buildRuntime();
+      const instance = await runtime.createInstance({ workflowName: "flow" });
+      observed.length = 0;
+
+      await PgTransactionContext.transaction(pool, async () => {
+        await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "go" });
+        expect(observed).toEqual([]);
+      });
+
+      expect(observed).toEqual(["done"]);
+    });
+
+    it("a nested sweep commits nothing for an instance whose onEnter throws", async () => {
+      const runtime = buildRuntime();
+      const instance = await runtime.createInstance({ workflowName: "flow" });
+      const historyBefore = await runtime.getHistory(instance.uuid);
+      now += 5 * 60_000;
+
+      const result = await transactionRunner.runInTransaction(() => runtime.processExpiredWorkflows());
+
+      expect(result.failed.map((f) => f.uuid)).toEqual([instance.uuid]);
+      expect((await runtime.getInstance(instance.uuid))!.currentState).toBe("start");
+      expect(await runtime.getHistory(instance.uuid)).toHaveLength(historyBefore.length);
+    });
+
+    it("a nested call that swallows a SQL error rejects instead of reporting success", async () => {
+      await expect(
+        transactionRunner.runInTransaction(async () => {
+          await transactionRunner.runInTransaction(async () => {
+            try {
+              await PgTransactionContext.getClient(pool)!.query("SELECT 1/0");
+            } catch {
+              // swallowed on purpose: the transaction is now aborted
+            }
+          });
+        }),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("pg transaction sharing", () => {
+    // A dedicated pool whose every connection has `lock_timeout` set, so a
+    // regression that makes a call wait on a row lock held by its own caller's
+    // transaction fails within seconds instead of hanging the suite. It shares
+    // the throwaway duraflows_pg_it schema with the rest of the file.
+    const sharingPool = new Pool({
+      connectionString: databaseUrl,
+      options: "-c search_path=duraflows_pg_it -c lock_timeout=2000",
+    });
+    const events: string[] = [];
+    const observerErrors: string[] = [];
+
+    /**
+     * `a --next--> b --next--> c`. With `relay`, an observer entering `b`
+     * triggers `next` on the same instance, so reaching `c` needs a duraflows
+     * call made from inside an observer.
+     */
+    function buildRuntime({ relay }: { relay: boolean }): WorkflowRuntime {
+      const definitionRegistry = new InMemoryDefinitionRegistry({
+        validator: new WorkflowValidator(),
+        compiler: new WorkflowCompiler(),
+      });
+      definitionRegistry.register({
+        name: "relay",
+        initialState: "a",
+        states: { a: { events: { next: { targetState: "b" } } }, b: { events: { next: { targetState: "c" } } }, c: {} },
+      });
+      const runtime = new WorkflowRuntime({
+        definitionRegistry,
+        commandRegistry: new InMemoryCommandRegistry(),
+        clock: { now: () => new Date() },
+        ...pgWorkflowProviders(sharingPool, { lockTimeoutMs: 2000 }),
+        onObserverError: (error) => void observerErrors.push(error instanceof Error ? error.message : String(error)),
+      });
+      runtime.addObserver({
+        name: "relayer",
+        onEnter: async (event) => {
+          events.push(event.toState);
+          if (relay && event.toState === "b") {
+            await runtime.triggerEvent({ workflowInstanceUuid: event.instanceUuid, eventName: "next" });
+          }
+        },
+      });
+      return runtime;
+    }
+
+    async function stateOf(runtime: WorkflowRuntime, uuid: string): Promise<string> {
+      return (await runtime.getInstance(uuid))!.currentState;
+    }
+
+    afterEach(async () => {
+      events.length = 0;
+      observerErrors.length = 0;
+      await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
+    });
+
+    afterAll(async () => {
+      await sharingPool.end();
+    });
+
+    it("an observer of a bare-seeded call joins the caller's still-open transaction", { timeout: 15_000 }, async () => {
+      const runtime = buildRuntime({ relay: true });
+      const instance = await runtime.createInstance({ workflowName: "relay" });
+      events.length = 0;
+
+      const client = await sharingPool.connect();
+      try {
+        await client.query("BEGIN");
+        await PgTransactionContext.run(sharingPool, client, () =>
+          runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "next" }),
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+
+      expect(observerErrors).toEqual([]);
+      expect(events).toEqual(["b", "c"]);
+      expect(await stateOf(runtime, instance.uuid)).toBe("c");
+    });
+
+    it("a helper transaction inside another joins it on the same instance", { timeout: 15_000 }, async () => {
+      const runtime = buildRuntime({ relay: false });
+      const instance = await runtime.createInstance({ workflowName: "relay" });
+      events.length = 0;
+
+      await PgTransactionContext.transaction(sharingPool, async (outer) => {
+        await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "next" });
+        await PgTransactionContext.transaction(sharingPool, async (inner) => {
+          expect(inner).toBe(outer);
+          await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "next" });
+        });
+        expect(events).toEqual([]);
+      });
+
+      expect(events).toEqual(["b", "c"]);
+      expect(await stateOf(runtime, instance.uuid)).toBe("c");
+    });
+
+    it("an outer helper failure rolls back the inner helper's writes", { timeout: 15_000 }, async () => {
+      const runtime = buildRuntime({ relay: false });
+      const instance = await runtime.createInstance({ workflowName: "relay" });
+      events.length = 0;
+
+      await expect(
+        PgTransactionContext.transaction(sharingPool, async () => {
+          await PgTransactionContext.transaction(sharingPool, async () => {
+            await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "next" });
+          });
+          throw new Error("outer failure");
+        }),
+      ).rejects.toThrow("outer failure");
+
+      expect(events).toEqual([]);
+      expect(await stateOf(runtime, instance.uuid)).toBe("a");
+    });
+
+    it("a swallowed SQL error makes the helper reject instead of firing observers", { timeout: 15_000 }, async () => {
+      const runtime = buildRuntime({ relay: false });
+      const instance = await runtime.createInstance({ workflowName: "relay" });
+      events.length = 0;
+
+      const outcome = PgTransactionContext.transaction(sharingPool, async (client) => {
+        await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "next" });
+        try {
+          await client.query("SELECT 1/0");
+        } catch {
+          // swallowed on purpose: PostgreSQL now answers COMMIT with ROLLBACK
+        }
+      });
+
+      await expect(outcome).rejects.toThrow(WorkflowError);
+      await expect(outcome).rejects.toThrow(
+        "COMMIT was rolled back by PostgreSQL because an earlier statement in the transaction failed",
+      );
+      expect(events).toEqual([]);
+      expect(await stateOf(runtime, instance.uuid)).toBe("a");
+    });
   });
 
   describe("pg adapter integration", () => {
