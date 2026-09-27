@@ -210,6 +210,28 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       });
     });
 
+    it("005's up migration skips columns and indexes that already exist", async () => {
+      // Models an operator who added the columns and pre-built both indexes
+      // CONCURRENTLY before running the migration: re-applying it must be a no-op.
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(extractUpSql("005_timeout_retries.sql"));
+        const indexes = await client.query(
+          `SELECT indexname FROM pg_indexes
+           WHERE schemaname = 'duraflows_pg_it_migrations' AND indexname LIKE 'workflow_instances_timeout_%'
+           ORDER BY indexname`,
+        );
+        expect(indexes.rows.map((r: { indexname: string }) => r.indexname)).toEqual([
+          "workflow_instances_timeout_due_idx",
+          "workflow_instances_timeout_parked_idx",
+        ]);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
+
     it("005's down migration removes the timeout retry columns and indexes", async () => {
       const client = await pool.connect();
       try {

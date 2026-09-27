@@ -118,6 +118,10 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
        WHERE expires_at IS NOT NULL AND expires_at < $2
          AND timeout_parked_at IS NULL
          AND (timeout_retry_at IS NULL OR timeout_retry_at < $2)
+         -- Redundant (every due row already satisfies it); it gives the planner
+         -- a range condition so workflow_instances_timeout_due_idx is range-scanned
+         -- instead of walked in order with every entry filtered against the heap.
+         AND coalesce(timeout_retry_at, expires_at) < $2
        ORDER BY coalesce(timeout_retry_at, expires_at)
        FOR UPDATE SKIP LOCKED
        LIMIT $1`,

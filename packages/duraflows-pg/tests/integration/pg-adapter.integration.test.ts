@@ -220,7 +220,10 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       const result = await transactionRunner.runInTransaction(() => runtime.processExpiredWorkflows());
 
       expect(result.failed.map((f) => f.uuid)).toEqual([instance.uuid]);
-      expect((await runtime.getInstance(instance.uuid))!.currentState).toBe("start");
+      expect(result.failed[0]!.attempts).toBe(1);
+      const after = (await runtime.getInstance(instance.uuid))!;
+      expect(after.currentState).toBe("start");
+      expect(after.timeoutRetry).not.toBeNull();
       expect(await runtime.getHistory(instance.uuid)).toHaveLength(historyBefore.length);
     });
 
@@ -283,9 +286,26 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
         initialState: "start",
         states: { start: { events: { expire: { targetState: "done", timeout: { afterMinutes: 1 } } } }, done: {} },
       });
+      definitionRegistry.register({
+        name: "nul-error",
+        initialState: "start",
+        states: {
+          start: {
+            events: {
+              expire: { targetState: "done", commands: [{ name: "nulBoom" }], timeout: { afterMinutes: 1 } },
+            },
+          },
+          done: {},
+        },
+      });
       commandRegistry.register("boom", {
         execute: async () => {
           throw new Error("js boom");
+        },
+      });
+      commandRegistry.register("nulBoom", {
+        execute: async () => {
+          throw new Error("bad\u0000byte");
         },
       });
       return new WorkflowRuntime({
@@ -335,6 +355,20 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       expect((await another.findParkedTimeouts()).map((i) => i.uuid)).toEqual([instance.uuid]);
       now += 600 * 60_000;
       expect((await another.processExpiredWorkflows()).failed).toEqual([]);
+    });
+
+    it("records a failure whose error message contains a NUL character", async () => {
+      const runtime = buildRuntime();
+      const instance = await runtime.createInstance({ workflowName: "nul-error" });
+      now += 5 * 60_000;
+
+      const { failed } = await runtime.processExpiredWorkflows();
+
+      expect(failed.map((f) => f.uuid)).toEqual([instance.uuid]);
+      expect(failed[0]!.attempts).toBe(1);
+      const lastError = (await runtime.getInstance(instance.uuid))!.timeoutRetry!.lastError;
+      expect(lastError).toContain("\uFFFD");
+      expect(lastError).not.toContain("\u0000");
     });
   });
 

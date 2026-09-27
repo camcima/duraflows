@@ -264,6 +264,7 @@ describe("PgWorkflowInstanceStore", () => {
       const sql = (txClient.query as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(sql).toContain("timeout_parked_at IS NULL");
       expect(sql).toContain("(timeout_retry_at IS NULL OR timeout_retry_at < $2)");
+      expect(sql).toContain("AND coalesce(timeout_retry_at, expires_at) < $2");
       expect(sql).toContain("ORDER BY coalesce(timeout_retry_at, expires_at)");
     });
 
