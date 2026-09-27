@@ -1,5 +1,17 @@
 # Changelog
 
+## [6.1.0](https://github.com/camcima/duraflows/compare/v6.0.0...v6.1.0) (2026-09-27)
+
+### Features
+
+* **nestjs:** accept the timeoutRetry option in WorkflowModule ([f7abaa8](https://github.com/camcima/duraflows/commit/f7abaa8dbb5e586c59f1e09e7e193f20fd494dbb))
+* **nestjs:** re-export the timeout retry types ([84621c1](https://github.com/camcima/duraflows/commit/84621c1a95d4d1c70a03a1acd272db20d28f91d8))
+
+### Notes
+
+* **NestJS:** set `timeoutRetry` in `WorkflowModule.forRoot({ ... })` or return it from the `forRootAsync` factory. An invalid value fails module setup. This closes the follow-up noted in 6.0.0.
+* **Store contract clarification:** `findExpired` returns instances that became due at the same moment in no particular order. This is documented behaviour, not a change.
+
 ## [6.0.0](https://github.com/camcima/duraflows/compare/v5.2.1...v6.0.0) (2026-09-27)
 
 A timeout that keeps failing no longer starves healthy instances. Failed timeout attempts are retried with exponential backoff and parked after too many consecutive failures, with an operator API to list and re-arm parked instances. This closes the last finding of the 5.1.0 architecture review.
