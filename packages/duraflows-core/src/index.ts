@@ -17,6 +17,7 @@ export type {
   WorkflowExecutionContext,
   WorkflowInstance,
   WorkflowTimeoutRetry,
+  WorkflowTimeoutRetryOptions,
   WorkflowExecutionResult,
   AvailableWorkflowEvent,
   CreateWorkflowInstanceInput,

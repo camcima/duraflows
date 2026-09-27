@@ -1193,7 +1193,7 @@ describe("WorkflowRuntime onEnter integration", () => {
 
     const result = await runtime.processExpiredWorkflows();
 
-    expect(result).toEqual({ processed: 0, rejected: 0, businessFailed: [], failed: [] });
+    expect(result).toEqual({ processed: 0, rejected: 0, businessFailed: [], failed: [], parked: [] });
 
     // Nothing was transitioned or recorded.
     const history = await historyStore.findByInstanceUuid(instance.uuid);
@@ -1285,7 +1285,11 @@ describe("WorkflowRuntime onEnter integration", () => {
     const result = await runtime.processExpiredWorkflows();
 
     expect(result.processed).toBe(0);
-    expect(result.failed).toEqual([{ uuid: instance.uuid, error: "boom" }]);
+    // The re-lock in the failing attempt threw, but the *separate* failure-recording
+    // transaction re-locks successfully and records the first retry attempt.
+    expect(result.failed).toEqual([
+      { uuid: instance.uuid, error: "boom", attempts: 1, retryAt: new Date(fixedDate.getTime() + 60_000) },
+    ]);
 
     lockSpy.mockRestore();
   });

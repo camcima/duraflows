@@ -21,6 +21,8 @@ import type {
   WorkflowExecutionContext,
   AvailableWorkflowEvent,
   CommandResult,
+  WorkflowTimeoutRetry,
+  WorkflowTimeoutRetryOptions,
 } from "../types/runtime.js";
 import { WorkflowCompiler } from "../compilation/workflow-compiler.js";
 import { CommandExecutor } from "../execution/command-executor.js";
@@ -29,24 +31,31 @@ import { OnEnterExecutor } from "../execution/on-enter-executor.js";
 import { TimeoutResolver } from "../execution/timeout-resolver.js";
 import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
 import type { WorkflowGuardRegistry } from "../registry/guard-registry.js";
-import { WorkflowInstanceNotFoundError, InvalidArgumentError, WorkflowDefinitionError } from "../errors/index.js";
+import { WorkflowInstanceNotFoundError, WorkflowDefinitionError } from "../errors/index.js";
 import { WorkflowHandle } from "./workflow-handle.js";
 import type { WorkflowObserver, StateEnterEvent, ObserverErrorHandler } from "../types/observer.js";
 import { ObserverRegistry } from "./observer-registry.js";
 import { computeDefinitionHash } from "../util/definition-hash.js";
+import { assertNonNegativeSafeInteger, assertPositiveSafeInteger } from "../util/assert.js";
+import { TimeoutRetryPolicy } from "./timeout-retry-policy.js";
 
 const DEFAULT_MAX_ON_ENTER_DEPTH = 10;
 
-function assertPositiveSafeInteger(value: number, name: string): void {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new InvalidArgumentError(`${name} must be a positive integer, got ${value}`);
-  }
+/** Whether `instance`'s timeout should be processed at `now`: expired, not parked, and any scheduled retry reached. */
+function isTimeoutDue(instance: WorkflowInstance, now: Date): boolean {
+  if (!instance.expiresAt || instance.expiresAt > now) return false;
+  if (instance.timeoutRetry?.parkedAt) return false;
+  const retryAt = instance.timeoutRetry?.retryAt;
+  return !retryAt || retryAt <= now;
 }
 
-function assertNonNegativeSafeInteger(value: number, name: string): void {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new InvalidArgumentError(`${name} must be a non-negative integer, got ${value}`);
-  }
+/** Whether `instance` is still the one a sweep scanned: same state, deadline and failure count. */
+function matchesTimeoutSnapshot(instance: WorkflowInstance, snapshot: WorkflowInstance): boolean {
+  return (
+    instance.currentState === snapshot.currentState &&
+    instance.expiresAt?.getTime() === snapshot.expiresAt?.getTime() &&
+    (instance.timeoutRetry?.attempts ?? 0) === (snapshot.timeoutRetry?.attempts ?? 0)
+  );
 }
 
 /**
@@ -117,6 +126,11 @@ export interface WorkflowRuntimeOptions {
   maxOnEnterDepth?: number;
   observers?: readonly WorkflowObserver[];
   onObserverError?: ObserverErrorHandler;
+  /**
+   * How `processExpiredWorkflows` retries an instance whose timeout processing
+   * fails: exponential backoff, then parking. See {@link WorkflowTimeoutRetryOptions}.
+   */
+  timeoutRetry?: WorkflowTimeoutRetryOptions;
 }
 
 export class WorkflowRuntime {
@@ -133,6 +147,7 @@ export class WorkflowRuntime {
   private readonly timeoutResolver: TimeoutResolver;
   private readonly maxOnEnterDepth: number;
   private readonly observerRegistry: ObserverRegistry;
+  private readonly timeoutRetryPolicy: TimeoutRetryPolicy;
 
   constructor(options: WorkflowRuntimeOptions) {
     this.definitionRegistry = options.definitionRegistry;
@@ -151,6 +166,7 @@ export class WorkflowRuntime {
     }
     this.maxOnEnterDepth = options.maxOnEnterDepth ?? DEFAULT_MAX_ON_ENTER_DEPTH;
     this.observerRegistry = new ObserverRegistry(options.observers ?? [], options.onObserverError);
+    this.timeoutRetryPolicy = new TimeoutRetryPolicy(options.timeoutRetry);
   }
 
   addObserver(observer: WorkflowObserver): void {
@@ -398,7 +414,8 @@ export class WorkflowRuntime {
     let processed = 0;
     let rejected = 0;
     const businessFailed: Array<{ uuid: string; finalState: string }> = [];
-    const failed: Array<{ uuid: string; error: string }> = [];
+    const failed: ProcessExpiredWorkflowsResult["failed"] = [];
+    const parked: ProcessExpiredWorkflowsResult["parked"] = [];
 
     // Step 1: find expired instances (short-lived txn; locks released immediately).
     const expired = await this.transactionRunner.runInTransaction(async () => {
@@ -418,8 +435,9 @@ export class WorkflowRuntime {
             return;
           }
 
-          // Re-verify still expired (another worker may have already processed it).
-          if (!instance.expiresAt || instance.expiresAt > this.clock.now()) {
+          // Still due? Another worker may have processed it, or recorded a
+          // failure that scheduled a later retry or parked it.
+          if (!isTimeoutDue(instance, this.clock.now())) {
             return;
           }
 
@@ -430,6 +448,7 @@ export class WorkflowRuntime {
           if (!eventName) {
             // No timeout event for this state; just clear the stale deadline.
             instance.expiresAt = null;
+            instance.timeoutRetry = null;
             instance.version++;
             instance.updatedAt = this.clock.now();
             instance.definitionVersion = this.definitionVersionOf(definition);
@@ -450,11 +469,46 @@ export class WorkflowRuntime {
         // over and none fire. Its writes are rolled back only if the runner
         // isolates them — a savepoint when nested, or the transaction it owns.
         const message = error instanceof Error ? error.message : String(error);
-        failed.push({ uuid: staleInstance.uuid, error: message });
+        const retry = await this.recordTimeoutFailure(staleInstance, message);
+        if (retry) {
+          failed.push({ uuid: staleInstance.uuid, error: message, attempts: retry.attempts, retryAt: retry.retryAt });
+          if (retry.parkedAt) parked.push({ uuid: staleInstance.uuid, error: message });
+        } else {
+          failed.push({ uuid: staleInstance.uuid, error: message });
+        }
       }
     }
 
-    return { processed, rejected, businessFailed, failed };
+    return { processed, rejected, businessFailed, failed, parked };
+  }
+
+  /**
+   * Records a failed timeout attempt in its own transaction: schedules the next
+   * retry with backoff, or parks the instance after `maxAttempts`. Records
+   * nothing — returning `null` — when the instance no longer matches the
+   * `snapshot` this sweep scanned (another worker or a user moved it, or it is
+   * gone), or when recording itself fails; the next sweep then retries as usual.
+   */
+  private async recordTimeoutFailure(snapshot: WorkflowInstance, error: string): Promise<WorkflowTimeoutRetry | null> {
+    try {
+      return await this.transactionRunner.runInTransaction(async () => {
+        const instance = await this.instanceStore.lockByUuid(snapshot.uuid);
+        const now = this.clock.now();
+        if (!instance || !matchesTimeoutSnapshot(instance, snapshot) || !isTimeoutDue(instance, now)) {
+          return null;
+        }
+        const retry = this.timeoutRetryPolicy.next(instance.timeoutRetry, error, now);
+        instance.timeoutRetry = retry;
+        instance.version++;
+        instance.updatedAt = now;
+        await this.instanceStore.update(instance);
+        return retry;
+      });
+    } catch (recordingError: unknown) {
+      const message = recordingError instanceof Error ? recordingError.message : String(recordingError);
+      console.warn(`[duraflows] could not record the timeout failure of instance "${snapshot.uuid}": ${message}`);
+      return null;
+    }
   }
 
   /**
@@ -530,6 +584,7 @@ export class WorkflowRuntime {
     if (result.outcome === "guard-rejected") {
       const now = this.clock.now();
       instance.expiresAt = null;
+      instance.timeoutRetry = null;
       instance.version++;
       instance.lastTransitionAt = now;
       instance.updatedAt = now;
@@ -624,6 +679,7 @@ export class WorkflowRuntime {
     executionContext.context = { ...instance.context };
 
     instance.expiresAt = this.timeoutResolver.computeDeadline(definition, toState, now);
+    instance.timeoutRetry = null;
   }
 
   /** The version label of a registered definition; omitted means 1. */
