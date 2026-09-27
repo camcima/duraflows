@@ -421,9 +421,11 @@ import { WorkflowTimeoutService } from "@duraflows/nestjs";
 
 **Methods:**
 
-| Method                            | Parameters          | Returns                                  | Description                                                                          |
-| --------------------------------- | ------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------ |
-| `processExpiredWorkflows(limit?)` | `number` (optional) | `Promise<ProcessExpiredWorkflowsResult>` | Process expired instances. Returns `{ processed, rejected, businessFailed, failed }` |
+| Method                            | Parameters                                  | Returns                                  | Description                                                           |
+| --------------------------------- | ------------------------------------------- | ---------------------------------------- | --------------------------------------------------------------------- |
+| `processExpiredWorkflows(limit?)` | `number` (optional)                         | `Promise<ProcessExpiredWorkflowsResult>` | Returns `{ processed, rejected, businessFailed, failed, parked }`     |
+| `findParkedTimeouts(input?)`      | `{ limit?: number; workflowName?: string }` | `Promise<WorkflowInstance[]>`            | Instances parked after repeated timeout failures, oldest-parked first |
+| `rearmTimeout(uuid)`              | `string`                                    | `Promise<WorkflowInstance>`              | Clear an instance's timeout retry state so the next sweep retries it  |
 
 **Example with @nestjs/schedule:**
 
