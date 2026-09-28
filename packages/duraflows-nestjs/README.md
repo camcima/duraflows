@@ -14,7 +14,7 @@ Part of the [duraflows](https://github.com/camcima/duraflows) monorepo.
 - Optional REST controllers for full HTTP API
 - `@WorkflowCommand` decorator with automatic discovery
 - `guards` option for registering declarative event preconditions
-- Re-exports all types from `@duraflows/core` for convenience
+- Re-exports the commonly used `@duraflows/core` types, errors and classes for convenience (import the rest, e.g. `InvalidArgumentError` or `toMermaidDiagram`, from `@duraflows/core`)
 
 ## Installation
 

@@ -9,12 +9,15 @@ Part of the [duraflows](https://github.com/camcima/duraflows) monorepo.
 - Declarative workflow definitions in plain TypeScript objects, optionally generic over a `TState` union for end-to-end state type safety (`WorkflowDefinition<TState>`, `WorkflowInstance<TState>`, `WorkflowExecutionResult<TState>`)
 - Named states with event-triggered transitions
 - Sequential command execution with success/failure branching
-- Timeout-driven transitions with persisted deadlines
+- Timeout-driven transitions with persisted deadlines; a timeout that keeps failing is retried with exponential backoff and then parked until re-armed
 - Mutable context accessible to commands, with state-defined patches merged on entry
 - Immutable metadata for identity labels that never change after creation
 - Full audit history of every transition with command results
 - Persistence-agnostic -- bring your own database adapter
 - **Event guards** — declarative preconditions that block transitions without running commands; rejections surface as `outcome: "guard-rejected"` and are recorded in history.
+- Observers notified after commit on every state entry
+- Definition versioning: a content change without a `version` bump is rejected, and in-flight instances stay pinned to the version they started on (or opt into `versionPolicy: "latest"`)
+- `migrateInstances()` to move instances between stored definition versions in batches, with state mapping, a context transform and a dry run
 - Mermaid diagram generation from workflow definitions
 
 ## Installation
@@ -121,9 +124,11 @@ The core package defines the persistence interfaces. Use one of the official ada
 
 To build a custom adapter, implement these interfaces:
 
-- `WorkflowInstanceStore`
+- `WorkflowInstanceStore` -- including `countInstances()`, required since 7.0.0, and the optional `findInstanceUuids()` (7.1.0), which lets `migrateInstances()` find candidates on its own and since 7.2.0 receives `states`/`excludeStates` as hints a store may honor or ignore
 - `WorkflowHistoryStore`
 - `WorkflowTransactionRunner`
+
+Optionally implement `WorkflowDefinitionStore` too, to enable definition versioning.
 
 ## Documentation
 

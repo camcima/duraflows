@@ -649,7 +649,7 @@ export class CustomService {
 
 ## Re-exports
 
-`@duraflows/nestjs` re-exports the entire `@duraflows/core` public API. You can import everything from a single package:
+`@duraflows/nestjs` re-exports the commonly used part of the `@duraflows/core` API -- the definition, runtime and persistence types, the error classes (except `InvalidArgumentError`), `WorkflowRuntime`, `WorkflowHandle`, the validator, compiler, executor and in-memory registry classes, and the observer and guard types -- so most apps can import from a single package:
 
 ```ts
 // Instead of:
@@ -660,6 +660,8 @@ import { WorkflowService } from "@duraflows/nestjs";
 import type { WorkflowDefinition } from "@duraflows/nestjs";
 import { WorkflowService } from "@duraflows/nestjs";
 ```
+
+It is not the entire core API. Import anything else from `@duraflows/core` directly -- for example `InvalidArgumentError`, `toMermaidDiagram`, `computeDefinitionHash`, `WorkflowDefinitionStore` / `StoredWorkflowDefinition`, `WorkflowRuntimeOptions`, `ObserverRegistry`, or the adapter helpers `ScopedTransactionContext` and `runAfterCommitCallbacks`. The core `WorkflowCommand` interface isn't re-exported either, since `WorkflowCommand` here is the decorator.
 
 This includes the observer types. Both import paths are valid:
 

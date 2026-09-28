@@ -33,7 +33,11 @@ Pick `@duraflows/pg` for the simpler default (raw `pg` pool, minimal deps). Pick
 
 - **Declarative workflow definitions** in plain TypeScript objects, optionally generic over a `TState` union for type-safe `currentState`/`fromState`/`toState`
 - **Command execution** with sequential fail-fast policy and success/failure branching
-- **Timeout processing** with persisted deadlines and batch processing
+- **Timeout processing** with persisted deadlines and batch processing; a timeout that keeps failing is retried with exponential backoff and then parked until an operator re-arms it
+- **Event guards** -- declarative preconditions that reject an event without running commands (`outcome: "guard-rejected"`, recorded in history)
+- **Observers** notified after commit on every state entry, for audit trails and projections
+- **Definition versioning** -- a content change without a `version` bump fails startup, and in-flight instances stay pinned to the version they started on (or opt into `versionPolicy: "latest"`)
+- **Instance migration** -- `migrateInstances()` moves instances between stored definition versions in batches, with state mapping, a context transform and a dry run
 - **Mutable context** accessible to commands, with state-defined patches merged on entry
 - **Immutable metadata** for identity labels that never change after creation
 - **Full audit history** of every transition with command results
@@ -383,7 +387,7 @@ The NestJS module and the core runtime are fully decoupled from `pg`. To use Pri
 
 Optionally implement the fourth, `WorkflowDefinitionStore`, to support definition versioning -- it's an optional field on `WorkflowPersistenceProvider`, so an adapter that omits it still compiles and runs, it just leaves definition versioning inert.
 
-`WorkflowInstanceStore.countInstances()` and (for `WorkflowDefinitionStore` implementers) `listVersions()` are required as of 7.0.0.
+`WorkflowInstanceStore.countInstances()` and (for `WorkflowDefinitionStore` implementers) `listVersions()` are required as of 7.0.0. `WorkflowInstanceStore.findInstanceUuids()` (7.1.0) is optional: it lets `migrateInstances()` find candidates without an explicit `instanceUuids` list, and since 7.2.0 it also receives `states`/`excludeStates` as hints a store may honor or ignore.
 
 See the [Persistence Guide](docs/persistence.md) for details and examples.
 
