@@ -1,5 +1,39 @@
 # Changelog
 
+## [7.2.0](https://github.com/camcima/duraflows/compare/v7.1.0...v7.2.0) (2026-09-28)
+
+`migrateInstances` becomes practical on large, mature tables: state filters, a resumable cursor, warnings, and interruption that carries its partial result. This release also fixes several durability bugs in definition versioning that were found in review. See [Migrating instances](./docs/workflow-definitions.md#migrating-instances).
+
+### Features
+
+* **core:** add state hints to findInstanceUuids ([40098e3](https://github.com/camcima/duraflows/commit/40098e3b1257f604adc3aaa9acdca0fc9527a644))
+* **core:** filter, resume and harden migrateInstances ([545488a](https://github.com/camcima/duraflows/commit/545488a7405058c25ec4ef88a16c0ac170845fe5))
+* **core:** `migrateInstances` accepts `states` / `excludeStates` (applied in the store query), and a `cursor` with `nextCursor` so batch loops never examine an instance twice. It returns `warnings` for target versions that reference commands or guards this process hasn't registered, and throws `MigrationInterruptedError` (re-exported by `@duraflows/nestjs`) with the partial result and a resume cursor when listing candidates fails.
+
+### Bug Fixes
+
+* **core:** write a version's snapshot in the same transaction that stamps an instance ([4e93578](https://github.com/camcima/duraflows/commit/4e935781b19bc36bec491757494c3d0358b34031))
+* **core:** re-check a pinned instance's cached snapshot against the store ([345fe85](https://github.com/camcima/duraflows/commit/345fe856a1c876d9ce115ef38ae7871719f6540e))
+* **core:** count event-less states with an onEnter as terminal ([8f1e84a](https://github.com/camcima/duraflows/commit/8f1e84a9c7ede8e32545c51b3c1d7d720f9b1a58))
+* **core:** never record a timeout failure on a row that changed since the scan ([d1dea44](https://github.com/camcima/duraflows/commit/d1dea4410a5b108486518741ee94e0f67bfda39d))
+* **kysely:** reject a transaction PostgreSQL silently rolled back at COMMIT ([e2658af](https://github.com/camcima/duraflows/commit/e2658afaaea720e3dd9977dadd936b849add5c39))
+* **core:** keep own __proto__ keys in the definition content hash ([87a597f](https://github.com/camcima/duraflows/commit/87a597f46aacbaf3a5a645f38b4caf1f673a952e))
+
+### Notes
+
+* **Instance and snapshot always commit together.** Every write that stamps an instance with a new definition version (`createInstance`, adopting the latest version, a migration) also writes that version's snapshot in the same transaction. That now holds for caller-owned transactions too. The cost is one insert-if-absent per `createInstance` or version change. Before, a lazy `initialize()` inside a transaction that rolled back, or a concurrent request's uncommitted sync, could leave instances pinned to a version missing from the store.
+* **Pinned instances re-check their snapshot.** An instance pinned to an older version re-reads that version's row on each resolution and reuses the cached copy only while its content hash matches.
+* **Behaviour changes for 7.1 callers:**
+  * a `transformContext` returning a `Date`, `Map` or class instance now fails that instance (arrays and non-objects were already rejected);
+  * a misbehaving `findInstanceUuids` page interrupts the call, or is truncated if it returns too many rows;
+  * a store error while listing candidates arrives as `MigrationInterruptedError` with the original error in `cause`;
+  * `MigrateInstancesResult` gains the required fields `nextCursor` and `warnings` (update hand-built results, mocks and exact `toEqual` assertions).
+* **Custom adapters:** `findInstanceUuids` accepts optional `states` / `excludeStates` hints, which may be ignored. Its pages must ascend by UUID string comparison: an adapter whose native UUID order differs (for example SQL Server `uniqueidentifier`) must order by the canonical lowercase text form. A custom runner should reject a COMMIT that PostgreSQL silently turned into a ROLLBACK, as both bundled adapters now do.
+* **Definitions with an own `"__proto__"` key** (possible after `JSON.parse`) now hash differently than in 7.1, so `initialize()` reports that their content changed. Bump their `version` when upgrading. Ordinary definitions hash exactly as before.
+* **Testing peer:** `@duraflows/core` now accepts vitest 5 as its optional peer (`^4.0.0 || ^5.0.0`) for the `@duraflows/core/testing` conformance suites.
+* **Docs, skills and evals** were brought in line with 7.2 (#113).
+* **A state with no events is terminal even if it has an `onEnter`**, so a final state that only sends an entry notification no longer keeps its version active forever.
+
 ## [7.1.0](https://github.com/camcima/duraflows/compare/v7.0.0...v7.1.0) (2026-09-28)
 
 Operators can now move in-flight instances from one definition version to another. This is the escape hatch that 7.0's pinning needed: it retires old versions, reaches in-flight instances with a fix, and rescues instances stuck on a missing or incompatible snapshot. See [Migrating instances](./docs/workflow-definitions.md#migrating-instances).
