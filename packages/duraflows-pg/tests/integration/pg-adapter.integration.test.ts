@@ -645,6 +645,57 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       expect((await runtimeV3.getInstance(instance.uuid))!.currentState).toBe("closed");
     });
 
+    it("refuses a cached migration target that no longer matches the committed version", async () => {
+      const build = (def: WorkflowDefinition) => {
+        const registry = new InMemoryDefinitionRegistry();
+        registry.register(def);
+        return new WorkflowRuntime({
+          definitionRegistry: registry,
+          commandRegistry: new InMemoryCommandRegistry(),
+          ...pgWorkflowProviders(pool),
+          clock: { now: () => new Date() },
+        });
+      };
+      const v2Open: WorkflowDefinition = { ...definition, version: 2 };
+      const v2Replacement: WorkflowDefinition = {
+        name: "sync-rollback",
+        version: 2,
+        initialState: "replacement",
+        states: { replacement: { events: { Close: { targetState: "closed" } } }, closed: {} },
+      };
+      const instance = await build(definition).createInstance({ workflowName: "sync-rollback" });
+      const runtimeV3 = build({ ...definition, version: 3 });
+      await runtimeV3.initialize();
+      const toV2 = { workflowName: "sync-rollback", fromVersion: 1, toVersion: 2 };
+
+      // Cache v2 ("open") from a row that then rolls back; different v2 content is committed afterwards.
+      await pgWorkflowProviders(pool)
+        .transactionRunner.runInTransaction(async () => {
+          await build(v2Open).initialize();
+          await runtimeV3.migrateInstances(toV2);
+          throw new Error("caller rolls back");
+        })
+        .catch(() => undefined);
+      await build(v2Replacement).initialize();
+
+      const stale = await runtimeV3.migrateInstances(toV2);
+
+      expect(stale.migrated).toEqual([]);
+      expect(stale.failed).toEqual([
+        { uuid: instance.uuid, error: expect.stringMatching(/stored version 2 differs from the copy loaded earlier/) },
+      ]);
+      expect((await runtimeV3.getInstance(instance.uuid))!.definitionVersion).toBe(1);
+
+      // The retry reloads the committed v2 and plans against it.
+      const retry = await runtimeV3.migrateInstances({ ...toV2, stateMapping: { open: "replacement" } });
+      expect(retry.migrated).toEqual([{ uuid: instance.uuid, fromState: "open", toState: "replacement" }]);
+      await build({ ...definition, version: 3 }).triggerEvent({
+        workflowInstanceUuid: instance.uuid,
+        eventName: "Close",
+      });
+      expect((await runtimeV3.getInstance(instance.uuid))!.currentState).toBe("closed");
+    });
+
     it("gives an instance created during another request's rolled-back sync its own snapshot", async () => {
       const { runtime, providers } = build();
       let markSynced!: () => void;

@@ -314,13 +314,24 @@ export class WorkflowRuntime {
       await this.writeSnapshot(this.definitionStore, registered);
       return;
     }
-    // Another version (a migration target): re-insert it from the content we hold if it is gone.
-    await this.definitionStore.ensure({
+    // Another version (a migration target): re-insert it from the content we hold if it is gone,
+    // and refuse to stamp if what is stored differs from the copy the caller planned with (e.g. a
+    // cached copy of a row that rolled back before different content was committed).
+    const contentHash = computeDefinitionHash(definition);
+    const stored = await this.definitionStore.ensure({
       workflowName: definition.name,
       version,
-      contentHash: computeDefinitionHash(definition),
+      contentHash,
       definitionJson: definition,
     });
+    if (stored.contentHash !== contentHash) {
+      this.definitionResolver.evict(definition.name, version);
+      throw new WorkflowDefinitionError(
+        definition.name,
+        `stored version ${version} differs from the copy loaded earlier ` +
+          `(stored ${stored.contentHash}, loaded ${contentHash}); retry to use the stored version`,
+      );
+    }
   }
 
   async createInstance(input: CreateWorkflowInstanceInput): Promise<WorkflowInstance> {

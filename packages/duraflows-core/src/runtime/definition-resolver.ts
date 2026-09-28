@@ -101,6 +101,11 @@ export class DefinitionResolver {
     );
   }
 
+  /** Drops a cached snapshot so the next resolution of `workflowName@version` reads the store again. */
+  evict(workflowName: string, version: number): void {
+    this.snapshots.delete(`${workflowName}@${version}`);
+  }
+
   private latest(workflowName: string): ResolvedDefinition {
     const definition = this.definitionRegistry.get(workflowName);
     return { definition, compiled: this.compiler.compile(definition) };

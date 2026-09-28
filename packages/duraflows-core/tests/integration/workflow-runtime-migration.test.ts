@@ -1002,3 +1002,36 @@ describe("migrateInstances: snapshot written with the instance", () => {
     expect(ensure.mock.calls[0][0]).toMatchObject({ workflowName: "order", version: 1 });
   });
 });
+
+describe("migrateInstances: a stale cached target", () => {
+  it("fails the candidate when the stored target no longer matches, then reloads it on retry", async () => {
+    const { store, runtimeV1, runtimeV2 } = world();
+    await runtimeV1.initialize(); // stores v1
+    const instance = await runtimeV2.createInstance({ workflowName: "order" });
+    const find = vi.spyOn(store, "findByNameAndVersion");
+    // The v1 row now holds different content than the copy this runtime will load and cache.
+    vi.spyOn(store, "ensure").mockImplementationOnce(async (record) => ({
+      ...record,
+      contentHash: "sha256:different",
+      registeredAt: new Date(),
+    }));
+    const toV1 = { workflowName: "order", fromVersion: 2, toVersion: 1 };
+
+    const first = await runtimeV2.migrateInstances(toV1);
+
+    expect(first.migrated).toEqual([]);
+    expect(first.failed).toEqual([
+      {
+        uuid: instance.uuid,
+        error: expect.stringMatching(/stored version 1 differs from the copy loaded earlier/),
+      },
+    ]);
+    expect((await runtimeV2.getInstance(instance.uuid))!.definitionVersion).toBe(2);
+
+    const loadsBefore = find.mock.calls.length;
+    const second = await runtimeV2.migrateInstances(toV1);
+
+    expect(second.migrated.map((m) => m.uuid)).toEqual([instance.uuid]);
+    expect(find.mock.calls.length).toBe(loadsBefore + 1); // the evicted target was reloaded
+  });
+});
