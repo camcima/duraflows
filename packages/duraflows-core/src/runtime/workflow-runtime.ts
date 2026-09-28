@@ -24,6 +24,7 @@ import type {
   CommandResult,
   WorkflowTimeoutRetry,
   WorkflowTimeoutRetryOptions,
+  DefinitionVersionSummary,
 } from "../types/runtime.js";
 import { WorkflowCompiler } from "../compilation/workflow-compiler.js";
 import { CommandExecutor } from "../execution/command-executor.js";
@@ -32,7 +33,12 @@ import { OnEnterExecutor } from "../execution/on-enter-executor.js";
 import { TimeoutResolver } from "../execution/timeout-resolver.js";
 import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
 import type { WorkflowGuardRegistry } from "../registry/guard-registry.js";
-import { WorkflowInstanceNotFoundError, WorkflowDefinitionError } from "../errors/index.js";
+import {
+  WorkflowInstanceNotFoundError,
+  WorkflowDefinitionError,
+  WorkflowError,
+  InvalidArgumentError,
+} from "../errors/index.js";
 import { WorkflowHandle } from "./workflow-handle.js";
 import type { WorkflowObserver, StateEnterEvent, ObserverErrorHandler } from "../types/observer.js";
 import { ObserverRegistry } from "./observer-registry.js";
@@ -40,6 +46,7 @@ import { computeDefinitionHash } from "../util/definition-hash.js";
 import { assertNonNegativeSafeInteger, assertPositiveSafeInteger } from "../util/assert.js";
 import { TimeoutRetryPolicy } from "./timeout-retry-policy.js";
 import { DefinitionResolver } from "./definition-resolver.js";
+import { countActiveInstances, findUnresolvableVersions } from "./definition-executability.js";
 
 const DEFAULT_MAX_ON_ENTER_DEPTH = 10;
 
@@ -143,6 +150,13 @@ export interface WorkflowRuntimeOptions {
    * fails: exponential backoff, then parking. See {@link WorkflowTimeoutRetryOptions}.
    */
   timeoutRetry?: WorkflowTimeoutRetryOptions;
+  /**
+   * What `initialize()` does when a stored definition version that still has
+   * active instances references a command or guard that is not registered:
+   * `"fail"` (default) throws `WorkflowDefinitionError`, `"warn"` logs it.
+   * Only runs with a `definitionStore`.
+   */
+  onUnresolvable?: "fail" | "warn";
 }
 
 export class WorkflowRuntime {
@@ -161,6 +175,9 @@ export class WorkflowRuntime {
   private readonly maxOnEnterDepth: number;
   private readonly observerRegistry: ObserverRegistry;
   private readonly timeoutRetryPolicy: TimeoutRetryPolicy;
+  private readonly commandRegistry: WorkflowCommandRegistry;
+  private readonly guardRegistry?: WorkflowGuardRegistry;
+  private readonly onUnresolvable: "fail" | "warn";
 
   constructor(options: WorkflowRuntimeOptions) {
     this.definitionRegistry = options.definitionRegistry;
@@ -169,6 +186,18 @@ export class WorkflowRuntime {
     this.transactionRunner = options.transactionRunner;
     this.clock = options.clock;
     this.definitionStore = options.definitionStore;
+    this.commandRegistry = options.commandRegistry;
+    this.guardRegistry = options.guardRegistry;
+    if (
+      options.onUnresolvable !== undefined &&
+      options.onUnresolvable !== "fail" &&
+      options.onUnresolvable !== "warn"
+    ) {
+      throw new InvalidArgumentError(
+        `onUnresolvable must be "fail" or "warn", got ${JSON.stringify(options.onUnresolvable)}`,
+      );
+    }
+    this.onUnresolvable = options.onUnresolvable ?? "fail";
     this.compiler = new WorkflowCompiler();
     this.definitionResolver = new DefinitionResolver({
       definitionRegistry: options.definitionRegistry,
@@ -196,16 +225,42 @@ export class WorkflowRuntime {
    * version-bump guard. Idempotent: concurrent and repeated calls share one
    * sync. A failed sync is not cached — the next call retries. Called lazily
    * by mutating operations, but calling it explicitly at boot is recommended
-   * so registration errors surface at startup.
+   * so registration errors surface at startup. With a definition store, it
+   * then checks that every stored version with active instances can still
+   * execute (see `onUnresolvable`).
    */
   async initialize(): Promise<void> {
     if (!this.initPromise) {
-      this.initPromise = this.syncDefinitions().catch((error: unknown) => {
-        this.initPromise = null;
-        throw error;
-      });
+      this.initPromise = this.syncDefinitions()
+        .then(() => this.checkExecutability())
+        .catch((error: unknown) => {
+          this.initPromise = null;
+          throw error;
+        });
     }
     return this.initPromise;
+  }
+
+  private async checkExecutability(): Promise<void> {
+    if (!this.definitionStore) return;
+    const problems = await findUnresolvableVersions({
+      definitionRegistry: this.definitionRegistry,
+      definitionStore: this.definitionStore,
+      instanceStore: this.instanceStore,
+      commandRegistry: this.commandRegistry,
+      guardRegistry: this.guardRegistry,
+    });
+    if (problems.length === 0) return;
+    const summary = problems.map((p) => p.description).join("; ");
+    if (this.onUnresolvable === "warn") {
+      console.warn(`[duraflows] ${summary}`);
+      return;
+    }
+    throw new WorkflowDefinitionError(
+      problems[0].workflowName,
+      `stored versions with active instances cannot execute: ${summary}. ` +
+        `Register the missing commands and guards, or set onUnresolvable: "warn".`,
+    );
   }
 
   private async syncDefinitions(): Promise<void> {
@@ -806,6 +861,28 @@ export class WorkflowRuntime {
     const limit = input?.limit ?? 100;
     assertPositiveSafeInteger(limit, "limit");
     return this.instanceStore.findParkedTimeouts({ limit, workflowName: input?.workflowName });
+  }
+
+  /**
+   * Every stored version of `workflowName`, oldest first, with how many
+   * non-terminal instances are still stamped with it — use it to decide when
+   * an old version has drained and its commands can be deleted. A plain read;
+   * requires a definition store.
+   */
+  async listDefinitionVersions(workflowName: string): Promise<DefinitionVersionSummary[]> {
+    if (!this.definitionStore) {
+      throw new WorkflowError("listDefinitionVersions requires a definition store");
+    }
+    const summaries: DefinitionVersionSummary[] = [];
+    for (const stored of await this.definitionStore.listVersions(workflowName)) {
+      summaries.push({
+        version: stored.version,
+        contentHash: stored.contentHash,
+        registeredAt: stored.registeredAt,
+        activeInstances: await countActiveInstances(this.instanceStore, stored),
+      });
+    }
+    return summaries;
   }
 
   /**

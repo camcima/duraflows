@@ -26,6 +26,7 @@ export type {
   ProcessExpiredWorkflowsResult,
   FindParkedTimeoutsInput,
   GetAvailableEventsInput,
+  DefinitionVersionSummary,
 } from "./types/runtime.js";
 
 // Types — Persistence

@@ -1,0 +1,85 @@
+import type { WorkflowDefinition } from "../types/definition.js";
+import type { StoredWorkflowDefinition, WorkflowDefinitionStore, WorkflowInstanceStore } from "../types/persistence.js";
+import type { WorkflowDefinitionRegistry } from "../registry/definition-registry.js";
+import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
+import type { WorkflowGuardRegistry } from "../registry/guard-registry.js";
+
+/**
+ * States an instance never leaves: no events and no onEnter. Instances resting
+ * in one never execute their definition again, so they are not "active".
+ */
+export function terminalStates(definition: WorkflowDefinition): string[] {
+  return Object.entries(definition.states)
+    .filter(([, state]) => Object.keys(state.events ?? {}).length === 0 && !state.onEnter)
+    .map(([name]) => name);
+}
+
+/** Every command and guard name the definition references, each once, in definition order. */
+export function referencedNames(definition: WorkflowDefinition): { commands: string[]; guards: string[] } {
+  const commands = new Set<string>();
+  const guards = new Set<string>();
+  for (const state of Object.values(definition.states)) {
+    for (const event of Object.values(state.events ?? {})) {
+      if (event.guard) guards.add(event.guard.name);
+      for (const command of event.commands ?? []) commands.add(command.name);
+    }
+    for (const command of state.onEnter?.commands ?? []) commands.add(command.name);
+  }
+  return { commands: [...commands], guards: [...guards] };
+}
+
+/** Non-terminal instances stamped with the stored version. */
+export function countActiveInstances(
+  instanceStore: WorkflowInstanceStore,
+  stored: StoredWorkflowDefinition,
+): Promise<number> {
+  return instanceStore.countInstances({
+    workflowName: stored.workflowName,
+    definitionVersion: stored.version,
+    excludeStates: terminalStates(stored.definitionJson),
+  });
+}
+
+export interface UnresolvableVersion {
+  workflowName: string;
+  /** e.g. `Workflow "order": version 3 (12 active instances) references unregistered commands [a], guards [b]` */
+  description: string;
+}
+
+/**
+ * Stored versions that still have active instances but reference a command
+ * or guard that is not registered. Workflows whose registered definition uses
+ * `versionPolicy: "latest"` are skipped: their instances never execute a
+ * stored snapshot. Without a guard registry, every guard reference is missing.
+ */
+export async function findUnresolvableVersions(deps: {
+  definitionRegistry: WorkflowDefinitionRegistry;
+  definitionStore: WorkflowDefinitionStore;
+  instanceStore: WorkflowInstanceStore;
+  commandRegistry: WorkflowCommandRegistry;
+  guardRegistry?: WorkflowGuardRegistry;
+}): Promise<UnresolvableVersion[]> {
+  const problems: UnresolvableVersion[] = [];
+  for (const registered of deps.definitionRegistry.getAll()) {
+    if (registered.versionPolicy === "latest") continue;
+    for (const stored of await deps.definitionStore.listVersions(registered.name)) {
+      const active = await countActiveInstances(deps.instanceStore, stored);
+      if (active === 0) continue;
+      const refs = referencedNames(stored.definitionJson);
+      const commands = refs.commands.filter((name) => !deps.commandRegistry.has(name));
+      const guards = refs.guards.filter((name) => !deps.guardRegistry?.has(name));
+      if (commands.length === 0 && guards.length === 0) continue;
+      const missing = [
+        ...(commands.length > 0 ? [`commands [${commands.join(", ")}]`] : []),
+        ...(guards.length > 0 ? [`guards [${guards.join(", ")}]`] : []),
+      ].join(", ");
+      problems.push({
+        workflowName: registered.name,
+        description:
+          `Workflow "${registered.name}": version ${stored.version} (${active} active instances) ` +
+          `references unregistered ${missing}`,
+      });
+    }
+  }
+  return problems;
+}
