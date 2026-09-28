@@ -27,6 +27,8 @@ export type {
   FindParkedTimeoutsInput,
   GetAvailableEventsInput,
   DefinitionVersionSummary,
+  MigrateInstancesInput,
+  MigrateInstancesResult,
 } from "./types/runtime.js";
 
 // Types — Persistence

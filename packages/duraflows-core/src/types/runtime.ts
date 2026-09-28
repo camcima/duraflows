@@ -152,3 +152,32 @@ export interface DefinitionVersionSummary {
   /** Instances stamped with this version whose current state is not terminal. */
   activeInstances: number;
 }
+
+/** Input for `WorkflowRuntime.migrateInstances`. */
+export interface MigrateInstancesInput {
+  workflowName: string;
+  fromVersion: number;
+  toVersion: number;
+  /** Only renamed or removed states need entries: current state → target state. */
+  stateMapping?: Record<string, string>;
+  /** Optional and pure: returns the migrated instance's context. Must be a plain object; stored as its JSON round trip. */
+  transformContext?: (
+    context: Record<string, unknown>,
+    instance: Readonly<WorkflowInstance>,
+  ) => Record<string, unknown>;
+  /** Optional scope-down. Omit to migrate every instance on `fromVersion` (needs `findInstanceUuids`). */
+  instanceUuids?: readonly string[];
+  /** Optional cap on how many candidates one call examines. Default: no cap. */
+  limit?: number;
+  /** Validate and report; write nothing and fire no observers. */
+  dryRun?: boolean;
+}
+
+/** Result of `WorkflowRuntime.migrateInstances`. */
+export interface MigrateInstancesResult {
+  dryRun: boolean;
+  /** In a dry run: the instances that would migrate. */
+  migrated: Array<{ uuid: string; fromState: string; toState: string }>;
+  skipped: Array<{ uuid: string; reason: string }>;
+  failed: Array<{ uuid: string; error: string }>;
+}

@@ -25,6 +25,8 @@ import type {
   WorkflowTimeoutRetry,
   WorkflowTimeoutRetryOptions,
   DefinitionVersionSummary,
+  MigrateInstancesInput,
+  MigrateInstancesResult,
 } from "../types/runtime.js";
 import { WorkflowCompiler } from "../compilation/workflow-compiler.js";
 import { CommandExecutor } from "../execution/command-executor.js";
@@ -48,6 +50,7 @@ import { TimeoutRetryPolicy } from "./timeout-retry-policy.js";
 import { DefinitionResolver } from "./definition-resolver.js";
 import { countActiveInstances, findUnresolvableVersions } from "./definition-executability.js";
 import { buildStateEnterEvent } from "./state-enter-event.js";
+import { InstanceMigrator } from "./instance-migrator.js";
 
 const DEFAULT_MAX_ON_ENTER_DEPTH = 10;
 
@@ -136,7 +139,9 @@ export class WorkflowRuntime {
   private readonly transactionRunner: WorkflowTransactionRunner;
   private readonly clock: WorkflowClock;
   private readonly definitionStore?: WorkflowDefinitionStore;
-  private initPromise: Promise<void> | null = null;
+  private syncPromise: Promise<void> | null = null;
+  private checkPromise: Promise<void> | null = null;
+  private readonly instanceMigrator: InstanceMigrator;
   private readonly compiler: WorkflowCompiler;
   private readonly definitionResolver: DefinitionResolver;
   private readonly eventExecutor: EventExecutor;
@@ -184,6 +189,14 @@ export class WorkflowRuntime {
     this.maxOnEnterDepth = options.maxOnEnterDepth ?? DEFAULT_MAX_ON_ENTER_DEPTH;
     this.observerRegistry = new ObserverRegistry(options.observers ?? [], options.onObserverError);
     this.timeoutRetryPolicy = new TimeoutRetryPolicy(options.timeoutRetry);
+    this.instanceMigrator = new InstanceMigrator({
+      instanceStore: this.instanceStore,
+      historyStore: this.historyStore,
+      clock: this.clock,
+      definitionResolver: this.definitionResolver,
+      timeoutResolver: this.timeoutResolver,
+      runWithObservers: <T>(work: (eventsToFire: StateEnterEvent[]) => Promise<T>) => this.runWithObservers(work),
+    });
   }
 
   addObserver(observer: WorkflowObserver): void {
@@ -197,18 +210,29 @@ export class WorkflowRuntime {
    * by mutating operations, but calling it explicitly at boot is recommended
    * so registration errors surface at startup. With a definition store, it
    * then checks that every stored version with active instances can still
-   * execute (see `onUnresolvable`).
+   * execute (see `onUnresolvable`). The sync and the check are cached
+   * separately; `migrateInstances` waits only for the sync.
    */
   async initialize(): Promise<void> {
-    if (!this.initPromise) {
-      this.initPromise = this.syncDefinitions()
-        .then(() => this.checkExecutability())
-        .catch((error: unknown) => {
-          this.initPromise = null;
-          throw error;
-        });
+    await this.ensureSynced();
+    if (!this.checkPromise) {
+      this.checkPromise = this.checkExecutability().catch((error: unknown) => {
+        this.checkPromise = null;
+        throw error;
+      });
     }
-    return this.initPromise;
+    return this.checkPromise;
+  }
+
+  /** The definition sync alone, shared by every caller; a failure is not cached. */
+  private ensureSynced(): Promise<void> {
+    if (!this.syncPromise) {
+      this.syncPromise = this.syncDefinitions().catch((error: unknown) => {
+        this.syncPromise = null;
+        throw error;
+      });
+    }
+    return this.syncPromise;
   }
 
   private async checkExecutability(): Promise<void> {
@@ -857,6 +881,21 @@ export class WorkflowRuntime {
       });
     }
     return summaries;
+  }
+
+  /**
+   * Moves instances of a workflow from one stored definition version to
+   * another: pure relabeling with an optional state mapping and context
+   * transform, recorded as a `$migrated` history row per instance. Runs the
+   * definition sync but not the executability check, which is often what
+   * migration is fixing. Requires a definition store.
+   */
+  async migrateInstances(input: MigrateInstancesInput): Promise<MigrateInstancesResult> {
+    if (!this.definitionStore) {
+      throw new WorkflowError("migrateInstances requires a definition store");
+    }
+    await this.ensureSynced();
+    return this.instanceMigrator.migrate(input);
   }
 
   /**
