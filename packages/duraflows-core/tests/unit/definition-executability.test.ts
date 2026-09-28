@@ -14,8 +14,10 @@ const definition: WorkflowDefinition = {
 };
 
 describe("terminalStates", () => {
-  it("returns states with no events and no onEnter", () => {
-    expect(terminalStates(definition)).toEqual(["c", "d"]);
+  it("returns every state with no events, whether or not it has an onEnter", () => {
+    // onEnter runs only on entry, within the transition, so an instance resting in an
+    // event-less state never executes this version again.
+    expect(terminalStates(definition)).toEqual(["b", "c", "d"]);
   });
 });
 

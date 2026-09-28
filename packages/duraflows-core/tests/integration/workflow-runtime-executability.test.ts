@@ -256,6 +256,40 @@ describe("startup executability check", () => {
   });
 });
 
+describe("event-less final states with an onEnter", () => {
+  const n1: WorkflowDefinition = {
+    name: "notified",
+    initialState: "open",
+    states: {
+      open: { events: { Close: { targetState: "closed" } } },
+      closed: { onEnter: { commands: [{ name: "notifyClosed" }] } },
+    },
+  };
+  const n2: WorkflowDefinition = {
+    name: "notified",
+    version: 2,
+    initialState: "open",
+    states: { open: { events: { Close: { targetState: "closed" } } }, closed: {} },
+  };
+
+  it("count as drained, so removing their entry command doesn't block startup", async () => {
+    const persistence = createInMemoryPersistence();
+    const store = new InMemoryDefinitionStore();
+    const runtimeV1 = makeRuntime(n1, persistence, store, { commands: ["notifyClosed"], guards: [] });
+    const instance = await runtimeV1.createInstance({ workflowName: "notified" });
+    await runtimeV1.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Close" });
+
+    const runtimeV2 = makeRuntime(n2, persistence, store, { commands: [], guards: [] });
+
+    await expect(runtimeV2.initialize()).resolves.toBeUndefined();
+    const versions = await runtimeV2.listDefinitionVersions("notified");
+    expect(versions.map((v) => [v.version, v.activeInstances])).toEqual([
+      [1, 0],
+      [2, 0],
+    ]);
+  });
+});
+
 describe("listDefinitionVersions", () => {
   it("reports each stored version in order with its active-instance count", async () => {
     const { persistence, store } = await worldWithActiveV1();

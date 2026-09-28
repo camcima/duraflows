@@ -451,7 +451,7 @@ interface DefinitionVersionSummary {
 }
 ```
 
-Results are ordered by `version` ascending (`WorkflowDefinitionStore.listVersions()`'s contract). "Terminal" means a state with no `events` (or an empty map) and no `onEnter` — the same rule the [startup executability check](#startup-executability-check) uses; instances resting in one are not counted as active.
+Results are ordered by `version` ascending (`WorkflowDefinitionStore.listVersions()`'s contract). "Terminal" means a state with no `events` (or an empty map), whether or not it has an `onEnter`: an `onEnter` runs only inside the transition that enters the state, so an instance resting there never executes that version again — the same rule the [startup executability check](#startup-executability-check) uses; instances resting in one are not counted as active.
 
 A plain read: it does not call `initialize()`, so it can be used before or independently of runtime startup.
 
