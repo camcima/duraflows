@@ -40,6 +40,7 @@ const runtime = new WorkflowRuntime({
   ...persistence,
   clock: { now: () => new Date() },
 });
+await runtime.initialize(); // surfaces definition/version errors at boot
 ```
 
 ## Sharing a Transaction

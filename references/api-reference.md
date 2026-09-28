@@ -499,7 +499,7 @@ new WorkflowRuntime(options: WorkflowRuntimeOptions)
 
 **`initialize(): Promise<void>`**
 
-Syncs registered definitions into `definitionStore` (enforcing the version-bump guard) and, with a `definitionStore` configured, runs the startup executability check (see [Definition Versioning (v7.0.0)](#definition-versioning-v700)). Idempotent and safe to call concurrently; a failed attempt is not cached. Called automatically by `createInstance()`, `triggerEvent()` and `processExpiredWorkflows()`; calling it explicitly at boot is recommended so failures surface before serving traffic. No-ops without a `definitionStore`.
+Syncs registered definitions into `definitionStore` (enforcing the version-bump guard) and, with a `definitionStore` configured, runs the startup executability check (see [Definition Versioning (v7.0.0)](#definition-versioning-v700)). Idempotent and safe to call concurrently; a failed attempt is not cached. Called automatically by `createInstance()`, `triggerEvent()`, `processExpiredWorkflows()` and `rearmTimeout()`; calling it explicitly at boot is recommended so failures surface before serving traffic (run lazily, a failure fails every one of those calls, for every workflow, until fixed; NestJS calls it during module init). No-ops without a `definitionStore`.
 
 **`createInstance(input: CreateWorkflowInstanceInput): Promise<WorkflowInstance>`**
 
@@ -577,7 +577,7 @@ Returned by `runtime.listDefinitionVersions(workflowName)`, ordered by `version`
 
 ### Startup executability check
 
-Runs at the end of `initialize()`, after the definition sync, only with a `definitionStore` configured. For each registered workflow, for each stored version with active (non-terminal) instances, every referenced command and guard must be registered and the snapshot must pass `WorkflowValidator`'s structure check (e.g. a 6.x snapshot with a `$`-prefixed event name fails it); a workflow whose registered definition has `versionPolicy: "latest"` is skipped entirely (its instances never execute a stored snapshot); without a `guardRegistry`, every guard reference counts as missing. On failure: `onUnresolvable: "fail"` (default) throws `WorkflowDefinitionError` naming the first offending workflow, message listing all; `"warn"` logs via `console.warn` and continues. Legacy (`null`-version) instances are never counted (they resolve the in-code definition). Workflows removed from code entirely aren't covered.
+Runs at the end of `initialize()`, after the definition sync, only with a `definitionStore` configured. For each registered workflow, for each stored version with active (non-terminal) instances, every referenced command and guard must be registered and the snapshot must pass `WorkflowValidator`'s structure check (e.g. a 6.x snapshot with a `$`-prefixed event name fails it); a workflow whose registered definition has `versionPolicy: "latest"` is skipped entirely (its instances never execute a stored snapshot); without a `guardRegistry`, every guard reference counts as missing. On failure: `onUnresolvable: "fail"` (default) throws `WorkflowDefinitionError` naming the first offending workflow, message listing all; `"warn"` logs via `console.warn` and continues. Without an explicit `initialize()` at boot the check runs lazily, and a failure fails every `createInstance()`/`triggerEvent()`/`processExpiredWorkflows()`/`rearmTimeout()` call, for every workflow, until fixed. Legacy (`null`-version) instances are never counted (they resolve the in-code definition). Workflows removed from code entirely aren't covered.
 
 ---
 

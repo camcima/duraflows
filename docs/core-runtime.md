@@ -50,7 +50,7 @@ async initialize(): Promise<void>
 
 Idempotent and safe to call repeatedly or concurrently: the first call starts the sync and every caller — concurrent or later — shares that same in-flight (or already-settled) result, so definitions are synced once. A **failed** sync is not cached — the next call to `initialize()` retries from scratch rather than replaying the failure.
 
-Calling it explicitly is optional: `createInstance()`, `triggerEvent()`, and `processExpiredWorkflows()` each call `initialize()` first, so the sync also happens lazily on whichever mutating operation runs first. Calling it explicitly at boot is still recommended — the NestJS module does this automatically (see [Startup Validation](./nestjs-integration.md#startup-validation)) — because it makes a version-bump violation, or an unresolvable stored version, fail application startup instead of surfacing unpredictably on the first workflow operation.
+Calling it explicitly is optional: `createInstance()`, `triggerEvent()`, `processExpiredWorkflows()`, and `rearmTimeout()` each call `initialize()` first, so the sync also happens lazily on whichever of them runs first. Calling it explicitly at boot is still recommended — the NestJS module does this automatically (see [Startup Validation](./nestjs-integration.md#startup-validation)) — because it makes a version-bump violation, or an unresolvable stored version, fail application startup instead of surfacing unpredictably at runtime: since a failed `initialize()` is retried on the next call, a lazily-run failure fails every one of those operations, for every workflow, until it is fixed.
 
 **Throws:**
 
@@ -75,6 +75,8 @@ Workflow "order": version 3 (12 active instances) references unregistered comman
 
 - `onUnresolvable: "fail"` (the default) throws `WorkflowDefinitionError` — the first offending workflow's name is on the error, the message lists all of them.
 - `onUnresolvable: "warn"` logs the message with `console.warn` and continues.
+
+Without an explicit `initialize()` at boot, the check runs lazily, and a `"fail"` fails every `createInstance()`, `triggerEvent()`, `processExpiredWorkflows()`, and `rearmTimeout()` call — for every workflow, not just the offending one — until it is fixed. The NestJS module calls `initialize()` during module init.
 
 Legacy (`definitionVersion: null`) instances resolve the in-code definition (validated at registration), so they are never counted. Workflows removed from code entirely aren't covered — their names are unknown to the runtime, and their instances fail as they do today.
 
