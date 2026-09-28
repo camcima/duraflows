@@ -62,6 +62,21 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * `String(value)`, falling back to a generic classification when that itself
+ * throws — e.g. a null-prototype object (no inherited `toString`), or a
+ * `toString`/`Symbol.toPrimitive` that throws. Used to format a thrown value
+ * that is not an `Error`, so a hostile throw can never itself escape as an
+ * uncaught exception.
+ */
+function safeString(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
+/**
  * Relabels instances from one stored definition version to another. No
  * commands, guards or onEnter run; each move is one transaction that updates
  * the instance, appends a `$migrated` history row and queues one observer event.
@@ -136,7 +151,7 @@ export class InstanceMigrator {
             result.skipped.push({ uuid, reason: plan.reason });
           }
         } catch (error: unknown) {
-          result.failed.push({ uuid, error: error instanceof Error ? error.message : String(error) });
+          result.failed.push({ uuid, error: error instanceof Error ? error.message : safeString(error) });
         }
       }
     } catch (error: unknown) {
@@ -194,7 +209,14 @@ export class InstanceMigrator {
       if (page.length === 0) return;
       let previous = afterUuid;
       for (const uuid of page) {
-        if (previous !== undefined && !(uuid > previous)) {
+        if (typeof uuid !== "string" || uuid.length === 0) {
+          throw new WorkflowError("findInstanceUuids returned a page with an entry that is not a UUID string");
+        }
+        // `typeof previous === "string"`, not `previous !== undefined`: a page
+        // entry that is itself `undefined` must never be mistaken for "no
+        // lower bound yet" — that would let a non-conforming page reset the
+        // lower bound to nothing and pass forever.
+        if (typeof previous === "string" && !(uuid > previous)) {
           throw new WorkflowError(
             `findInstanceUuids returned a page that does not advance past ${afterUuid ?? "the start"}`,
           );

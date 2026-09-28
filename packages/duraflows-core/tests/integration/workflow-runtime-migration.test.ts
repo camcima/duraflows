@@ -691,6 +691,16 @@ describe("migrateInstances: interruption", () => {
     expect((error as MigrationInterruptedError).result.nextCursor).toBe(a.uuid);
   });
 
+  it("safely formats a non-Error, unstringifiable rejection from findInstanceUuids", async () => {
+    const { persistence, runtimeV2 } = world();
+    vi.spyOn(persistence.instanceStore, "findInstanceUuids").mockRejectedValue(Object.create(null));
+
+    const error = (await runtimeV2.migrateInstances({ ...toV2 }).catch((caught: unknown) => caught)) as Error;
+
+    expect(error).toBeInstanceOf(MigrationInterruptedError);
+    expect(error.message).toBe("migrateInstances was interrupted after examining 0 candidates: [object Object]");
+  });
+
   it("drops rows beyond the requested limit", async () => {
     const { persistence, runtimeV1, runtimeV2 } = world();
     for (let i = 0; i < 10; i++) await runtimeV1.createInstance({ workflowName: "order" });
@@ -703,6 +713,37 @@ describe("migrateInstances: interruption", () => {
 
     expect(result.migrated).toHaveLength(3);
     expect(result.nextCursor).toBe(result.migrated[2].uuid);
+  });
+
+  it("interrupts on a page entry that is not a UUID string, without looping forever", async () => {
+    const { persistence, runtimeV2 } = world();
+    vi.spyOn(persistence.instanceStore, "findInstanceUuids").mockResolvedValue([undefined as unknown as string]);
+
+    const error = (await runtimeV2.migrateInstances({ ...toV2 }).catch((caught: unknown) => caught)) as Error;
+
+    expect(error).toBeInstanceOf(MigrationInterruptedError);
+    expect(error.message).toBe(
+      "migrateInstances was interrupted after examining 0 candidates: " +
+        "findInstanceUuids returned a page with an entry that is not a UUID string",
+    );
+    expect((error as MigrationInterruptedError).result.nextCursor).toBeNull();
+  });
+
+  it("interrupts when the first page (no cursor) is not internally ascending", async () => {
+    const { persistence, runtimeV1, runtimeV2 } = world();
+    const a = await runtimeV1.createInstance({ workflowName: "order" });
+    const b = await runtimeV1.createInstance({ workflowName: "order" });
+    const [lo, hi] = [a.uuid, b.uuid].sort();
+    vi.spyOn(persistence.instanceStore, "findInstanceUuids").mockResolvedValue([hi, lo]);
+
+    const error = (await runtimeV2.migrateInstances({ ...toV2 }).catch((caught: unknown) => caught)) as Error;
+
+    expect(error).toBeInstanceOf(MigrationInterruptedError);
+    expect(error.message).toBe(
+      "migrateInstances was interrupted after examining 0 candidates: " +
+        "findInstanceUuids returned a page that does not advance past the start",
+    );
+    expect((error as MigrationInterruptedError).result.nextCursor).toBeNull();
   });
 });
 
@@ -835,5 +876,24 @@ describe("migrateInstances: 7.2 validation and hardening", () => {
 
     expect(result.migrated).toHaveLength(1);
     expect((await runtimeV2.getInstance(instance.uuid))!.context).toEqual({ tier: "gold" });
+  });
+
+  it("fails an instance whose transformContext throws a null-prototype object, not an interruption", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    const bad = await runtimeV1.createInstance({ workflowName: "order", context: { bad: true } });
+    const good = await runtimeV1.createInstance({ workflowName: "order" });
+
+    const result = await runtimeV2.migrateInstances({
+      ...toV2,
+      instanceUuids: [bad.uuid, good.uuid],
+      transformContext: (context) => {
+        if (context.bad) throw Object.create(null) as Error;
+        return context;
+      },
+    });
+
+    expect(result.failed).toEqual([{ uuid: bad.uuid, error: "[object Object]" }]);
+    expect(result.migrated.map((m) => m.uuid)).toEqual([good.uuid]);
+    expect((await runtimeV2.getInstance(bad.uuid))!.definitionVersion).toBe(1);
   });
 });

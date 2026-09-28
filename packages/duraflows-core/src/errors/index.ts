@@ -1,5 +1,18 @@
 import type { CommandResult, MigrateInstancesResult } from "../types/runtime.js";
 
+/**
+ * `String(value)`, falling back to a generic classification when that itself
+ * throws — e.g. a null-prototype object (no inherited `toString`), or a
+ * `toString`/`Symbol.toPrimitive` that throws.
+ */
+function safeString(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
 export class WorkflowError extends Error {
   constructor(message: string, cause?: unknown) {
     super(message, { cause });
@@ -115,7 +128,7 @@ export class MigrationInterruptedError extends WorkflowError {
   public readonly result: MigrateInstancesResult;
 
   constructor(result: MigrateInstancesResult, examined: number, cause: unknown) {
-    const reason = cause instanceof Error ? cause.message : String(cause);
+    const reason = cause instanceof Error ? cause.message : safeString(cause);
     super(`migrateInstances was interrupted after examining ${examined} candidates: ${reason}`, cause);
     this.name = "MigrationInterruptedError";
     this.result = result;
