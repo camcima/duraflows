@@ -239,6 +239,8 @@ export const myWorkflow: WorkflowDefinition = {
 
 **(v5.0.0)** Bump `version` whenever you change the definition's content (states, events, commands) after it has already shipped — `WorkflowRuntime.initialize()` detects a content change under an unbumped version and throws `WorkflowDefinitionError`. A first-time build doesn't need to worry about this; it matters from the second deploy onward. See the duraflows-developer skill for the full mechanics.
 
+**(v7.0.0)** By default (`versionPolicy: "pinned"`), in-flight instances keep executing the version they were created under across a redeploy — don't assume renaming a state or dropping an event takes effect for instances already running. Only set `versionPolicy: "latest"` if you intend every instance to jump to whatever is currently registered (and are keeping states backward-compatible). Also: event names starting with `"$"` are reserved and rejected by validation — don't propose one when naming events.
+
 Use the skeleton templates as starting points:
 
 - [Simple sequence](./assets/simple-sequence.ts) -- linear progression with timeout

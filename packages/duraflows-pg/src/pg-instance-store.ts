@@ -143,6 +143,22 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
     return result.rows.map((row: Record<string, unknown>) => this.mapRow(row));
   }
 
+  async countInstances(options: {
+    workflowName: string;
+    definitionVersion: number;
+    excludeStates: readonly string[];
+  }): Promise<number> {
+    const client = this.getClient();
+    // With an empty array, `NOT (x = ANY('{}'))` is true, so nothing is excluded.
+    const result = await client.query(
+      `SELECT count(*)::int AS count FROM workflow_instances
+       WHERE workflow_name = $1 AND definition_version = $2
+         AND NOT (current_state = ANY($3::text[]))`,
+      [options.workflowName, options.definitionVersion, [...options.excludeStates]],
+    );
+    return (result.rows[0] as { count: number }).count;
+  }
+
   private mapRow(row: Record<string, unknown>): WorkflowInstance {
     return {
       uuid: row.uuid as string,

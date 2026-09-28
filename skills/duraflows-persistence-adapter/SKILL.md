@@ -9,9 +9,11 @@ How to implement custom persistence adapters for duraflows. The core runtime is 
 
 > **v1.0.0 — verify with the conformance suite.** `@duraflows/core/testing` ships `runInstanceStoreConformance(factory)`, the canonical test suite for `WorkflowInstanceStore` implementations. It exercises locking, optimistic concurrency, expiration ordering, the metadata-write-once contract, and nested transactions. Reference adapters: `@duraflows/pg` and `@duraflows/kysely` (v0.4.0+) — both pass it in CI. See [Testing Your Adapter](#testing-your-adapter).
 >
-> **Definition versioning — `WorkflowDefinitionStore` is now part of the contract.** Every `WorkflowDefinition` carries an explicit `version` (defaulting to `1`), and `WorkflowRuntime.initialize()` snapshots each registered definition into a `WorkflowDefinitionStore` so it can fail fast when a version's content drifts from what was previously registered. Implement `WorkflowDefinitionStore` and add `definition_version` columns to `workflow_instances` and `workflow_history` so instances and history rows record the definition version that governed them. It's optional on `WorkflowPersistenceProvider` — an adapter that omits it still compiles and runs, it just leaves definition versioning inert. `@duraflows/core/testing` ships `runDefinitionStoreConformance(label, harness)` to verify your implementation; both reference adapters pass it in CI. **Resolution is unchanged by any of this: instances still execute the currently registered definition regardless of the version they were stamped with.** See [WorkflowDefinitionStore](#4-workflowdefinitionstore-optional) and [Testing Your Adapter](#testing-your-adapter).
+> **Definition versioning — `WorkflowDefinitionStore` is part of the contract.** Every `WorkflowDefinition` carries an explicit `version` (defaulting to `1`), and `WorkflowRuntime.initialize()` snapshots each registered definition into a `WorkflowDefinitionStore` so it can fail fast when a version's content drifts from what was previously registered. Implement `WorkflowDefinitionStore` and add `definition_version` columns to `workflow_instances` and `workflow_history` so instances and history rows record the definition version that governed them. It's optional on `WorkflowPersistenceProvider` — an adapter that omits it still compiles and runs, it just leaves definition versioning inert. `@duraflows/core/testing` ships `runDefinitionStoreConformance(label, harness)` to verify your implementation; both reference adapters pass it in CI. **(v7.0.0) Resolution is no longer unconditional: instances are pinned to the version they were stamped with by default (see below).** See [WorkflowDefinitionStore](#4-workflowdefinitionstore-optional) and [Testing Your Adapter](#testing-your-adapter).
 >
 > **v6.0.0 — timeout retry state is part of the instance contract (breaking).** `WorkflowInstance.timeoutRetry: WorkflowTimeoutRetry | null` is required and must round-trip through four columns (`timeout_attempts`, `timeout_retry_at`, `timeout_last_error`, `timeout_parked_at`); `findExpired` must skip parked and not-yet-due rows and order by `coalesce(timeout_retry_at, expires_at)`; and `WorkflowInstanceStore.findParkedTimeouts({ limit, workflowName? })` is a new required method. `@duraflows/pg` ships the schema change as `005_timeout_retries.sql`. See [findExpired](#findexpired----concurrent-batch-processing), [findParkedTimeouts](#findparkedtimeouts----operator-listing), [WorkflowInstance Fields](#workflowinstance-fields) and [Adding timeout retries to an existing schema](#v600--adding-timeout-retries-to-an-existing-schema).
+>
+> **v7.0.0 — definition-version pinning; two new required store methods (breaking).** Instances now execute the definition version they were stamped with by default, loaded from the store when it differs from the latest registered one (`versionPolicy: "latest"` opts a workflow back into always-latest execution). This needs `WorkflowInstanceStore.countInstances({ workflowName, definitionVersion, excludeStates })` -- a **new required method on every adapter**, not just ones with a `WorkflowDefinitionStore` -- plus `WorkflowDefinitionStore.listVersions(workflowName)` for adapters that implement the optional definition store. Both back `WorkflowRuntime.initialize()`'s startup executability check and `runtime.listDefinitionVersions()`. `@duraflows/pg` ships a recommended (not required) index as `006_definition_version_index.sql`. See [countInstances](#countinstances----active-instance-counting), [listVersions](#listversions----all-stored-snapshots), and [Adding definition-version pinning to an existing adapter](#v700--adding-definition-version-pinning-to-an-existing-adapter).
 
 ---
 
@@ -27,6 +29,11 @@ interface WorkflowInstanceStore {
   update(instance: WorkflowInstance): Promise<void>;
   findExpired(limit: number, now: Date): Promise<WorkflowInstance[]>;
   findParkedTimeouts(options: { limit: number; workflowName?: string }): Promise<WorkflowInstance[]>; // v6.0.0
+  countInstances(options: {
+    workflowName: string;
+    definitionVersion: number;
+    excludeStates: readonly string[];
+  }): Promise<number>; // v7.0.0
 }
 ```
 
@@ -61,6 +68,7 @@ interface WorkflowDefinitionStore {
     definitionJson: WorkflowDefinition;
   }): Promise<StoredWorkflowDefinition>;
   findByNameAndVersion(workflowName: string, version: number): Promise<StoredWorkflowDefinition | null>;
+  listVersions(workflowName: string): Promise<StoredWorkflowDefinition[]>; // v7.0.0
 }
 ```
 
@@ -188,6 +196,59 @@ LIMIT $1
 
 Back it with `CREATE INDEX workflow_instances_timeout_parked_idx ON workflow_instances (timeout_parked_at) WHERE timeout_parked_at IS NOT NULL`.
 
+### countInstances -- Active Instance Counting
+
+**(v7.0.0)** Backs `WorkflowRuntime.initialize()`'s startup executability check and `runtime.listDefinitionVersions()`: counts non-terminal instances stamped with a given definition version, so the runtime knows whether an old version has drained.
+
+**Requirements:**
+
+- Filter: `workflow_name = workflowName AND definition_version = definitionVersion`, excluding rows whose `current_state` is in `excludeStates`
+- **An empty `excludeStates` must exclude nothing** -- every matching row is counted, not zero
+- Instances with a `null` `definition_version` never match (they're legacy rows, never counted as "active" for a specific version)
+- A plain read: **no transaction required**
+
+**SQL pattern (what `@duraflows/pg` uses):**
+
+```sql
+SELECT count(*)::int FROM workflow_instances
+WHERE workflow_name = $1 AND definition_version = $2
+  AND NOT (current_state = ANY($3::text[]))
+```
+
+With an empty array bound to `$3`, `NOT (current_state = ANY('{}'))` evaluates to `true` for every row, so nothing is excluded -- no special-casing needed in the SQL itself.
+
+**Kysely equivalent** (Kysely rejects `.where(col, "not in", [])`, so the empty case needs an explicit branch):
+
+```ts
+let query = db
+  .selectFrom("workflow_instances")
+  .select((eb) => eb.fn.countAll<number>().as("count"))
+  .where("workflow_name", "=", workflowName)
+  .where("definition_version", "=", definitionVersion);
+if (excludeStates.length > 0) {
+  query = query.where("current_state", "not in", [...excludeStates]);
+}
+const row = await query.executeTakeFirst();
+return Number(row?.count ?? 0);
+```
+
+**Drizzle equivalent:**
+
+```ts
+await db
+  .select({ count: sql<number>`count(*)::int` })
+  .from(workflowInstances)
+  .where(
+    and(
+      eq(workflowInstances.workflowName, workflowName),
+      eq(workflowInstances.definitionVersion, definitionVersion),
+      excludeStates.length > 0 ? notInArray(workflowInstances.currentState, excludeStates) : undefined,
+    ),
+  );
+```
+
+Back it with the recommended index `workflow_instances_definition_version_idx ON workflow_instances (workflow_name, definition_version)` (`@duraflows/pg`'s migration `006`) so this stays cheap as the table grows.
+
 ### runInTransaction -- Nested Transaction Support
 
 **Requirements:**
@@ -273,6 +334,32 @@ const [stored] = await db
   .where(
     and(eq(workflowDefinitions.workflowName, record.workflowName), eq(workflowDefinitions.version, record.version)),
   );
+```
+
+### listVersions -- All Stored Snapshots
+
+**(v7.0.0)** Backs `WorkflowRuntime.initialize()`'s startup executability check and `runtime.listDefinitionVersions()`. A plain, ordered read -- no upsert semantics to get right, unlike `ensure()`.
+
+**Requirements:**
+
+- Return every stored snapshot of `workflowName`, ordered by `version` ascending
+- Return an empty array (not `null`/`undefined`) when the workflow has no stored versions
+- A plain read: **no transaction required**
+
+**SQL pattern:**
+
+```sql
+SELECT * FROM workflow_definitions WHERE workflow_name = $1 ORDER BY version
+```
+
+**Drizzle equivalent:**
+
+```ts
+await db
+  .select()
+  .from(workflowDefinitions)
+  .where(eq(workflowDefinitions.workflowName, workflowName))
+  .orderBy(asc(workflowDefinitions.version));
 ```
 
 ---
@@ -439,6 +526,9 @@ CREATE INDEX workflow_instances_timeout_due_idx ON workflow_instances ((coalesce
 CREATE INDEX workflow_instances_timeout_parked_idx ON workflow_instances (timeout_parked_at)
   WHERE timeout_parked_at IS NOT NULL;
 CREATE INDEX workflow_history_instance_created_idx ON workflow_history (workflow_instance_uuid, created_at DESC);
+-- v7.0.0 (recommended, not required): keeps countInstances() cheap for the
+-- startup executability check and listDefinitionVersions().
+CREATE INDEX workflow_instances_definition_version_idx ON workflow_instances (workflow_name, definition_version);
 ```
 
 Adapt column types for your database (e.g., MySQL uses `JSON` instead of `JSONB`, `DATETIME` instead of `TIMESTAMPTZ`).
@@ -509,6 +599,22 @@ CREATE INDEX IF NOT EXISTS workflow_instances_timeout_parked_idx
 ```
 
 `@duraflows/pg` ships this as `005_timeout_retries.sql`, and it must be applied **before** deploying 6.0.0: `create()` and `update()` write these columns on every call. Existing rows get `timeout_attempts = 0`, which maps to `timeoutRetry: null`. On large tables, set `lock_timeout` for the migration, and consider pre-building both indexes with `CREATE INDEX CONCURRENTLY` (same names and definitions) after adding the columns; the `IF NOT EXISTS` clauses then skip them. The schema alone isn't enough -- the adapter must also map `timeoutRetry` (see [Timeout retry mapping](#timeout-retry-mapping)), apply the new `findExpired` filter and ordering, and implement `findParkedTimeouts`.
+
+### v7.0.0 — Adding definition-version pinning to an existing adapter
+
+No schema change is required -- `definition_version` already exists on `workflow_instances` from `004_definition_versions.sql`. Two methods are new, and the `@duraflows/core` types require both:
+
+1. **Add `WorkflowInstanceStore.countInstances()`.** This is required on **every** adapter, whether or not it implements `WorkflowDefinitionStore` -- see [countInstances](#countinstances----active-instance-counting).
+2. **If you implement `WorkflowDefinitionStore`, add `listVersions()`** -- see [listVersions](#listversions----all-stored-snapshots).
+
+The runtime calls both in `initialize()` (for the startup executability check, when a definition store is configured) and in `runtime.listDefinitionVersions()`. An adapter missing either fails to typecheck against 7.0.0; one built without type checking fails at those calls. Definition-version pinning itself needs no further adapter changes -- `DefinitionResolver` reads existing snapshots through `findByNameAndVersion()`, already implemented for the version-bump guard.
+
+Separately, a new index is **recommended, not required**: it keeps `countInstances()` cheap on large tables. `@duraflows/pg` ships it as `006_definition_version_index.sql`:
+
+```sql
+CREATE INDEX IF NOT EXISTS workflow_instances_definition_version_idx
+  ON workflow_instances (workflow_name, definition_version);
+```
 
 ---
 
@@ -592,6 +698,10 @@ WorkflowModule.forRootAsync({
 - [ ] **(v5.0.0)** `definitionStore` wired into your `WorkflowPersistenceProvider` — it's optional (an adapter that omits it still compiles), but versioning stays inert without it
 - [ ] **(v5.0.0)** `runDefinitionStoreConformance` from `@duraflows/core/testing` passes against your `WorkflowDefinitionStore`
 - [ ] **(v5.0.0)** `findByInstanceUuid()` maps `created_at` into `WorkflowHistoryRecord.createdAt` (a `Date`); `append()` does NOT send it — the field is optional, so a forgotten mapping compiles fine and silently returns `undefined` for every caller (there's no history-store conformance suite to catch this)
+- [ ] **(v7.0.0)** `WorkflowInstanceStore.countInstances({ workflowName, definitionVersion, excludeStates })` implemented on **every** adapter (not just ones with a `WorkflowDefinitionStore`); an empty `excludeStates` counts every matching row, not zero
+- [ ] **(v7.0.0)** If you implement `WorkflowDefinitionStore`: `listVersions(workflowName)` returns snapshots ordered by `version` ascending, `[]` when none exist
+- [ ] **(v7.0.0)** `runInstanceStoreConformance` and (if applicable) `runDefinitionStoreConformance` still pass -- both suites now cover `countInstances`/`listVersions`
+- [ ] **(v7.0.0)** Recommended: index `(workflow_name, definition_version)` on `workflow_instances` so `countInstances()` stays cheap on large tables
 
 ---
 
@@ -626,7 +736,7 @@ describe("MyInstanceStore (conformance)", () => {
 });
 ```
 
-The suite verifies the persistence contract end-to-end: row-level locking, transaction-required behavior, optimistic concurrency on `version`, the `metadata` write-once contract, expiration ordering + limit + `SKIP LOCKED`, the `timeoutRetry` round-trip, retry/parked filtering and due-time ordering in `findExpired`, `findParkedTimeouts` filtering and ordering, and nested-transaction reuse.
+The suite verifies the persistence contract end-to-end: row-level locking, transaction-required behavior, optimistic concurrency on `version`, the `metadata` write-once contract, expiration ordering + limit + `SKIP LOCKED`, the `timeoutRetry` round-trip, retry/parked filtering and due-time ordering in `findExpired`, `findParkedTimeouts` filtering and ordering, **(v7.0.0)** `countInstances` filtering by workflow, definition version and excluded states (including that an empty `excludeStates` counts everything), and nested-transaction reuse.
 
 ### Definition Versioning — Use the Definition-Store Conformance Suite
 
@@ -652,7 +762,7 @@ describe("MyDefinitionStore (conformance)", () => {
 });
 ```
 
-It verifies: `ensure()` inserts a new snapshot and returns it, `ensure()` returns the pre-existing row unchanged (not the caller's new content) when `(workflowName, version)` already exists, `findByNameAndVersion()` round-trips a structurally equal definition and returns `null` for unknown pairs, and different versions of the same workflow are stored as independent rows.
+It verifies: `ensure()` inserts a new snapshot and returns it, `ensure()` returns the pre-existing row unchanged (not the caller's new content) when `(workflowName, version)` already exists, `findByNameAndVersion()` round-trips a structurally equal definition and returns `null` for unknown pairs, different versions of the same workflow are stored as independent rows, and **(v7.0.0)** `listVersions()` returns only the named workflow's snapshots ordered by `version` ascending.
 
 ### Reference Implementations
 

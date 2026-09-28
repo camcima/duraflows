@@ -18,23 +18,24 @@ new WorkflowRuntime(options: WorkflowRuntimeOptions)
 
 **WorkflowRuntimeOptions:**
 
-| Property             | Type                          | Description                                                                                                                                                                                                                                                                                                                         |
-| -------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                                                                                                                                                                                                                                                                    |
-| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                                                                                                                                                                                                                                                                        |
-| `instanceStore`      | `WorkflowInstanceStore`       | Persistence for workflow instances                                                                                                                                                                                                                                                                                                  |
-| `historyStore`       | `WorkflowHistoryStore`        | Persistence for history records                                                                                                                                                                                                                                                                                                     |
-| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                                                                                                                                                                                                                                                                              |
-| `clock`              | `WorkflowClock`               | Clock for timestamps (injectable for testing)                                                                                                                                                                                                                                                                                       |
-| `maxOnEnterDepth`    | `number`                      | Maximum depth for onEnter auto-transition chains (default: 10)                                                                                                                                                                                                                                                                      |
-| `timeoutRetry`       | `WorkflowTimeoutRetryOptions` | How `processExpiredWorkflows()` retries an instance whose timeout processing fails: `{ initialDelayMs?: 60000, maxDelayMs?: 3600000, maxAttempts?: 10 }`. Delays double from `initialDelayMs` up to `maxDelayMs`; after `maxAttempts` consecutive failures the instance is parked. See [Retries and parking](#retries-and-parking). |
-| `observers`          | `readonly WorkflowObserver[]` | Optional observers notified post-commit on every state entry                                                                                                                                                                                                                                                                        |
-| `guardRegistry`      | `WorkflowGuardRegistry`       | Optional registry of guard implementations; required when any workflow definition references a `guard`                                                                                                                                                                                                                              |
-| `definitionStore`    | `WorkflowDefinitionStore`     | Optional store for definition snapshots; when present, `initialize()` syncs registered definitions into it and enforces the version-bump guard. Omit to leave definition versioning inert.                                                                                                                                          |
+| Property             | Type                          | Description                                                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `definitionRegistry` | `WorkflowDefinitionRegistry`  | Registry of workflow definitions                                                                                                                                                                                                                                                                                                                                                               |
+| `commandRegistry`    | `WorkflowCommandRegistry`     | Registry of command handlers                                                                                                                                                                                                                                                                                                                                                                   |
+| `instanceStore`      | `WorkflowInstanceStore`       | Persistence for workflow instances                                                                                                                                                                                                                                                                                                                                                             |
+| `historyStore`       | `WorkflowHistoryStore`        | Persistence for history records                                                                                                                                                                                                                                                                                                                                                                |
+| `transactionRunner`  | `WorkflowTransactionRunner`   | Transaction management                                                                                                                                                                                                                                                                                                                                                                         |
+| `clock`              | `WorkflowClock`               | Clock for timestamps (injectable for testing)                                                                                                                                                                                                                                                                                                                                                  |
+| `maxOnEnterDepth`    | `number`                      | Maximum depth for onEnter auto-transition chains (default: 10)                                                                                                                                                                                                                                                                                                                                 |
+| `timeoutRetry`       | `WorkflowTimeoutRetryOptions` | How `processExpiredWorkflows()` retries an instance whose timeout processing fails: `{ initialDelayMs?: 60000, maxDelayMs?: 3600000, maxAttempts?: 10 }`. Delays double from `initialDelayMs` up to `maxDelayMs`; after `maxAttempts` consecutive failures the instance is parked. See [Retries and parking](#retries-and-parking).                                                            |
+| `observers`          | `readonly WorkflowObserver[]` | Optional observers notified post-commit on every state entry                                                                                                                                                                                                                                                                                                                                   |
+| `guardRegistry`      | `WorkflowGuardRegistry`       | Optional registry of guard implementations; required when any workflow definition references a `guard`                                                                                                                                                                                                                                                                                         |
+| `definitionStore`    | `WorkflowDefinitionStore`     | Optional store for definition snapshots; when present, `initialize()` syncs registered definitions into it, enforces the version-bump guard, and activates version pinning. Omit to leave definition versioning inert.                                                                                                                                                                         |
+| `onUnresolvable`     | `"fail" \| "warn"`            | What `initialize()` does when a stored definition version that still has active instances references an unregistered command or guard, or is structurally invalid: `"fail"` (default) throws `WorkflowDefinitionError`; `"warn"` logs it with `console.warn` and continues. Only runs when a `definitionStore` is configured. See [Startup executability check](#startup-executability-check). |
 
 ### initialize()
 
-Syncs registered workflow definitions into the configured `definitionStore` and enforces the version-bump guard.
+Syncs registered workflow definitions into the configured `definitionStore`, enforces the version-bump guard, and (with a `definitionStore`) runs the startup executability check.
 
 ```ts
 async initialize(): Promise<void>
@@ -44,21 +45,51 @@ async initialize(): Promise<void>
 
 1. For each definition in the `definitionRegistry`, computes its content hash and calls `definitionStore.ensure()`, which inserts a snapshot for that `(workflowName, version)` if one doesn't already exist, or returns the existing one untouched.
 2. Compares the returned snapshot's stored content hash against the freshly computed one. A mismatch means a known version was re-registered with different content.
-3. No-ops entirely when the runtime was constructed without a `definitionStore` — definition versioning is inert in that case.
+3. With a `definitionStore` configured, runs the [startup executability check](#startup-executability-check).
+4. No-ops entirely when the runtime was constructed without a `definitionStore` — definition versioning (both the version-bump guard and pinning) is inert in that case.
 
 Idempotent and safe to call repeatedly or concurrently: the first call starts the sync and every caller — concurrent or later — shares that same in-flight (or already-settled) result, so definitions are synced once. A **failed** sync is not cached — the next call to `initialize()` retries from scratch rather than replaying the failure.
 
-Calling it explicitly is optional: `createInstance()`, `triggerEvent()`, and `processExpiredWorkflows()` each call `initialize()` first, so the sync also happens lazily on whichever mutating operation runs first. Calling it explicitly at boot is still recommended — the NestJS module does this automatically (see [Startup Validation](./nestjs-integration.md#startup-validation)) — because it makes a version-bump violation fail application startup instead of surfacing unpredictably on the first workflow operation.
+Calling it explicitly is optional: `createInstance()`, `triggerEvent()`, `processExpiredWorkflows()`, and `rearmTimeout()` each call `initialize()` first, so the sync also happens lazily on whichever of them runs first. Calling it explicitly at boot is still recommended — the NestJS module does this automatically (see [Startup Validation](./nestjs-integration.md#startup-validation)) — because it makes a version-bump violation, or an unresolvable stored version, fail application startup instead of surfacing unpredictably at runtime: since a failed `initialize()` is retried on the next call, a lazily-run failure fails every one of those operations, for every workflow, until it is fixed.
 
 **Throws:**
 
 - `WorkflowDefinitionError` — a known `(workflowName, version)` pair's stored content hash differs from the registered definition's, meaning the definition's content changed without its `version` being bumped.
+- `WorkflowDefinitionError` — (with `onUnresolvable: "fail"`, the default) a stored definition version that still has active instances references a command or guard that is not registered, or its snapshot is structurally invalid. See [Startup executability check](#startup-executability-check).
 
 **Example:**
 
 ```ts
 await runtime.initialize(); // recommended at boot, before serving traffic
 ```
+
+#### Startup executability check
+
+Runs at the end of `initialize()`, after the definition sync, only when a `definitionStore` is configured. For each registered workflow, it lists every stored version (`definitionStore.listVersions(name)`) and, for each version that still has active instances (non-terminal instances via `instanceStore.countInstances`, the same rule `listDefinitionVersions` uses), checks that every command and guard it references is registered and that the snapshot is structurally valid (the same `WorkflowValidator` structure check a pinned instance's snapshot gets when it is loaded — e.g. a 6.x snapshot with a `$`-prefixed event name fails it). Workflows whose registered definition has `versionPolicy: "latest"` are skipped entirely — their instances never execute a stored snapshot. Without a `guardRegistry` configured, every guard reference counts as missing.
+
+If anything is unresolvable, one message lists every offending workflow, version, active-instance count, the missing command/guard names and any validation errors, e.g.:
+
+```
+Workflow "order": version 3 (12 active instances) references unregistered commands [chargeLegacy], guards [isVip]; Workflow "invoice": version 1 (1 active instance) is invalid: Event names starting with "$" are reserved
+```
+
+- `onUnresolvable: "fail"` (the default) throws `WorkflowDefinitionError` — the first offending workflow's name is on the error, the message lists all of them.
+- `onUnresolvable: "warn"` logs the message with `console.warn` and continues.
+
+Without an explicit `initialize()` at boot, the check runs lazily, and a `"fail"` fails every `createInstance()`, `triggerEvent()`, `processExpiredWorkflows()`, and `rearmTimeout()` call — for every workflow, not just the offending one — until it is fixed. The NestJS module calls `initialize()` during module init.
+
+Legacy (`definitionVersion: null`) instances resolve the in-code definition (validated at registration), so they are never counted. Workflows removed from code entirely aren't covered — their names are unknown to the runtime, and their instances fail as they do today.
+
+### Which definition governs
+
+| Operation                         | Resolution                                                                                                                 |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `createInstance()`                | Always the latest registered definition.                                                                                   |
+| `triggerEvent()`                  | The instance's pinned version, loaded from the store if it differs from the latest; the latest under `"latest"`.           |
+| `processExpiredWorkflows()` sweep | Same as `triggerEvent()`, resolved per instance inside its own transaction, so a mixed-version batch is handled correctly. |
+| `getAvailableEvents()`            | Same as `triggerEvent()`.                                                                                                  |
+
+Under `versionPolicy: "latest"`, an instance whose current state is missing from the latest definition throws `IncompatibleDefinitionError` instead of resolving. A sweep resolution failure (a missing or invalid snapshot, or `IncompatibleDefinitionError`) is treated as an infrastructure failure like any other timeout failure: it goes through the sweep's [retry/parking](#retries-and-parking) mechanism rather than aborting the batch. In `triggerEvent()` and `getAvailableEvents()`, the error propagates to the caller. See [Definition versions](./workflow-definitions.md#definition-versions) for the full pinning model.
 
 ### createInstance()
 
@@ -144,6 +175,8 @@ interface WorkflowExecutionResult {
   historyUuid: string;
 }
 ```
+
+Right after locking the instance (step 2), the runtime resolves its governing definition per [Which definition governs](#which-definition-governs): under `versionPolicy: "latest"`, an instance whose current state doesn't exist in the latest definition throws `IncompatibleDefinitionError` instead of proceeding; a pinned instance whose stored snapshot is missing or invalid throws `WorkflowDefinitionError`.
 
 `outcome` is aggregated across both the event execution and the subsequent onEnter chain:
 
@@ -236,6 +269,13 @@ async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<Pro
    - Re-locks the instance with `lockByUuid` and re-checks that its timeout is
      still due — the scan's locks were released, so another worker may have
      processed the instance in between. Instances no longer due are skipped.
+   - Resolves the instance's governing definition per [Which definition
+     governs](#which-definition-governs) -- each instance is resolved
+     independently, inside its own transaction, so a batch mixing pinned
+     versions and `"latest"` instances is handled correctly. A resolution
+     failure (missing/invalid snapshot, or `IncompatibleDefinitionError`) is
+     treated as an infrastructure failure like any other and goes through the
+     retry/parking path below, instead of aborting the batch.
    - Resolves the timeout event name from the freshly locked state. If the
      definition changed and no timeout event exists, clears `expiresAt`.
    - Triggers the event with `triggerMetadata: { source: "timeout" }` and runs
@@ -330,6 +370,8 @@ interface AvailableWorkflowEvent {
 }
 ```
 
+Resolves the instance's governing definition per [Which definition governs](#which-definition-governs) and lists that definition's events for the instance's current state -- a pinned instance still on an old version sees that version's events, not the latest. Throws `IncompatibleDefinitionError` under `versionPolicy: "latest"` if the instance's state no longer exists in the latest definition.
+
 **Example:**
 
 ```ts
@@ -387,6 +429,39 @@ for (const record of history) {
 Each record's `createdAt` is when the store recorded that transition (populated on read; adapters that predate this field return `undefined`). **Caveat:** every history row written inside the same database transaction -- an event plus its entire `onEnter` chain -- shares an identical `createdAt`, so it must not be used to reconstruct the order of steps within a single multi-hop transition, only roughly when the transition happened.
 
 The array returned by `getHistory()` (and `findByInstanceUuid()` underneath it) is itself ordered `created_at DESC, uuid DESC`, so this caveat is also about the order of the returned array, not just the `createdAt` field on each record. With the `@duraflows/pg` default `uuidStrategy` (`gen_random_uuid`), a multi-hop transition's rows come back in an arbitrary (but stable) order; pass `uuidStrategy: "uuidv7"` to `generateMigrationSql()` (PostgreSQL 18+ only) to make them come back in the order they actually happened. See [Persistence: Ordering within a multi-hop transition](./persistence.md#ordering-within-a-multi-hop-transition) for the full explanation and a verified empirical example.
+
+### listDefinitionVersions()
+
+Reports every stored version of a workflow and how many non-terminal instances are still stamped with it — use it to decide when an old version has drained and its commands/guards can be retired.
+
+```ts
+async listDefinitionVersions(workflowName: string): Promise<DefinitionVersionSummary[]>
+```
+
+```ts
+interface DefinitionVersionSummary {
+  version: number;
+  contentHash: string;
+  registeredAt: Date;
+  activeInstances: number; // non-terminal instances stamped with this version
+}
+```
+
+Results are ordered by `version` ascending (`WorkflowDefinitionStore.listVersions()`'s contract). "Terminal" means a state with no `events` (or an empty map) and no `onEnter` — the same rule the [startup executability check](#startup-executability-check) uses; instances resting in one are not counted as active.
+
+A plain read: it does not call `initialize()`, so it can be used before or independently of runtime startup.
+
+**Throws:**
+
+- `WorkflowError("listDefinitionVersions requires a definition store")` — the runtime was constructed without a `definitionStore`.
+
+**Example:**
+
+```ts
+const versions = await runtime.listDefinitionVersions("order");
+// [{ version: 1, contentHash: "...", registeredAt: ..., activeInstances: 0 }, ...]
+const drained = versions.filter((v) => v.version < 2 && v.activeInstances === 0);
+```
 
 ### getHandle()
 

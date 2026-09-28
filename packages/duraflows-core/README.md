@@ -95,6 +95,7 @@ const runtime = new WorkflowRuntime({
   transactionRunner, // implements WorkflowTransactionRunner
   clock: { now: () => new Date() },
 });
+await runtime.initialize(); // surfaces definition/version errors at boot
 
 const instance = await runtime.createInstance({ workflowName: "order" });
 

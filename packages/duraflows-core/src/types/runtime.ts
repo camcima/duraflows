@@ -143,3 +143,12 @@ export interface ProcessExpiredWorkflowsResult {
 export interface GetAvailableEventsInput {
   workflowInstanceUuid: string;
 }
+
+/** A stored definition version, as reported by `WorkflowRuntime.listDefinitionVersions`. */
+export interface DefinitionVersionSummary {
+  version: number;
+  contentHash: string;
+  registeredAt: Date;
+  /** Instances stamped with this version whose current state is not terminal. */
+  activeInstances: number;
+}

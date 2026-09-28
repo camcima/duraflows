@@ -64,6 +64,9 @@ CREATE INDEX workflow_instances_timeout_parked_idx
   ON workflow_instances (timeout_parked_at)
   WHERE timeout_parked_at IS NOT NULL;
 
+CREATE INDEX workflow_instances_definition_version_idx
+  ON workflow_instances (workflow_name, definition_version);
+
 CREATE TABLE workflow_history (
   uuid                    uuid PRIMARY KEY DEFAULT ${uuidDefault},
   workflow_instance_uuid  uuid NOT NULL

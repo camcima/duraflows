@@ -26,6 +26,7 @@ export type {
   ProcessExpiredWorkflowsResult,
   FindParkedTimeoutsInput,
   GetAvailableEventsInput,
+  DefinitionVersionSummary,
 } from "./types/runtime.js";
 
 // Types — Persistence
@@ -53,6 +54,7 @@ export {
   InvalidEventError,
   CommandFailureError,
   OnEnterDepthExceededError,
+  IncompatibleDefinitionError,
 } from "./errors/index.js";
 
 // Registries

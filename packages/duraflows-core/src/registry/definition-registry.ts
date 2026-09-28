@@ -51,6 +51,17 @@ export class InMemoryDefinitionRegistry implements WorkflowDefinitionRegistry {
       );
     }
 
+    if (
+      definition.versionPolicy !== undefined &&
+      definition.versionPolicy !== "pinned" &&
+      definition.versionPolicy !== "latest"
+    ) {
+      throw new WorkflowDefinitionError(
+        definition.name,
+        `versionPolicy must be "pinned" or "latest", got ${JSON.stringify(definition.versionPolicy)}`,
+      );
+    }
+
     const frozen = deepFreeze(structuredClone(definition));
 
     if (this.validator) {

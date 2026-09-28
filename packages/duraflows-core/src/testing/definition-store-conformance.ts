@@ -114,5 +114,28 @@ export function runDefinitionStoreConformance(label: string, harness: Definition
         await teardown();
       }
     });
+
+    it("listVersions returns one workflow's snapshots ordered by version", async () => {
+      const { store, teardown } = await harness.setup();
+      try {
+        await store.ensure({ ...record, version: 3, contentHash: `sha256:${"03".repeat(32)}` });
+        await store.ensure(record);
+        await store.ensure({
+          ...record,
+          workflowName: "other-wf",
+          definitionJson: { ...definitionJson, name: "other-wf" },
+        });
+        await store.ensure({ ...record, version: 2, contentHash: `sha256:${"02".repeat(32)}` });
+
+        const versions = await store.listVersions("conformance-wf");
+        expect(versions.map((v) => v.version)).toEqual([1, 2, 3]);
+        expect(versions.every((v) => v.workflowName === "conformance-wf")).toBe(true);
+        expect(versions[0].definitionJson).toEqual(definitionJson);
+        expect(versions[0].registeredAt).toBeInstanceOf(Date);
+        expect(await store.listVersions("no-such-wf")).toEqual([]);
+      } finally {
+        await teardown();
+      }
+    });
   });
 }

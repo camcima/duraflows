@@ -315,5 +315,37 @@ export function runInstanceStoreConformance(label: string, harness: InstanceStor
         await teardown();
       }
     });
+
+    it("countInstances filters by workflow, definition version and excluded states", async () => {
+      const { store, transactionRunner, teardown } = await harness.setup();
+      try {
+        const rows = [
+          makeInstance({ uuid: "00000000-0000-0000-0000-000000000060", definitionVersion: 1, currentState: "open" }),
+          makeInstance({ uuid: "00000000-0000-0000-0000-000000000061", definitionVersion: 1, currentState: "open" }),
+          makeInstance({ uuid: "00000000-0000-0000-0000-000000000062", definitionVersion: 1, currentState: "closed" }),
+          makeInstance({ uuid: "00000000-0000-0000-0000-000000000063", definitionVersion: 2, currentState: "open" }),
+          makeInstance({
+            uuid: "00000000-0000-0000-0000-000000000064",
+            workflowName: "other-workflow",
+            definitionVersion: 1,
+            currentState: "open",
+          }),
+          makeInstance({ uuid: "00000000-0000-0000-0000-000000000065", definitionVersion: null, currentState: "open" }),
+        ];
+        for (const row of rows) {
+          await transactionRunner.runInTransaction(() => store.create(row));
+        }
+
+        const count = (definitionVersion: number, excludeStates: readonly string[]) =>
+          store.countInstances({ workflowName: "test-workflow", definitionVersion, excludeStates });
+        expect(await count(1, ["closed"])).toBe(2);
+        expect(await count(1, [])).toBe(3);
+        expect(await count(1, ["open", "closed"])).toBe(0);
+        expect(await count(2, ["closed"])).toBe(1);
+        expect(await count(9, [])).toBe(0);
+      } finally {
+        await teardown();
+      }
+    });
   });
 }

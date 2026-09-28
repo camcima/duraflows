@@ -52,6 +52,9 @@ const stubInstanceStore: WorkflowInstanceStore = {
   async findParkedTimeouts(): Promise<WorkflowInstance[]> {
     return [];
   },
+  async countInstances(): Promise<number> {
+    return 0;
+  },
 };
 
 const stubHistoryStore: WorkflowHistoryStore = {
@@ -487,6 +490,7 @@ describe("WorkflowModule.forRootAsync()", () => {
                       return { ...record, registeredAt: new Date() };
                     },
                     findByNameAndVersion: async () => null,
+                    listVersions: async () => [],
                   },
                 },
                 clock: fixedClock,
@@ -532,6 +536,7 @@ describe("WorkflowModule.forRootAsync()", () => {
                     return { ...record, registeredAt: new Date() };
                   },
                   findByNameAndVersion: async () => null,
+                  listVersions: async () => [],
                 },
               },
               clock: fixedClock,

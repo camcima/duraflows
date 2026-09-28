@@ -10,6 +10,7 @@ classDiagram
     WorkflowError <|-- WorkflowDefinitionError
     WorkflowError <|-- InvalidArgumentError
     WorkflowError <|-- InvalidEventError
+    WorkflowError <|-- IncompatibleDefinitionError
     WorkflowError <|-- CommandFailureError
     WorkflowError <|-- OnEnterDepthExceededError
 ```
@@ -68,6 +69,8 @@ class WorkflowDefinitionError extends WorkflowError {
 - Compilation failure during `register()` (e.g., non-existent target/error state in finita process)
 - Looking up a workflow that doesn't exist in the registry (via `get()`)
 - `initialize()` finding that a known `(workflowName, version)` pair's stored content hash differs from the registered definition's — i.e., the definition's content changed without its `version` being bumped
+- `initialize()`'s startup executability check (`onUnresolvable: "fail"`, the default): a stored definition version that still has active instances references a command or guard that is not registered, or its snapshot is structurally invalid
+- A pinned instance resolving to a stored version that is missing from the definition store, or whose stored snapshot fails structural validation
 - Startup validation in NestJS: a command name referenced in a workflow definition has no registered implementation (neither via `@WorkflowCommand` decorator nor explicit `commands` array)
 
 ```ts
@@ -114,8 +117,9 @@ class InvalidArgumentError extends WorkflowError {
 - `runtime.processExpiredWorkflows({ limit })` — `limit` must be a positive safe integer
 - `runtime.getHistory(uuid, { limit, offset })` — `limit` must be a positive safe integer; `offset` must be a non-negative safe integer
 - `new WorkflowRuntime({ maxOnEnterDepth })` — `maxOnEnterDepth` must be a positive safe integer
+- `new WorkflowRuntime({ onUnresolvable })` — must be `"fail"` or `"warn"` when provided
 
-Message shape: `"<name> must be a positive integer, got <value>"` for positive-only arguments (`limit`, `maxOnEnterDepth`), or `"<name> must be a non-negative integer, got <value>"` for `offset`.
+Message shape: `"<name> must be a positive integer, got <value>"` for positive-only arguments (`limit`, `maxOnEnterDepth`), or `"<name> must be a non-negative integer, got <value>"` for `offset`. `onUnresolvable`'s message is `onUnresolvable must be "fail" or "warn", got <value>`.
 
 ```ts
 try {
@@ -164,6 +168,47 @@ try {
   }
 }
 ```
+
+## IncompatibleDefinitionError
+
+Thrown when an instance's current state does not exist in the definition that governs it.
+
+```ts
+class IncompatibleDefinitionError extends WorkflowError {
+  readonly workflowInstanceUuid: string;
+  readonly workflowName: string;
+  readonly currentState: string;
+  readonly version: number;
+  constructor(workflowInstanceUuid: string, workflowName: string, currentState: string, version: number);
+}
+```
+
+| Property               | Type     | Description                                            |
+| ---------------------- | -------- | ------------------------------------------------------ |
+| `workflowInstanceUuid` | `string` | The instance UUID                                      |
+| `workflowName`         | `string` | The workflow name                                      |
+| `currentState`         | `string` | The instance's current state                           |
+| `version`              | `number` | The definition version that does not define that state |
+
+**When thrown:** an instance's governing definition has `versionPolicy: "latest"` and its current state is not an own key of the latest registered definition's `states`. See [Definition versions](./workflow-definitions.md#definition-versions). An event that no longer exists on a state the definition _does_ still have throws `InvalidEventError` instead — this error is specifically about a missing state.
+
+```ts
+try {
+  await runtime.triggerEvent({
+    workflowInstanceUuid: instance.uuid,
+    eventName: "Ship",
+  });
+} catch (err) {
+  if (err instanceof IncompatibleDefinitionError) {
+    console.error(err.currentState); // the state the latest definition no longer has
+    console.error(err.version); // the latest definition's version
+  }
+}
+```
+
+**How to fix:** either keep the old state in the definition until every instance has moved off it, or switch the definition back to `versionPolicy: "pinned"` (the default) so in-flight instances keep executing the version they were stamped with instead of the latest one.
+
+In `@duraflows/nestjs`, the bundled `WorkflowExceptionFilter` maps this to **409 Conflict**, the same as `InvalidEventError`.
 
 ## CommandFailureError
 
@@ -367,6 +412,7 @@ import {
   WorkflowError,
   WorkflowDefinitionError,
   InvalidEventError,
+  IncompatibleDefinitionError,
   CommandFailureError,
   OnEnterDepthExceededError,
 } from "@duraflows/core";
@@ -377,6 +423,10 @@ try {
   if (err instanceof InvalidEventError) {
     // Event not available on current state
     return { status: 400, message: `Event "${err.eventName}" is not available in state "${err.currentState}"` };
+  }
+  if (err instanceof IncompatibleDefinitionError) {
+    // Instance's state doesn't exist in the latest ("latest"-policy) definition
+    return { status: 409, message: err.message };
   }
   if (err instanceof CommandFailureError) {
     // Command failed with no error state

@@ -40,6 +40,7 @@ const runtime = new WorkflowRuntime({
   ...persistence,
   clock: { now: () => new Date() },
 });
+await runtime.initialize(); // surfaces definition/version errors at boot
 ```
 
 ## Sharing a Transaction
@@ -108,7 +109,7 @@ A database type declared as `interface AppDb extends WorkflowDatabase` picks up 
 
 ## Database Setup
 
-This package uses the same database schema as `@duraflows/pg`. Use the migration generator from `@duraflows/pg` or copy the reference migration:
+This package uses the same database schema as `@duraflows/pg`, including migration `006_definition_version_index.sql` (recommended, not required -- it keeps the 7.0.0 startup executability check and `listDefinitionVersions()` cheap on large tables). Use the migration generator from `@duraflows/pg` or copy the reference migration:
 
 ```ts
 import { generateMigrationSql } from "@duraflows/pg";
@@ -117,6 +118,8 @@ const { up, down } = generateMigrationSql();
 ```
 
 See the [`@duraflows/pg` README](https://github.com/camcima/duraflows/tree/main/packages/duraflows-pg#database-setup) for full details.
+
+`KyselyWorkflowInstanceStore` and `KyselyWorkflowDefinitionStore` implement the two store methods (`countInstances()`, `listVersions()`) that back 7.0.0's definition-version pinning and startup executability check. See [Definition versions](https://github.com/camcima/duraflows/blob/main/docs/workflow-definitions.md#definition-versions), and [Upgrading to 7.0.0](https://github.com/camcima/duraflows/blob/main/docs/workflow-definitions.md#upgrading-to-700) before deploying.
 
 ## API
 

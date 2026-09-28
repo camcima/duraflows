@@ -37,14 +37,14 @@ const sampleRow = {
 // including the nested `onConflict((oc) => oc.columns(...).doNothing())`
 // callback that `insertInto(...).onConflict(...)` invokes.
 function createMockDb(queryResult: Record<string, unknown>[] = []) {
-  const executeMock = vi.fn().mockResolvedValue(undefined);
+  const executeMock = vi.fn().mockResolvedValue(queryResult);
   const executeTakeFirstMock = vi.fn().mockResolvedValue(queryResult[0] ?? undefined);
 
   const calls: { method: string; args: unknown[] }[] = [];
 
   const chainBuilder = (): Record<string, unknown> => {
     const builder: Record<string, ReturnType<typeof vi.fn>> = {};
-    const methods = ["insertInto", "values", "selectFrom", "selectAll", "where"];
+    const methods = ["insertInto", "values", "selectFrom", "selectAll", "where", "orderBy"];
     for (const method of methods) {
       builder[method] = vi.fn((...args: unknown[]) => {
         calls.push({ method, args });
@@ -190,6 +190,19 @@ describe("KyselyWorkflowDefinitionStore", () => {
 
       expect(result).not.toBeNull();
       expect(result!.workflowName).toBe("order");
+    });
+  });
+
+  describe("listVersions()", () => {
+    it("filters by workflow and orders by version", async () => {
+      const { db, calls } = createMockDb([sampleRow]);
+      const store = new KyselyWorkflowDefinitionStore(db);
+
+      const versions = await store.listVersions("order");
+
+      expect(calls).toContainEqual({ method: "where", args: ["workflow_name", "=", "order"] });
+      expect(calls).toContainEqual({ method: "orderBy", args: ["version"] });
+      expect(versions).toHaveLength(1);
     });
   });
 });

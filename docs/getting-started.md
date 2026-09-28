@@ -258,6 +258,7 @@ const runtime = new WorkflowRuntime({
   ...pgWorkflowProviders(pool),
   clock: { now: () => new Date() },
 });
+await runtime.initialize(); // surfaces definition/version errors at boot
 ```
 
 ### Step 4: Create and Transition Instances

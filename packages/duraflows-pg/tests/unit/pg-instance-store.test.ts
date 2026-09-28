@@ -320,4 +320,22 @@ describe("PgWorkflowInstanceStore", () => {
       expect((await store.findByUuid("inst-uuid"))!.timeoutRetry).toBeNull();
     });
   });
+
+  describe("countInstances()", () => {
+    it("passes the filters and returns the integer count", async () => {
+      const pool = createMockPool({ rows: [{ count: 7 }], rowCount: 1 });
+      const store = new PgWorkflowInstanceStore(pool);
+
+      const count = await store.countInstances({
+        workflowName: "order",
+        definitionVersion: 2,
+        excludeStates: ["done"],
+      });
+
+      const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain("NOT (current_state = ANY($3::text[]))");
+      expect(params).toEqual(["order", 2, ["done"]]);
+      expect(count).toBe(7);
+    });
+  });
 });

@@ -15,7 +15,7 @@ Auto-generated from all feature plans. Last updated: 2026-09-27
 
 ```text
 packages/duraflows-core/src/
-packages/duraflows-pg/src/        # also sql/dbmate/ migrations 001–005
+packages/duraflows-pg/src/        # also sql/dbmate/ migrations 001–006
 packages/duraflows-kysely/src/
 packages/duraflows-nestjs/src/
 skills/                            # agent skills shipped with the repo

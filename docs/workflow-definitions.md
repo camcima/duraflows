@@ -8,17 +8,19 @@ A workflow definition is a plain TypeScript object that describes the states, ev
 interface WorkflowDefinition {
   name: string;
   version?: number;
+  versionPolicy?: "pinned" | "latest";
   initialState: string;
   states: Record<string, WorkflowStateDefinition>;
 }
 ```
 
-| Property       | Type                                      | Required | Description                                                                                                                                    |
-| -------------- | ----------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`         | `string`                                  | Yes      | Unique identifier for the workflow. Must be non-empty.                                                                                         |
-| `version`      | `number`                                  | No       | Explicit definition version, defaulting to `1` when omitted. Must be a positive safe integer. See [Definition versions](#definition-versions). |
-| `initialState` | `string`                                  | Yes      | Name of the starting state. Must exist in `states`.                                                                                            |
-| `states`       | `Record<string, WorkflowStateDefinition>` | Yes      | Map of state names to state definitions. At least one state required.                                                                          |
+| Property        | Type                                      | Required | Description                                                                                                                                    |
+| --------------- | ----------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`          | `string`                                  | Yes      | Unique identifier for the workflow. Must be non-empty.                                                                                         |
+| `version`       | `number`                                  | No       | Explicit definition version, defaulting to `1` when omitted. Must be a positive safe integer. See [Definition versions](#definition-versions). |
+| `versionPolicy` | `"pinned" \| "latest"`                    | No       | Which definition governs existing instances, defaulting to `"pinned"`. See [Definition versions](#definition-versions).                        |
+| `initialState`  | `string`                                  | Yes      | Name of the starting state. Must exist in `states`.                                                                                            |
+| `states`        | `Record<string, WorkflowStateDefinition>` | Yes      | Map of state names to state definitions. At least one state required.                                                                          |
 
 ### Example
 
@@ -54,17 +56,149 @@ and lazily by the first operation otherwise) snapshots each registered
 definition into the `workflow_definitions` table and compares content hashes:
 re-registering a known version with changed content fails fast with
 `WorkflowDefinitionError` instead of silently running drifted definitions.
-The content hash deliberately excludes `version` itself, so relabeling a
-version without changing anything else never trips the guard.
+The content hash deliberately excludes `version` (and `versionPolicy` --
+see below) itself, so relabeling a version, or flipping its policy, without
+changing anything else never trips the guard.
 
 Instances record the definition version that governs them
 (`WorkflowInstance.definitionVersion`), and every history row records the
-version that governed that transition. Instances created before versioning
-existed have `definitionVersion: null` and are stamped on their next
-transition. **In the current release, resolution behavior is unchanged: all
-instances still execute the currently registered definition regardless of
-the version they were stamped with.** The version stamp is provenance only
--- version-pinned execution is planned for a later release.
+version that governed that transition.
+
+### Pinned by default
+
+Each instance executes the definition version it was stamped with, not
+whatever is currently registered. When a newer version is deployed --
+renaming a state, changing an event's target, removing a command -- an
+instance already in flight keeps running the version it started on, loaded
+from the stored snapshot in `workflow_definitions`. New instances always
+start on the latest registered version.
+
+Instances created before versioning existed (`definitionVersion: null`) are
+the one exception: they resolve the latest registered definition and are
+stamped with it on their next successful transition.
+
+### `versionPolicy: "latest"`
+
+Set `versionPolicy: "latest"` on a definition to run every instance of that
+workflow on the currently registered definition instead, matching the
+behavior of releases before 7.0.0:
+
+```ts
+const orderWorkflow: WorkflowDefinition = {
+  name: "order",
+  version: 3,
+  versionPolicy: "latest",
+  initialState: "new",
+  states: {/* ... */},
+};
+```
+
+**The latest registered definition's `versionPolicy` governs every instance of
+that workflow** -- it expresses the deployer's current intent, not a
+per-instance setting. If an instance's current state does not exist in the
+latest definition, it fails loudly with `IncompatibleDefinitionError` instead
+of silently running on a definition that cannot describe it. An event that no
+longer exists on a state it does have keeps surfacing as the existing
+`InvalidEventError` -- only a missing _state_ is `IncompatibleDefinitionError`.
+
+### Deploying a change safely
+
+1. Bump `version` on the definition.
+2. Keep the commands and guards the old version references registered --
+   deleting one that a still-active pinned instance needs breaks it, and
+   `WorkflowRuntime.initialize()`'s startup check (see
+   [startup executability check](./core-runtime.md#startup-executability-check)) fails startup by
+   default if you delete them too early. The same check also fails startup when
+   a stored version that still has active instances is structurally invalid --
+   for example a snapshot written by 6.x with a `$`-prefixed event name.
+3. Once the old version has no active instances left, its commands and guards
+   can be retired. Check with `runtime.listDefinitionVersions(name)`:
+
+```ts
+const versions = await runtime.listDefinitionVersions("order");
+// [{ version: 1, activeInstances: 0, ... }, { version: 2, activeInstances: 42, ... }]
+const drained = versions.filter((v) => v.version < 2 && v.activeInstances === 0);
+```
+
+See [`listDefinitionVersions`](./core-runtime.md#listdefinitionversions) for
+the full signature.
+
+### Without a definition store
+
+Definition-version pinning requires a `definitionStore`
+(`WorkflowPersistenceProvider.definitionStore`). Without one, pinning is
+inactive: every instance executes the latest registered definition,
+regardless of `versionPolicy` or the version it was stamped with, and a
+one-time warning is logged if any registered definition is pinned (the
+default). The bundled `@duraflows/pg` and `@duraflows/kysely` providers
+always supply a definition store, so this only matters for a custom adapter
+that omits `definitionStore`.
+
+### Limitation: timeout deadlines are not recomputed retroactively
+
+A persisted deadline (`WorkflowInstance.expiresAt`) is recomputed only when a
+state is next entered. If a newer version changes a state's timeout duration,
+instances already waiting in that state keep their existing deadline; a
+newly-entered instance (or one that re-enters the state) picks up the new
+duration. Under `versionPolicy: "latest"`, an instance's _next_ transition
+uses the new definition, but its current deadline is unaffected until then.
+
+### Reserved event names
+
+Event names starting with `$` are rejected by validation (`Event names
+starting with "$" are reserved`). This keeps `$migrated` and future
+system-generated events unambiguous -- don't name your own events `$foo`.
+
+### Upgrading to 7.0.0
+
+In 6.x every transition re-stamped an instance with the then-latest version,
+so an instance that has sat idle since an earlier version bump is still
+stamped with that older version. From the first 7.0.0 deploy -- even with no
+definition change -- such instances execute that older version's rules
+(loaded from its stored snapshot), without any fix made in a later version.
+
+Before upgrading, see which versions your instances are on (PostgreSQL):
+
+```sql
+select workflow_name, definition_version, count(*)
+from workflow_instances group by 1, 2 order by 1, 2;
+```
+
+Compare each row with the workflow's current in-code `version`: instances on
+an older version revert to that version's rules. Instances resting in a
+terminal state never execute again, and `null` rows (created before 5.0)
+resolve the latest version, so neither matters.
+
+- **Keep 6.x behavior** for a workflow by setting `versionPolicy: "latest"`
+  on its definition -- see [`versionPolicy: "latest"`](#versionpolicy-latest).
+- **Expect the startup check to trip.** The most likely first-deploy failure
+  is the [startup executability check](./core-runtime.md#startup-executability-check)
+  finding an old version with active instances that references commands or
+  guards deleted long ago (or whose snapshot is now invalid, e.g. a
+  `$`-prefixed event name). Either re-register what is missing until that
+  version drains, or set `versionPolicy: "latest"`. `onUnresolvable: "warn"`
+  only moves the failure to runtime: those instances throw, and the timeout
+  sweep backs off and eventually parks them.
+- **Call `initialize()` at boot.** Without it the check runs lazily, and a
+  failure fails every `createInstance()`, `triggerEvent()`,
+  `processExpiredWorkflows()` and `rearmTimeout()` call -- for every workflow
+  -- until it is fixed. The NestJS module calls `initialize()` during module
+  init.
+- **Mixed 6.x / 7.0 workers.** 6.x workers always run the latest registered
+  definition and re-stamp instances to it. Deploy 7.0.0 to every worker with
+  _unchanged_ definitions first; bump a definition's `version` only once
+  every worker runs 7.0.
+- **Rolling back within 7.x.** A rollback build that lacks commands or guards
+  a newer version's active instances reference fails startup; set
+  `onUnresolvable: "warn"` on the rollback build.
+- **Custom persistence adapters** must implement
+  `WorkflowInstanceStore.countInstances()` and, if they provide a definition
+  store, `WorkflowDefinitionStore.listVersions()` -- see
+  [Writing a Custom Adapter](./persistence.md#writing-a-custom-adapter).
+- **Event names starting with `$` are rejected** -- see
+  [Reserved event names](#reserved-event-names).
+- **Apply migration `006`** (recommended, not required) -- see
+  [Definition version index](./persistence.md#definition-version-index).
 
 ## WorkflowStateDefinition
 

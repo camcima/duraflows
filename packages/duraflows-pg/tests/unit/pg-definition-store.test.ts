@@ -164,4 +164,19 @@ describe("PgWorkflowDefinitionStore", () => {
       expect(pool.query).not.toHaveBeenCalled();
     });
   });
+
+  describe("listVersions()", () => {
+    it("selects one workflow's rows ordered by version and maps them", async () => {
+      const pool = createMockPool({ rows: [sampleRow], rowCount: 1 });
+      const store = new PgWorkflowDefinitionStore(pool);
+
+      const versions = await store.listVersions("order");
+
+      const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain("WHERE workflow_name = $1 ORDER BY version");
+      expect(params).toEqual(["order"]);
+      expect(versions).toHaveLength(1);
+      expect(versions[0].registeredAt).toBeInstanceOf(Date);
+    });
+  });
 });

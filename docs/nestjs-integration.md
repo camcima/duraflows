@@ -122,17 +122,18 @@ export class AppModule {}
 
 **WorkflowModuleOptions:**
 
-| Property            | Type                            | Required | Description                                                                                                                                                      |
-| ------------------- | ------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workflows`         | `WorkflowDefinition[]`          | Yes      | Workflow definitions to register                                                                                                                                 |
-| `commands`          | `WorkflowCommandRegistration[]` | No       | Explicit command handler registrations. Optional if using `@WorkflowCommand` decorator.                                                                          |
-| `guards`            | `WorkflowGuard[]`               | No       | Guard implementations. Registered into an `InMemoryGuardRegistry` at module bootstrap. See [Guards](#guards).                                                    |
-| `guardRegistry`     | `WorkflowGuardRegistry`         | No       | Prebuilt guard registry. Mutually exclusive with `guards`. Use when you need a custom registry implementation.                                                   |
-| `observers`         | `WorkflowObserver[]`            | No       | Lifecycle observers registered with the runtime. See [Observers](#observers).                                                                                    |
-| `persistence`       | `WorkflowPersistenceProvider`   | Yes      | Persistence implementations (instance store, history store, transaction runner)                                                                                  |
-| `clock`             | `WorkflowClock`                 | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                                                                                            |
-| `timeoutRetry`      | `WorkflowTimeoutRetryOptions`   | No       | How timeout failures are retried and parked: `{ initialDelayMs?, maxDelayMs?, maxAttempts? }`. See [Retries and parking](./core-runtime.md#retries-and-parking). |
-| `enableControllers` | `boolean`                       | No       | If `true`, registers REST controllers. Defaults to `false`                                                                                                       |
+| Property            | Type                            | Required | Description                                                                                                                                                                                                                                                                                                      |
+| ------------------- | ------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflows`         | `WorkflowDefinition[]`          | Yes      | Workflow definitions to register                                                                                                                                                                                                                                                                                 |
+| `commands`          | `WorkflowCommandRegistration[]` | No       | Explicit command handler registrations. Optional if using `@WorkflowCommand` decorator.                                                                                                                                                                                                                          |
+| `guards`            | `WorkflowGuard[]`               | No       | Guard implementations. Registered into an `InMemoryGuardRegistry` at module bootstrap. See [Guards](#guards).                                                                                                                                                                                                    |
+| `guardRegistry`     | `WorkflowGuardRegistry`         | No       | Prebuilt guard registry. Mutually exclusive with `guards`. Use when you need a custom registry implementation.                                                                                                                                                                                                   |
+| `observers`         | `WorkflowObserver[]`            | No       | Lifecycle observers registered with the runtime. See [Observers](#observers).                                                                                                                                                                                                                                    |
+| `persistence`       | `WorkflowPersistenceProvider`   | Yes      | Persistence implementations (instance store, history store, transaction runner)                                                                                                                                                                                                                                  |
+| `clock`             | `WorkflowClock`                 | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                                                                                                                                                                                                                                            |
+| `timeoutRetry`      | `WorkflowTimeoutRetryOptions`   | No       | How timeout failures are retried and parked: `{ initialDelayMs?, maxDelayMs?, maxAttempts? }`. See [Retries and parking](./core-runtime.md#retries-and-parking).                                                                                                                                                 |
+| `onUnresolvable`    | `"fail" \| "warn"`              | No       | What module init does when a stored definition version that still has active instances references an unregistered command or guard, or is structurally invalid: `"fail"` (default) fails startup, `"warn"` logs and continues. See [Startup executability check](./core-runtime.md#startup-executability-check). |
+| `enableControllers` | `boolean`                       | No       | If `true`, registers REST controllers. Defaults to `false`                                                                                                                                                                                                                                                       |
 
 ### forRootAsync()
 
@@ -174,13 +175,14 @@ export class AppModule {}
 
 **WorkflowModuleFactoryConfig** (returned by `useFactory`):
 
-| Property       | Type                          | Required | Description                                                                                                                                                      |
-| -------------- | ----------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workflows`    | `WorkflowDefinition[]`        | Yes      | Workflow definitions to register                                                                                                                                 |
-| `persistence`  | `WorkflowPersistenceProvider` | Yes      | Persistence implementations                                                                                                                                      |
-| `clock`        | `WorkflowClock`               | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                                                                                            |
-| `observers`    | `WorkflowObserver[]`          | No       | Lifecycle observers. Return them from the factory to compose from injected services.                                                                             |
-| `timeoutRetry` | `WorkflowTimeoutRetryOptions` | No       | How timeout failures are retried and parked: `{ initialDelayMs?, maxDelayMs?, maxAttempts? }`. See [Retries and parking](./core-runtime.md#retries-and-parking). |
+| Property         | Type                          | Required | Description                                                                                                                                                      |
+| ---------------- | ----------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workflows`      | `WorkflowDefinition[]`        | Yes      | Workflow definitions to register                                                                                                                                 |
+| `persistence`    | `WorkflowPersistenceProvider` | Yes      | Persistence implementations                                                                                                                                      |
+| `clock`          | `WorkflowClock`               | No       | Custom clock. Defaults to `{ now: () => new Date() }`                                                                                                            |
+| `observers`      | `WorkflowObserver[]`          | No       | Lifecycle observers. Return them from the factory to compose from injected services.                                                                             |
+| `timeoutRetry`   | `WorkflowTimeoutRetryOptions` | No       | How timeout failures are retried and parked: `{ initialDelayMs?, maxDelayMs?, maxAttempts? }`. See [Retries and parking](./core-runtime.md#retries-and-parking). |
+| `onUnresolvable` | `"fail" \| "warn"`            | No       | See [`WorkflowModuleOptions.onUnresolvable`](#forroot).                                                                                                          |
 
 #### Breaking change: observers moved into useFactory (v0.6.0)
 
@@ -350,14 +352,15 @@ export class OrderService {
 
 **Methods:**
 
-| Method                       | Parameters                    | Returns                             | Description                                |
-| ---------------------------- | ----------------------------- | ----------------------------------- | ------------------------------------------ |
-| `createInstance(input)`      | `CreateWorkflowInstanceInput` | `Promise<WorkflowInstance>`         | Create a new workflow instance             |
-| `triggerEvent(input)`        | `TriggerWorkflowEventInput`   | `Promise<WorkflowExecutionResult>`  | Trigger an event on an instance            |
-| `getAvailableEvents(input)`  | `GetAvailableEventsInput`     | `Promise<AvailableWorkflowEvent[]>` | Get events available for an instance       |
-| `getInstance(uuid)`          | `string`                      | `Promise<WorkflowInstance \| null>` | Get instance by UUID                       |
-| `getHistory(uuid, options?)` | `string, { limit?, offset? }` | `Promise<WorkflowHistoryRecord[]>`  | Get history for an instance                |
-| `getHandle(uuid)`            | `string`                      | `WorkflowHandle`                    | Get a thin proxy handle (sync, no DB call) |
+| Method                                 | Parameters                    | Returns                               | Description                                                                                                                                                                                                                               |
+| -------------------------------------- | ----------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createInstance(input)`                | `CreateWorkflowInstanceInput` | `Promise<WorkflowInstance>`           | Create a new workflow instance                                                                                                                                                                                                            |
+| `triggerEvent(input)`                  | `TriggerWorkflowEventInput`   | `Promise<WorkflowExecutionResult>`    | Trigger an event on an instance                                                                                                                                                                                                           |
+| `getAvailableEvents(input)`            | `GetAvailableEventsInput`     | `Promise<AvailableWorkflowEvent[]>`   | Get events available for an instance                                                                                                                                                                                                      |
+| `getInstance(uuid)`                    | `string`                      | `Promise<WorkflowInstance \| null>`   | Get instance by UUID                                                                                                                                                                                                                      |
+| `getHistory(uuid, options?)`           | `string, { limit?, offset? }` | `Promise<WorkflowHistoryRecord[]>`    | Get history for an instance                                                                                                                                                                                                               |
+| `listDefinitionVersions(workflowName)` | `string`                      | `Promise<DefinitionVersionSummary[]>` | Stored versions and active-instance counts for a workflow. Delegates to `runtime.listDefinitionVersions()`; throws `WorkflowError` without a `definitionStore`. See [`listDefinitionVersions`](./core-runtime.md#listdefinitionversions). |
+| `getHandle(uuid)`                      | `string`                      | `WorkflowHandle`                      | Get a thin proxy handle (sync, no DB call)                                                                                                                                                                                                |
 
 **Example using WorkflowHandle (recommended):**
 
@@ -600,12 +603,13 @@ Response:
 
 All four controllers apply `@UseFilters(WorkflowExceptionFilter)`, which maps domain errors thrown by the runtime to HTTP status codes instead of leaking a generic 500:
 
-| Error class                     | HTTP status                                                                      |
-| ------------------------------- | -------------------------------------------------------------------------------- |
-| `WorkflowInstanceNotFoundError` | 404 Not Found                                                                    |
-| `InvalidEventError`             | 409 Conflict                                                                     |
-| `InvalidArgumentError`          | 400 Bad Request                                                                  |
-| Any other `WorkflowError`       | 500 Internal Server Error (sanitized message; original cause logged server-side) |
+| Error class                     | HTTP status                                                                                                       |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `WorkflowInstanceNotFoundError` | 404 Not Found                                                                                                     |
+| `InvalidEventError`             | 409 Conflict                                                                                                      |
+| `IncompatibleDefinitionError`   | 409 Conflict (same as `InvalidEventError` -- both mean the instance's state doesn't fit the governing definition) |
+| `InvalidArgumentError`          | 400 Bad Request                                                                                                   |
+| Any other `WorkflowError`       | 500 Internal Server Error (sanitized message; original cause logged server-side)                                  |
 
 ## Injection Tokens
 
@@ -696,9 +700,19 @@ WorkflowModule.forRoot({
 The module also registers a `WorkflowRuntimeInitializer` (implementing `OnModuleInit`) that calls `runtime.initialize()` during module init, so definition snapshots sync at boot rather than on the first workflow operation:
 
 - A definition whose content changed without its `version` being bumped throws `WorkflowDefinitionError` at application startup, instead of surfacing later on the first `createInstance()`, `triggerEvent()`, or `processExpiredWorkflows()` call.
+- With a `definitionStore` configured, it also runs the [startup executability check](./core-runtime.md#startup-executability-check): if a stored definition version that still has active instances references a command or guard that isn't registered, or its snapshot is structurally invalid, startup fails with `WorkflowDefinitionError` by default. Set `onUnresolvable: "warn"` on `WorkflowModuleOptions` / `WorkflowModuleFactoryConfig` to log instead of failing.
 - This is inert when the configured `persistence` has no `definitionStore` — the bundled `pgWorkflowProviders()` and `kyselyWorkflowProviders()` always supply one, so it applies automatically whenever you use either.
 
 `WorkflowModule` is a global module, and NestJS runs the lifecycle hooks of global modules **before** those of non-global modules (on both NestJS 11 and 12). So `runtime.initialize()` runs before the `onModuleInit()` of your own modules, including a module you pass to `forRootAsync({ imports })`. The persistence you return from the factory must be usable as soon as it is constructed. A `pg` `Pool` or a Kysely instance is fine, because they connect lazily. A client that only connects in its own `onModuleInit()` is not ready yet.
+
+### Upgrading to 7.0.0
+
+See [Upgrading to 7.0.0](./workflow-definitions.md#upgrading-to-700) for the full checklist (idle instances reverting to older versions' rules, mixed 6.x/7.0 workers, rollbacks, a pre-upgrade query). In short:
+
+- **Pinned by default.** Existing instances now execute the definition version they were stamped with instead of the latest registered one. Set `versionPolicy: "latest"` on a definition to keep 6.x behavior for that workflow.
+- **Custom persistence adapters** must add `WorkflowInstanceStore.countInstances()` and, if they implement `WorkflowDefinitionStore`, `listVersions()`. See [Persistence: Writing a Custom Adapter](./persistence.md#writing-a-custom-adapter).
+- **Event names starting with `"$"` are now rejected** by definition validation.
+- **Startup fails by default** (with a `definitionStore` configured) if a stored version with active instances references an unregistered command or guard, or is structurally invalid. Set `onUnresolvable: "warn"` to downgrade this to a warning instead of failing application startup.
 
 ## NestCommandRegistry
 

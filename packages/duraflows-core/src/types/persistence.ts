@@ -69,6 +69,18 @@ export interface WorkflowInstanceStore {
    * transaction required.
    */
   findParkedTimeouts(options: { limit: number; workflowName?: string }): Promise<WorkflowInstance[]>;
+
+  /**
+   * Count instances of `workflowName` stamped with `definitionVersion` whose
+   * `currentState` is not in `excludeStates` (an empty list excludes nothing).
+   * Instances with a null `definitionVersion` never match. A plain read: no
+   * transaction required.
+   */
+  countInstances(options: {
+    workflowName: string;
+    definitionVersion: number;
+    excludeStates: readonly string[];
+  }): Promise<number>;
 }
 
 export interface WorkflowHistoryStore {
@@ -193,6 +205,14 @@ export interface WorkflowDefinitionStore {
    * Transactional: not required (read-only).
    */
   findByNameAndVersion(workflowName: string, version: number): Promise<StoredWorkflowDefinition | null>;
+
+  /**
+   * All stored snapshots of `workflowName`, ordered by version ascending;
+   * an empty array when there are none.
+   *
+   * Transactional: not required (read-only).
+   */
+  listVersions(workflowName: string): Promise<StoredWorkflowDefinition[]>;
 }
 
 export interface WorkflowPersistenceProvider {
