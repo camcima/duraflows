@@ -707,6 +707,8 @@ The module also registers a `WorkflowRuntimeInitializer` (implementing `OnModule
 
 ### Upgrading to 7.0.0
 
+See [Upgrading to 7.0.0](./workflow-definitions.md#upgrading-to-700) for the full checklist (idle instances reverting to older versions' rules, mixed 6.x/7.0 workers, rollbacks, a pre-upgrade query). In short:
+
 - **Pinned by default.** Existing instances now execute the definition version they were stamped with instead of the latest registered one. Set `versionPolicy: "latest"` on a definition to keep 6.x behavior for that workflow.
 - **Custom persistence adapters** must add `WorkflowInstanceStore.countInstances()` and, if they implement `WorkflowDefinitionStore`, `listVersions()`. See [Persistence: Writing a Custom Adapter](./persistence.md#writing-a-custom-adapter).
 - **Event names starting with `"$"` are now rejected** by definition validation.

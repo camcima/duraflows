@@ -119,7 +119,7 @@ const { up, down } = generateMigrationSql();
 
 See the [`@duraflows/pg` README](https://github.com/camcima/duraflows/tree/main/packages/duraflows-pg#database-setup) for full details.
 
-`KyselyWorkflowInstanceStore` and `KyselyWorkflowDefinitionStore` implement the two store methods (`countInstances()`, `listVersions()`) that back 7.0.0's definition-version pinning and startup executability check. See [Definition versions](https://github.com/camcima/duraflows/blob/main/docs/workflow-definitions.md#definition-versions).
+`KyselyWorkflowInstanceStore` and `KyselyWorkflowDefinitionStore` implement the two store methods (`countInstances()`, `listVersions()`) that back 7.0.0's definition-version pinning and startup executability check. See [Definition versions](https://github.com/camcima/duraflows/blob/main/docs/workflow-definitions.md#definition-versions), and [Upgrading to 7.0.0](https://github.com/camcima/duraflows/blob/main/docs/workflow-definitions.md#upgrading-to-700) before deploying.
 
 ## API
 

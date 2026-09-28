@@ -149,6 +149,57 @@ Event names starting with `$` are rejected by validation (`Event names
 starting with "$" are reserved`). This keeps `$migrated` and future
 system-generated events unambiguous -- don't name your own events `$foo`.
 
+### Upgrading to 7.0.0
+
+In 6.x every transition re-stamped an instance with the then-latest version,
+so an instance that has sat idle since an earlier version bump is still
+stamped with that older version. From the first 7.0.0 deploy -- even with no
+definition change -- such instances execute that older version's rules
+(loaded from its stored snapshot), without any fix made in a later version.
+
+Before upgrading, see which versions your instances are on (PostgreSQL):
+
+```sql
+select workflow_name, definition_version, count(*)
+from workflow_instances group by 1, 2 order by 1, 2;
+```
+
+Compare each row with the workflow's current in-code `version`: instances on
+an older version revert to that version's rules. Instances resting in a
+terminal state never execute again, and `null` rows (created before 5.0)
+resolve the latest version, so neither matters.
+
+- **Keep 6.x behavior** for a workflow by setting `versionPolicy: "latest"`
+  on its definition -- see [`versionPolicy: "latest"`](#versionpolicy-latest).
+- **Expect the startup check to trip.** The most likely first-deploy failure
+  is the [startup executability check](./core-runtime.md#startup-executability-check)
+  finding an old version with active instances that references commands or
+  guards deleted long ago (or whose snapshot is now invalid, e.g. a
+  `$`-prefixed event name). Either re-register what is missing until that
+  version drains, or set `versionPolicy: "latest"`. `onUnresolvable: "warn"`
+  only moves the failure to runtime: those instances throw, and the timeout
+  sweep backs off and eventually parks them.
+- **Call `initialize()` at boot.** Without it the check runs lazily, and a
+  failure fails every `createInstance()`, `triggerEvent()`,
+  `processExpiredWorkflows()` and `rearmTimeout()` call -- for every workflow
+  -- until it is fixed. The NestJS module calls `initialize()` during module
+  init.
+- **Mixed 6.x / 7.0 workers.** 6.x workers always run the latest registered
+  definition and re-stamp instances to it. Deploy 7.0.0 to every worker with
+  _unchanged_ definitions first; bump a definition's `version` only once
+  every worker runs 7.0.
+- **Rolling back within 7.x.** A rollback build that lacks commands or guards
+  a newer version's active instances reference fails startup; set
+  `onUnresolvable: "warn"` on the rollback build.
+- **Custom persistence adapters** must implement
+  `WorkflowInstanceStore.countInstances()` and, if they provide a definition
+  store, `WorkflowDefinitionStore.listVersions()` -- see
+  [Writing a Custom Adapter](./persistence.md#writing-a-custom-adapter).
+- **Event names starting with `$` are rejected** -- see
+  [Reserved event names](#reserved-event-names).
+- **Apply migration `006`** (recommended, not required) -- see
+  [Definition version index](./persistence.md#definition-version-index).
+
 ## WorkflowStateDefinition
 
 ```ts
