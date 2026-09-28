@@ -9,10 +9,12 @@ classDiagram
     Error <|-- WorkflowError
     WorkflowError <|-- WorkflowDefinitionError
     WorkflowError <|-- InvalidArgumentError
+    WorkflowError <|-- WorkflowInstanceNotFoundError
     WorkflowError <|-- InvalidEventError
     WorkflowError <|-- IncompatibleDefinitionError
     WorkflowError <|-- CommandFailureError
     WorkflowError <|-- OnEnterDepthExceededError
+    WorkflowError <|-- MigrationInterruptedError
 ```
 
 ## WorkflowError
@@ -30,11 +32,14 @@ class WorkflowError extends Error {
 | `message` | `string`  | Error description                                  |
 | `cause`   | `unknown` | Optional underlying cause (standard `Error.cause`) |
 
-**When thrown:**
+**When thrown** (directly, not as a subclass):
 
-- Workflow instance not found (by UUID)
 - Optimistic locking failure — the instance was modified concurrently (e.g., `'Optimistic locking failure: workflow instance "..." was modified concurrently (expected version 3)'`)
 - Command not found in registry
+- A COMMIT that PostgreSQL rolled back because an earlier statement in the transaction failed (its error was caught and swallowed) -- `@duraflows/pg` and `@duraflows/kysely` reject with `"COMMIT was rolled back by PostgreSQL because an earlier statement in the transaction failed"` for a transaction they own (the runner's, or `transaction()`). Nothing was persisted and no observers fire.
+- `listDefinitionVersions()` or `migrateInstances()` without a `definitionStore`, and `migrateInstances()` without `instanceUuids` when the instance store has no `findInstanceUuids`
+
+A missing instance throws the subclass [`WorkflowInstanceNotFoundError`](#workflowinstancenotfounderror), so an `instanceof WorkflowError` check also catches it:
 
 ```ts
 try {
@@ -68,7 +73,8 @@ class WorkflowDefinitionError extends WorkflowError {
 - Validation failure during `register()` (e.g., invalid state references, missing target states, unknown command names, a `version` that isn't a positive safe integer)
 - Compilation failure during `register()` (e.g., non-existent target/error state in finita process)
 - Looking up a workflow that doesn't exist in the registry (via `get()`)
-- `initialize()` finding that a known `(workflowName, version)` pair's stored content hash differs from the registered definition's — i.e., the definition's content changed without its `version` being bumped
+- `initialize()` finding that a known `(workflowName, version)` pair's stored content hash differs from the registered definition's — i.e., the definition's content changed without its `version` being bumped. _(v7.2.0)_ The same check also runs when an instance is stamped with the registered version — inside `createInstance()`'s transaction, and when a legacy or `"latest"`-policy instance adopts the latest version in `triggerEvent()` or the timeout sweep — so it can surface from those calls too, not only from `initialize()`
+- _(v7.2.0)_ `migrateInstances()` finding that the target version's stored snapshot differs from the copy the call loaded (`stored version <v> differs from the copy loaded earlier ...`) — reported per instance in `result.failed`, not thrown
 - `initialize()`'s startup executability check (`onUnresolvable: "fail"`, the default): a stored definition version that still has active instances references a command or guard that is not registered, or its snapshot is structurally invalid
 - A pinned instance resolving to a stored version that is missing from the definition store, or whose stored snapshot fails structural validation
 - Startup validation in NestJS: a command name referenced in a workflow definition has no registered implementation (neither via `@WorkflowCommand` decorator nor explicit `commands` array)
@@ -118,6 +124,7 @@ class InvalidArgumentError extends WorkflowError {
 - `runtime.getHistory(uuid, { limit, offset })` — `limit` must be a positive safe integer; `offset` must be a non-negative safe integer
 - `new WorkflowRuntime({ maxOnEnterDepth })` — `maxOnEnterDepth` must be a positive safe integer
 - `new WorkflowRuntime({ onUnresolvable })` — must be `"fail"` or `"warn"` when provided
+- `runtime.migrateInstances(input)` — its upfront validation (`fromVersion`/`toVersion`/`limit`, `states`/`excludeStates`, `cursor`, `stateMapping`); see [`migrateInstances()`](./core-runtime.md#migrateinstances)
 
 Message shape: `"<name> must be a positive integer, got <value>"` for positive-only arguments (`limit`, `maxOnEnterDepth`), or `"<name> must be a non-negative integer, got <value>"` for `offset`. `onUnresolvable`'s message is `onUnresolvable must be "fail" or "warn", got <value>`.
 
@@ -133,6 +140,23 @@ try {
 ```
 
 **How to fix:** Pass a positive safe integer (or a non-negative safe integer for `offset`). `NaN`, `Infinity`, non-integers, and out-of-range values are all rejected.
+
+## WorkflowInstanceNotFoundError
+
+Thrown when an operation that needs an existing instance can't find its UUID.
+
+```ts
+class WorkflowInstanceNotFoundError extends WorkflowError {
+  readonly workflowInstanceUuid: string;
+  constructor(workflowInstanceUuid: string);
+}
+```
+
+| Property               | Type     | Description             |
+| ---------------------- | -------- | ----------------------- |
+| `workflowInstanceUuid` | `string` | The UUID that was given |
+
+**When thrown:** `triggerEvent()`, `getAvailableEvents()` and `rearmTimeout()` with a UUID that doesn't exist. The message is `Workflow instance "<uuid>" not found`. (`getInstance()` returns `null` instead.) In `@duraflows/nestjs`, `WorkflowExceptionFilter` maps it to **404 Not Found**.
 
 ## InvalidEventError
 
@@ -301,6 +325,25 @@ try {
 
 **How to fix:** Review the onEnter chain for unintended loops. The static cycle detector at registration time catches direct cycles, but complex chains with many hops (without cycles) can still exceed the depth limit. Increase `maxOnEnterDepth` in `WorkflowRuntimeOptions` if the chain depth is intentional.
 
+## MigrationInterruptedError
+
+_(v7.2.0)_ Thrown by `migrateInstances()` when _listing_ candidates fails partway through.
+
+```ts
+class MigrationInterruptedError extends WorkflowError {
+  readonly result: MigrateInstancesResult;
+}
+```
+
+| Property | Type                     | Description                                                                          |
+| -------- | ------------------------ | ------------------------------------------------------------------------------------ |
+| `result` | `MigrateInstancesResult` | Everything done before the interruption; `result.nextCursor` is where to resume from |
+| `cause`  | `unknown`                | The original error (inherited from `WorkflowError`)                                  |
+
+**When thrown:** the instance store's `findInstanceUuids` rejects, or returns a page that isn't strictly ascending past the cursor or that contains an entry that isn't a non-empty string. Never for a per-instance problem (a throwing `transformContext`, an optimistic-lock conflict, a database error migrating one instance) — those land in `result.failed` and the batch continues. `result.nextCursor` is the last UUID examined, or the input `cursor` (`null` without one) if none was examined yet.
+
+**How to fix:** test `err.cause instanceof <YourStoreError>`, not `err`, to see what failed. Resume with `cursor: err.result.nextCursor ?? undefined`, keeping `err.result`'s `skipped` and `failed` (a resumed call won't examine them again), and cap consecutive retries (see [Catch Specific Errors](#catch-specific-errors)). A store rejection is usually transient; a bad page means the adapter's `findInstanceUuids` breaks its ordering contract. See [Migrating instances](./workflow-definitions.md#migrating-instances) for the full batch loop.
+
 ## Guard rejection vs. invalid event
 
 `InvalidEventError` is thrown when an event isn't even registered for the current state — a definition-level mismatch. **Guard rejection is different**: the event is registered, but its guard returned `false` at runtime. That isn't an error; it's a normal outcome surfaced via `result.outcome === "guard-rejected"` and `result.rejectedBy`. Callers should branch on `outcome` to distinguish success, command failure, and guard rejection rather than catching exceptions.
@@ -345,11 +388,11 @@ For **best-effort** commands, the runtime catches the exception instead of propa
 
 A command is best-effort when it declares `readonly bestEffort = true` (class field) or `bestEffort: true` (object property). Best-effort commands have different failure semantics from mandatory commands:
 
-| Outcome              | Mandatory command                                | Best-effort command                                             |
-| -------------------- | ------------------------------------------------ | --------------------------------------------------------------- |
-| `{ ok: true }`       | Chain continues                                  | Chain continues                                                 |
-| `{ ok: false, ... }` | Chain aborts (or routes to `errorState`)         | Chain continues; result recorded                                |
-| Throws               | Exception propagates (or routes to `errorState`) | Exception caught; converted to `CommandResult`; chain continues |
+| Outcome              | Mandatory command                            | Best-effort command                                             |
+| -------------------- | -------------------------------------------- | --------------------------------------------------------------- |
+| `{ ok: true }`       | Chain continues                              | Chain continues                                                 |
+| `{ ok: false, ... }` | Chain aborts (or routes to `errorState`)     | Chain continues; result recorded                                |
+| Throws               | Exception propagates; transaction rolls back | Exception caught; converted to `CommandResult`; chain continues |
 
 ### Thrown Exception Shape
 
@@ -400,7 +443,7 @@ If `WarmCacheCommand.execute()` throws instead of catching, the runtime catches 
 
 `errorState` and `bestEffort` are independent mechanisms:
 
-- `errorState` applies to **mandatory** command failures in an `onEnter` chain. When a mandatory command returns `ok: false` (or throws) and the state has an `errorState`, the runtime transitions to `errorState` instead of throwing `CommandFailureError`. This is per-hop routing — the chain's aggregate `outcome` becomes `"failure"` once an `errorState` hop occurs.
+- `errorState` applies to **mandatory** command failures in an `onEnter` chain. When a mandatory command returns `ok: false` and the state has an `errorState`, the runtime transitions to `errorState` instead of throwing `CommandFailureError`. This is per-hop routing — the chain's aggregate `outcome` becomes `"failure"` once an `errorState` hop occurs. A mandatory command that **throws** never routes to `errorState`: the exception propagates and the transaction rolls back (see [Uncontrolled Failure](#uncontrolled-failure-throws-an-exception)).
 - `bestEffort` applies to **individual commands** regardless of whether the state has `errorState`. A best-effort failure never triggers `errorState` routing because, from the chain's perspective, it is not a failure.
 
 ## Error Handling Patterns
@@ -410,7 +453,7 @@ If `WarmCacheCommand.execute()` throws instead of catching, the runtime catches 
 ```ts
 import {
   WorkflowError,
-  WorkflowDefinitionError,
+  WorkflowInstanceNotFoundError,
   InvalidEventError,
   IncompatibleDefinitionError,
   CommandFailureError,
@@ -420,6 +463,9 @@ import {
 try {
   const result = await runtime.triggerEvent(input);
 } catch (err) {
+  if (err instanceof WorkflowInstanceNotFoundError) {
+    return { status: 404, message: err.message };
+  }
   if (err instanceof InvalidEventError) {
     // Event not available on current state
     return { status: 400, message: `Event "${err.eventName}" is not available in state "${err.currentState}"` };
@@ -437,11 +483,30 @@ try {
     return { status: 500, message: err.message };
   }
   if (err instanceof WorkflowError) {
-    // Other workflow error (instance not found, etc.)
-    return { status: 404, message: err.message };
+    // Anything else -- an optimistic-lock conflict, a COMMIT PostgreSQL rolled back,
+    // a definition error -- is not the caller's fault: log it and answer 500 (or rethrow).
+    console.error(err, err.cause);
+    return { status: 500, message: "Internal server error" };
   }
   // Infrastructure error
   throw err;
+}
+```
+
+`migrateInstances()` is usually run from a script rather than a request handler; handle its [`MigrationInterruptedError`](#migrationinterruptederror) by resuming from `err.result.nextCursor`:
+
+```ts
+import { MigrationInterruptedError } from "@duraflows/core";
+
+try {
+  const result = await runtime.migrateInstances({ ...input, limit: 500, cursor });
+} catch (err) {
+  if (err instanceof MigrationInterruptedError) {
+    // Listing candidates failed: err.cause is the original error, err.result the partial result.
+    cursor = err.result.nextCursor ?? undefined; // resume here, keeping err.result.skipped/failed
+  } else {
+    throw err;
+  }
 }
 ```
 

@@ -18,10 +18,10 @@
 `toMermaidDiagram(definition, options?)` — renders a Mermaid flowchart for a `WorkflowDefinition` (added v0.3.0).
 
 **Subpath export — `@duraflows/core/testing`:**
-`runInstanceStoreConformance(factory)` — shared conformance suite. Adapter authors run this against their `WorkflowInstanceStore` to verify the persistence contract (locking, optimistic concurrency, expiration).
+`runInstanceStoreConformance(label, harness)` — shared conformance suite. Adapter authors run this against their `WorkflowInstanceStore` to verify the persistence contract (locking, optimistic concurrency, expiration). Siblings: `runDefinitionStoreConformance` for a `WorkflowDefinitionStore` and `runTransactionRunnerConformance` for a `WorkflowTransactionRunner` (see [Adapter Conformance](#adapter-conformance-duraflowscoretesting-v100)).
 
 **Errors:**
-`WorkflowError`, `WorkflowDefinitionError`, `InvalidArgumentError`, `WorkflowInstanceNotFoundError`, `InvalidEventError`, `IncompatibleDefinitionError` (v7.0.0), `CommandFailureError`, `OnEnterDepthExceededError`
+`WorkflowError`, `WorkflowDefinitionError`, `InvalidArgumentError`, `WorkflowInstanceNotFoundError`, `InvalidEventError`, `IncompatibleDefinitionError` (v7.0.0), `CommandFailureError`, `OnEnterDepthExceededError`, `MigrationInterruptedError` (v7.2.0)
 
 ### @duraflows/pg
 
@@ -33,7 +33,7 @@
 
 ### @duraflows/nestjs
 
-`WorkflowModule`, `WorkflowService`, `WorkflowTimeoutService`, `WorkflowCommand` (decorator), `WORKFLOW_RUNTIME`, `WORKFLOW_INSTANCE_STORE`, `WORKFLOW_HISTORY_STORE`, `WORKFLOW_COMMAND_REGISTRY`, `WORKFLOW_DEFINITION_REGISTRY`, `WORKFLOW_GUARD_REGISTRY` (v1.1.0), `WORKFLOW_TRANSACTION_RUNNER`, `WORKFLOW_CLOCK`. Also re-exports the entire `@duraflows/core` public API (including observer + guard types) so apps can import everything from a single package.
+`WorkflowModule`, `WorkflowService`, `WorkflowTimeoutService`, `WorkflowCommand` (decorator), `WORKFLOW_RUNTIME`, `WORKFLOW_INSTANCE_STORE`, `WORKFLOW_HISTORY_STORE`, `WORKFLOW_COMMAND_REGISTRY`, `WORKFLOW_DEFINITION_REGISTRY`, `WORKFLOW_GUARD_REGISTRY` (v1.1.0), `WORKFLOW_TRANSACTION_RUNNER`, `WORKFLOW_CLOCK`. Also re-exports the commonly used `@duraflows/core` API -- definition, runtime and persistence types, the error classes (except `InvalidArgumentError`), the runtime, executor, validator, compiler and registry classes, and the observer + guard types. Import anything else (e.g. `InvalidArgumentError`, `toMermaidDiagram`, `computeDefinitionHash`, `WorkflowDefinitionStore`, `WorkflowRuntimeOptions`, `ScopedTransactionContext`) from `@duraflows/core` directly.
 
 ---
 
@@ -340,7 +340,7 @@ interface ProcessExpiredWorkflowsResult {
 }
 ```
 
-**v6.0.0 — retries and parking:** each `failed` instance's failure is recorded on its `timeoutRetry` in a second small transaction. When recording succeeded, `attempts` is the consecutive failure count and `retryAt` the next retry (`null` when this failure parked the instance); the sweep skips the instance until then. After `timeoutRetry.maxAttempts` consecutive failures the instance is parked, listed in `parked`, and no longer swept until `rearmTimeout()` clears it. Failed attempts write no history rows.
+**v6.0.0 — retries and parking:** each `failed` instance's failure is recorded on its `timeoutRetry` in a second small transaction -- only if, re-locked, the instance is unchanged since the scan (same row `version`, state, `expiresAt` and attempt count) and its timeout is still due; otherwise (another worker or a user moved it, or it is gone) nothing is recorded and its `failed` entry has no `attempts`/`retryAt`. When recording succeeded, `attempts` is the consecutive failure count and `retryAt` the next retry (`null` when this failure parked the instance); the sweep skips the instance until then. After `timeoutRetry.maxAttempts` consecutive failures the instance is parked, listed in `parked`, and no longer swept until `rearmTimeout()` clears it. Failed attempts write no history rows.
 
 **v1.1.0 — `rejected`:** when a timeout-driven event has a guard that returns `false`, the runtime additionally clears `expiresAt` so the next sweep won't re-pick the instance. The history row is still appended with `outcome: "guard-rejected"`. Track `rejected` separately from `processed` so observability dashboards don't conflate "timeout fired and progressed" with "timeout fired and was held back."
 
@@ -441,7 +441,7 @@ interface StoredWorkflowDefinition {
 
 Optional on `WorkflowPersistenceProvider` -- an adapter that omits it still compiles and runs, it just leaves definition versioning (the version-bump guard, pinning, the startup executability check, `listDefinitionVersions()`) inert.
 
-- `ensure(record)` -- insert-if-absent, **never overwrites** an existing `(workflowName, version)` row; must be atomic under concurrent callers (`INSERT ... ON CONFLICT (workflow_name, version) DO NOTHING` + re-select in both bundled adapters). Not required to be transactional.
+- `ensure(record)` -- insert-if-absent, **never overwrites** an existing `(workflowName, version)` row; must be atomic under concurrent callers (`INSERT ... ON CONFLICT (workflow_name, version) DO NOTHING` + re-select in both bundled adapters). Called by `initialize()`'s sync and (v7.2.0) inside every transaction that stamps an instance with a definition version -- `createInstance()`, a legacy or `"latest"`-policy instance adopting the latest version, and each migrated instance -- so keep it cheap (a no-op insert plus a primary-key read) and run it on the active transaction's connection, like the instance and history stores, so the snapshot commits or rolls back with the instance row.
 - `findByNameAndVersion(workflowName, version)` -- fetch a snapshot; `null` if that pair was never synced. Not required to be transactional.
 - `listVersions(workflowName)` _(v7.0.0)_ -- every stored snapshot of `workflowName`, ordered by `version` ascending; `[]` when none exist. Not required to be transactional. Backs the startup executability check and `listDefinitionVersions()`.
 
@@ -574,12 +574,12 @@ Requires a `definitionStore` (`pgWorkflowProviders()` / `kyselyWorkflowProviders
 
 **Which definition governs:**
 
-| Operation                         | Resolution                                                                                      |
-| --------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `createInstance()`                | Always the latest registered definition.                                                        |
-| `triggerEvent()`                  | The instance's pinned version (store lookup, cached per resolver); the latest under `"latest"`. |
-| `processExpiredWorkflows()` sweep | Same as `triggerEvent()`, resolved per instance inside its own transaction.                     |
-| `getAvailableEvents()`            | Same as `triggerEvent()`.                                                                       |
+| Operation                         | Resolution                                                                                                                                                     |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createInstance()`                | Always the latest registered definition.                                                                                                                       |
+| `triggerEvent()`                  | The instance's pinned version (store row re-read on each resolution; the compiled copy is reused while its content hash matches); the latest under `"latest"`. |
+| `processExpiredWorkflows()` sweep | Same as `triggerEvent()`, resolved per instance inside its own transaction.                                                                                    |
+| `getAvailableEvents()`            | Same as `triggerEvent()`.                                                                                                                                      |
 
 **Resolution order for an existing instance** (`DefinitionResolver.forInstance`): (1) no `definitionStore` → latest; (2) `instance.definitionVersion === null` (legacy, pre-5.0.0) → latest; (3) the latest registered definition's `versionPolicy === "latest"` → latest if `instance.currentState` is an own key of its `states`, else `IncompatibleDefinitionError`; (4) `instance.definitionVersion === (latest.version ?? 1)` → latest, no store read; (5) otherwise → load the snapshot via `definitionStore.findByNameAndVersion()` (missing → `WorkflowDefinitionError`; structurally invalid → `WorkflowDefinitionError`), validate, deep-freeze, compile, and cache per runtime (`workflowName@version` key). **(v7.2.0)** Each resolution re-reads the row and reuses the cached copy only while its content hash matches, so a copy cached from a row whose transaction rolled back is never executed once different content is committed under that version; migration targets keep their cache and are checked when the instance is written.
 
@@ -631,21 +631,21 @@ interface MigrateInstancesResult {
   migrated: Array<{ uuid: string; fromState: string; toState: string }>; // would-migrate, in a dry run
   skipped: Array<{ uuid: string; reason: string }>;
   failed: Array<{ uuid: string; error: string }>;
-  nextCursor: string | null; // v7.2.0; last UUID examined; null when fully drained or instanceUuids was given
+  nextCursor: string | null; // v7.2.0; last UUID examined when paging stopped at limit; null when every candidate was examined, or instanceUuids was given
   warnings: string[]; // v7.2.0; e.g. toVersion referencing unregistered commands/guards
 }
 ```
 
-**Upfront validation** -- every row runs before any instance row is touched; the first failure throws and nothing is written:
+**Upfront validation** -- every row runs before any instance row is touched, in the order listed; the first failure throws and nothing is written:
 
 | Check                                                                                        | Error                                                                                                                                                                                                                                        |
 | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A definition store is configured                                                             | `WorkflowError("migrateInstances requires a definition store")`                                                                                                                                                                              |
-| `workflowName` is registered                                                                 | `WorkflowDefinitionError` (`Workflow "<name>": Workflow not found in registry`)                                                                                                                                                              |
 | `fromVersion`/`toVersion` are positive safe integers, and differ (downgrades OK)             | `InvalidArgumentError` (`fromVersion must be a positive integer, got <value>`; `fromVersion and toVersion must differ`)                                                                                                                      |
 | `limit`, when given, is a positive safe integer                                              | `InvalidArgumentError("limit must be a positive integer, got <value>")`                                                                                                                                                                      |
 | `states`/`excludeStates`, when given, contain only strings; `states` isn't empty (v7.2.0)    | `InvalidArgumentError` (`states must not be empty`; `states must contain only strings`; `excludeStates must contain only strings`)                                                                                                           |
 | `cursor`, when given, is a non-empty string and isn't combined with `instanceUuids` (v7.2.0) | `InvalidArgumentError` (`cursor must be a non-empty string`; `cursor cannot be combined with instanceUuids`)                                                                                                                                 |
+| `workflowName` is registered                                                                 | `WorkflowDefinitionError` (`Workflow "<name>": Workflow not found in registry`)                                                                                                                                                              |
 | `toVersion` is in the store and structurally valid                                           | `WorkflowDefinitionError`, loaded the same way a pinned instance's snapshot is -- missing: `Workflow "<name>": version <toVersion> is not in the definition store`; invalid: `Workflow "<name>": stored version <toVersion> is invalid: ...` |
 | Every `stateMapping` value is an own state of `toVersion`, with no `onEnter`                 | `InvalidArgumentError('stateMapping maps "<from>" to "<to>", which is not a state of version <toVersion>')` (or the `onEnter` variant)                                                                                                       |
 | `instanceUuids` given, or the store implements `findInstanceUuids`                           | `WorkflowError("migrateInstances without instanceUuids requires an instance store that implements findInstanceUuids")`                                                                                                                       |
@@ -653,6 +653,8 @@ interface MigrateInstancesResult {
 `stateMapping` keys are matched as own properties only (`Object.hasOwn`), never through the prototype chain (a state named `"toString"` is safe).
 
 **Per instance:** lock and re-check (`lockByUuid`) -- an instance moved off `fromVersion` since being listed is skipped, not failed; check `states`/`excludeStates` against the current state (v7.2.0), skipping a non-matching one; resolve the target state (`stateMapping`, or the same-named state in `toVersion`, or skip); run `transformContext` if given, requiring its result to be a plain object (v7.2.0); relabel `currentState`, `definitionVersion`, `context`, recompute `expiresAt` from `lastTransitionAt` (elapsed time preserved), clear `timeoutRetry`, bump `version`/`updatedAt` -- `lastTransitionAt` itself is unchanged; append a `$migrated` history row (`triggerMetadata: { source: "migration", fromVersion, toVersion }`) and fire observers with `triggerEvent: "$migrated"` after commit. A throw anywhere in this sequence fails only that instance (`failed`); the batch continues -- distinct from a failure _listing_ candidates, which stops the whole call (see `MigrationInterruptedError` below).
+
+**Stale target (v7.2.0):** before relabeling, each instance's transaction also writes `toVersion`'s snapshot (insert-if-absent). If the stored row differs from the copy the call loaded -- e.g. a cached copy of a row whose transaction rolled back before different content was committed under that version -- the instance fails with `Workflow "<name>": stored version <toVersion> differs from the copy loaded earlier (stored <hash>, loaded <hash>); retry to use the stored version`, and the cached copy is dropped. The target is loaded once per call, so every later candidate in the same call fails with the same message; the next call (or a retry of `failed` by `instanceUuids`) re-reads the stored version.
 
 **Skip reasons** (`result.skipped[].reason`, verbatim): `not found`; `belongs to workflow <name>`; `unstamped` (null `definitionVersion`); `on version <v>, not <fromVersion>`; `state <s> is excluded by the state filter` (v7.2.0); `state <s> has no mapping and does not exist in version <toVersion>`; `state <s> has an onEnter in version <toVersion>`.
 
@@ -1156,30 +1158,30 @@ Returns a string of valid Mermaid `flowchart` syntax. Visual encoding: success p
 ```ts
 import { runInstanceStoreConformance } from "@duraflows/core/testing";
 
-describe("MyInstanceStore conformance", () => {
-  runInstanceStoreConformance({
-    setup: async () => {
-      // Return { store, transactionRunner, teardown }
-    },
-  });
+runInstanceStoreConformance("my-adapter", {
+  setup: async () => {
+    // Return { store, transactionRunner, teardown }
+  },
 });
 ```
 
 `runInstanceStoreConformance` is the canonical way to verify a custom `WorkflowInstanceStore` against the persistence contract. It exercises:
 
-- `lockByUuid()` row-level locking and transaction-required behavior
-- `update()` optimistic locking on `version`
-- `findExpired()` ordering, limit, and `SKIP LOCKED` semantics
+- `create()` / `findByUuid()` round-trips, and `null` for an unknown UUID
+- `update()` persisting the mutable fields, and optimistic locking on `version` (a stale version throws)
+- `findExpired()` returning past-due instances, and respecting `limit`
 - `timeoutRetry` round-trips through `create` / `update`; `findExpired()` skips parked and not-yet-due retries and orders by due time; `findParkedTimeouts()` filtering, ordering and limit (v6.0.0)
 - `metadata` write-once enforcement (v1.0.0 contract)
 - `countInstances()` filtering by workflow, definition version and excluded states, and that an empty `excludeStates` counts everything (v7.0.0)
 - `findInstanceUuids()` paging by workflow and definition version, `afterUuid` and `limit`, ascending by `uuid`; the case is skipped (`ctx.skip()`) when the adapter doesn't implement it (v7.1.0, optional)
 - `findInstanceUuids()`'s `states`/`excludeStates` hints: a store may filter server-side or ignore them entirely -- the case accepts any sorted result that includes every matching UUID and only UUIDs from the unfiltered result, so both pass, since `migrateInstances()` re-checks the filter itself either way; skipped when the adapter doesn't implement `findInstanceUuids` (v7.2.0, optional)
-- Nested-transaction reuse via `transactionRunner`
+- `definitionVersion` round-trips through `create` / `update` / `findByUuid`
 
-Adapters that pass this suite are guaranteed to work with the runtime. `@duraflows/pg` and `@duraflows/kysely` both run it as part of their CI.
+It does not exercise row locking or `SKIP LOCKED` -- cover those in the adapter's own integration tests. Adapters that pass this suite are guaranteed to work with the runtime. `@duraflows/pg` and `@duraflows/kysely` both run it as part of their CI.
 
 A sibling suite, `runDefinitionStoreConformance(label, harness)` (same subpath), verifies a `WorkflowDefinitionStore`: `ensure()` insert-if-absent semantics (never overwrites), `findByNameAndVersion()` round-trip and unknown-pair handling, independent storage of different versions, and (v7.0.0) `listVersions()` ordering and per-workflow filtering.
+
+A third, `runTransactionRunnerConformance(label, harness)` (v5.2.0, same subpath), verifies a `WorkflowTransactionRunner` that implements `afterCommit`: callbacks run after the outermost commit in registration order, are discarded on rollback, and a throwing one doesn't stop the rest; a failed nested call rolls back only its own writes and callbacks (savepoints); the outer transaction stays usable after a caught nested database error (skipped unless the harness supplies `failWithDatabaseError`); `afterCommit` outside a transaction throws `WorkflowError`; and a transaction started from a callback is a fresh outermost one.
 
 ---
 
@@ -1193,7 +1195,7 @@ class WorkflowError extends Error {
 }
 ```
 
-Thrown for: instance not found, optimistic lock failure, command not in registry, `listDefinitionVersions`/`migrateInstances` without a `definitionStore`, and (v7.1.0) `migrateInstances` called without `instanceUuids` when the instance store has no `findInstanceUuids`.
+Thrown for: optimistic lock failure, command not in registry, `listDefinitionVersions`/`migrateInstances` without a `definitionStore`, (v7.1.0) `migrateInstances` called without `instanceUuids` when the instance store has no `findInstanceUuids`, and (pg and kysely adapters, in a transaction they own -- the runner's or `transaction()`) a COMMIT that PostgreSQL rolled back because an earlier statement in the transaction failed (`COMMIT was rolled back by PostgreSQL because an earlier statement in the transaction failed`; nothing was persisted and no observers fire). A missing instance throws the subclass `WorkflowInstanceNotFoundError`.
 
 ### WorkflowDefinitionError
 
@@ -1203,7 +1205,7 @@ class WorkflowDefinitionError extends WorkflowError {
 }
 ```
 
-Thrown for: duplicate registration, validation failure, unknown workflow lookup, content changed without a version bump, (v7.0.0) the startup executability check finding an unregistered command/guard or a structurally invalid snapshot (`onUnresolvable: "fail"`) or a pinned instance resolving to a missing/invalid stored snapshot, and (v7.1.0) `migrateInstances`'s `toVersion` not being in the definition store.
+Thrown for: duplicate registration, validation failure, unknown workflow lookup, content changed without a version bump (from `initialize()`, or -- v7.2.0 -- from the in-transaction snapshot write of `createInstance()` or of an instance adopting the latest version), (v7.0.0) the startup executability check finding an unregistered command/guard or a structurally invalid snapshot (`onUnresolvable: "fail"`) or a pinned instance resolving to a missing/invalid stored snapshot, (v7.1.0) `migrateInstances`'s `toVersion` not being in the definition store, and (v7.2.0) a migration target whose stored snapshot differs from the copy the call loaded (per instance, reported in `result.failed` rather than thrown).
 
 ### InvalidArgumentError
 
@@ -1273,4 +1275,4 @@ class MigrationInterruptedError extends WorkflowError {
 }
 ```
 
-Thrown when: `migrateInstances()` fails while _listing_ candidates -- `instanceStore.findInstanceUuids` rejects, or returns a page that isn't strictly ascending past the cursor or that contains an entry that isn't a non-empty UUID string. Never thrown for a per-instance failure (a throwing `transformContext`, an optimistic-lock conflict, a database error migrating one instance); those land in `result.failed` and the batch continues. `result` is the same `MigrateInstancesResult` the call would otherwise have returned, complete up to the interruption, with `nextCursor` set to the last UUID examined (or the input `cursor`, or `null`, if none was examined yet) -- pass it back as `cursor` to resume. `cause` (inherited from `WorkflowError`) is the original error: the store's rejection, or the `WorkflowError` the migrator raised over a bad page (then wrapped as `cause`). An `instanceof <YourStoreError>` check on a wrapped store failure must test `error.cause`, not `error`. See [Instance Migration (v7.1.0)](#instance-migration-v710).
+Thrown when: `migrateInstances()` fails while _listing_ candidates -- `instanceStore.findInstanceUuids` rejects, or returns a page that isn't strictly ascending past the cursor or that contains an entry that isn't a non-empty string (the migrator's message calls it "not a UUID string", but the check is only that it is a non-empty string). Never thrown for a per-instance failure (a throwing `transformContext`, an optimistic-lock conflict, a database error migrating one instance); those land in `result.failed` and the batch continues. `result` is the same `MigrateInstancesResult` the call would otherwise have returned, complete up to the interruption, with `nextCursor` set to the last UUID examined (or the input `cursor`, or `null`, if none was examined yet) -- pass it back as `cursor` to resume. `cause` (inherited from `WorkflowError`) is the original error: the store's rejection, or the `WorkflowError` the migrator raised over a bad page (then wrapped as `cause`). An `instanceof <YourStoreError>` check on a wrapped store failure must test `error.cause`, not `error`. See [Instance Migration (v7.1.0)](#instance-migration-v710).
