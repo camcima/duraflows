@@ -9,7 +9,7 @@
 ### @duraflows/core
 
 **Types:**
-`WorkflowDefinition`, `WorkflowStateDefinition`, `WorkflowEventDefinition`, `WorkflowOnEnterDefinition`, `WorkflowCommandRef`, `WorkflowGuardRef`, `WorkflowTimeoutDefinition`, `WorkflowCommand`, `WorkflowGuard`, `CommandResult`, `WorkflowExecutionContext`, `WorkflowInstance`, `WorkflowTimeoutRetry` (v6.0.0), `WorkflowTimeoutRetryOptions` (v6.0.0), `WorkflowExecutionResult`, `OnEnterChainResult`, `OnEnterHopResult`, `AvailableWorkflowEvent`, `WorkflowHistoryRecord`, `CreateWorkflowInstanceInput`, `TriggerWorkflowEventInput`, `ProcessExpiredWorkflowsInput`, `ProcessExpiredWorkflowsResult`, `FindParkedTimeoutsInput` (v6.0.0), `GetAvailableEventsInput`, `WorkflowInstanceStore`, `WorkflowHistoryStore`, `WorkflowTransactionRunner`, `WorkflowDefinitionStore` (v5.0.0), `StoredWorkflowDefinition` (v5.0.0), `DefinitionVersionSummary` (v7.0.0), `WorkflowClock`, `WorkflowPersistenceProvider`, `WorkflowDefinitionRegistry`, `WorkflowCommandRegistry`, `WorkflowGuardRegistry`, `WorkflowObserver`, `StateEnterEvent`, `ObserverErrorHandler`, `WorkflowRuntimeOptions`
+`WorkflowDefinition`, `WorkflowStateDefinition`, `WorkflowEventDefinition`, `WorkflowOnEnterDefinition`, `WorkflowCommandRef`, `WorkflowGuardRef`, `WorkflowTimeoutDefinition`, `WorkflowCommand`, `WorkflowGuard`, `CommandResult`, `WorkflowExecutionContext`, `WorkflowInstance`, `WorkflowTimeoutRetry` (v6.0.0), `WorkflowTimeoutRetryOptions` (v6.0.0), `WorkflowExecutionResult`, `OnEnterChainResult`, `OnEnterHopResult`, `AvailableWorkflowEvent`, `WorkflowHistoryRecord`, `CreateWorkflowInstanceInput`, `TriggerWorkflowEventInput`, `ProcessExpiredWorkflowsInput`, `ProcessExpiredWorkflowsResult`, `FindParkedTimeoutsInput` (v6.0.0), `GetAvailableEventsInput`, `WorkflowInstanceStore`, `WorkflowHistoryStore`, `WorkflowTransactionRunner`, `WorkflowDefinitionStore` (v5.0.0), `StoredWorkflowDefinition` (v5.0.0), `DefinitionVersionSummary` (v7.0.0), `MigrateInstancesInput` (v7.1.0), `MigrateInstancesResult` (v7.1.0), `WorkflowClock`, `WorkflowPersistenceProvider`, `WorkflowDefinitionRegistry`, `WorkflowCommandRegistry`, `WorkflowGuardRegistry`, `WorkflowObserver`, `StateEnterEvent`, `ObserverErrorHandler`, `WorkflowRuntimeOptions`
 
 **Classes:**
 `WorkflowRuntime`, `WorkflowHandle`, `WorkflowValidator`, `WorkflowCompiler`, `CommandExecutor`, `EventExecutor`, `OnEnterExecutor`, `TimeoutResolver`, `InMemoryDefinitionRegistry`, `InMemoryCommandRegistry`, `InMemoryGuardRegistry`, `ObserverRegistry`
@@ -380,6 +380,12 @@ interface WorkflowInstanceStore {
     definitionVersion: number;
     excludeStates: readonly string[];
   }): Promise<number>; // v7.0.0: required on every adapter; no transaction required
+  findInstanceUuids?(options: {
+    workflowName: string;
+    definitionVersion: number;
+    limit: number;
+    afterUuid?: string;
+  }): Promise<string[]>; // v7.1.0: optional; no transaction required
 }
 ```
 
@@ -398,6 +404,10 @@ interface WorkflowInstanceStore {
 **v7.0.0 contract notes:**
 
 - `countInstances` is a **new required method on every `WorkflowInstanceStore`**, whether or not the adapter also implements `WorkflowDefinitionStore`. It counts instances of `workflowName` stamped with `definitionVersion` whose `currentState` is not in `excludeStates`. An empty `excludeStates` MUST exclude nothing (count every matching row); instances with a `null` `definitionVersion` never match. A plain read -- no transaction required. Backs `WorkflowRuntime.initialize()`'s startup executability check and `listDefinitionVersions()`.
+
+**v7.1.0 contract notes:**
+
+- `findInstanceUuids` is a **new optional method** -- unlike `countInstances`, no existing adapter breaks by omitting it. UUIDs of instances of `workflowName` stamped with `definitionVersion`, ascending, strictly after `afterUuid` when given, at most `limit`; instances with a `null` `definitionVersion` never match. A plain read -- no transaction required. Backs `migrateInstances()`'s candidate paging; without it, `migrateInstances()` throws unless the caller passes `instanceUuids` explicitly. See [Instance Migration (v7.1.0)](#instance-migration-v710).
 
 ### WorkflowDefinitionStore (v5.0.0)
 
@@ -499,7 +509,7 @@ new WorkflowRuntime(options: WorkflowRuntimeOptions)
 
 **`initialize(): Promise<void>`**
 
-Syncs registered definitions into `definitionStore` (enforcing the version-bump guard) and, with a `definitionStore` configured, runs the startup executability check (see [Definition Versioning (v7.0.0)](#definition-versioning-v700)). Idempotent and safe to call concurrently; a failed attempt is not cached. Called automatically by `createInstance()`, `triggerEvent()`, `processExpiredWorkflows()` and `rearmTimeout()`; calling it explicitly at boot is recommended so failures surface before serving traffic (run lazily, a failure fails every one of those calls, for every workflow, until fixed; NestJS calls it during module init). No-ops without a `definitionStore`.
+Syncs registered definitions into `definitionStore` (enforcing the version-bump guard) and, with a `definitionStore` configured, runs the startup executability check (see [Definition Versioning (v7.0.0)](#definition-versioning-v700)). Idempotent and safe to call concurrently; a failed attempt is not cached. Called automatically by `createInstance()`, `triggerEvent()`, `processExpiredWorkflows()` and `rearmTimeout()`; calling it explicitly at boot is recommended so failures surface before serving traffic (run lazily, a failure fails every one of those calls, for every workflow, until fixed; NestJS calls it during module init). No-ops without a `definitionStore`. **(v7.1.0)** Internally two separately-cached steps -- the sync, then the check; `migrateInstances()` awaits only the sync, since a failing check is often exactly what a migration is fixing.
 
 **`createInstance(input: CreateWorkflowInstanceInput): Promise<WorkflowInstance>`**
 
@@ -528,6 +538,10 @@ Returns events available on instance's current state, from its **governing** def
 **`listDefinitionVersions(workflowName: string): Promise<DefinitionVersionSummary[]>`** _(v7.0.0)_
 
 Every stored version of `workflowName`, ordered by `version` ascending, each with its non-terminal ("active") instance count. A plain read -- does **not** call `initialize()`. Throws `WorkflowError("listDefinitionVersions requires a definition store")` without a `definitionStore`. See [Definition Versioning (v7.0.0)](#definition-versioning-v700).
+
+**`migrateInstances(input: MigrateInstancesInput): Promise<MigrateInstancesResult>`** _(v7.1.0)_
+
+Moves chosen instances of a workflow from one stored definition version to another: pure relabeling (no commands, guards or `onEnter` run), with an optional `stateMapping` and `transformContext`. Requires a `definitionStore`; awaits only the definition sync half of `initialize()`, not the startup executability check. See [Instance Migration (v7.1.0)](#instance-migration-v710) for the full input/result shape, upfront validation and per-instance semantics.
 
 **`getInstance(uuid: string): Promise<WorkflowInstance | null>`**
 
@@ -581,6 +595,57 @@ Runs at the end of `initialize()`, after the definition sync, only with a `defin
 
 ---
 
+## Instance Migration (v7.1.0)
+
+`runtime.migrateInstances(input)` and `WorkflowService.migrateInstances(input)` move chosen instances of a workflow from one stored definition version to another: pure relabeling -- no commands, guards or `onEnter` run. See [Migrating instances](../docs/workflow-definitions.md#migrating-instances) for when to use it, and [`migrateInstances()`](../docs/core-runtime.md#migrateinstances) for the full walkthrough.
+
+```ts
+interface MigrateInstancesInput {
+  workflowName: string;
+  fromVersion: number;
+  toVersion: number;
+  stateMapping?: Record<string, string>; // current state -> target state, renamed/removed states only
+  transformContext?: (
+    context: Record<string, unknown>,
+    instance: Readonly<WorkflowInstance>,
+  ) => Record<string, unknown>; // pure; result stored as its JSON round trip
+  instanceUuids?: readonly string[]; // omit to migrate every instance on fromVersion (needs findInstanceUuids)
+  limit?: number; // caps candidates examined, not just migrated; default: no cap
+  dryRun?: boolean; // validate and report; write nothing, fire no observers
+}
+
+interface MigrateInstancesResult {
+  dryRun: boolean;
+  migrated: Array<{ uuid: string; fromState: string; toState: string }>; // would-migrate, in a dry run
+  skipped: Array<{ uuid: string; reason: string }>;
+  failed: Array<{ uuid: string; error: string }>;
+}
+```
+
+**Upfront validation** -- every row runs before any instance row is touched; the first failure throws and nothing is written:
+
+| Check                                                                            | Error                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A definition store is configured                                                 | `WorkflowError("migrateInstances requires a definition store")`                                                                                                                                                                              |
+| `workflowName` is registered                                                     | `WorkflowDefinitionError` (`Workflow not found in registry`)                                                                                                                                                                                 |
+| `fromVersion`/`toVersion` are positive safe integers, and differ (downgrades OK) | `InvalidArgumentError` (`fromVersion must be a positive integer, got <value>`; `fromVersion and toVersion must differ`)                                                                                                                      |
+| `limit`, when given, is a positive safe integer                                  | `InvalidArgumentError("limit must be a positive integer, got <value>")`                                                                                                                                                                      |
+| `toVersion` is in the store and structurally valid                               | `WorkflowDefinitionError`, loaded the same way a pinned instance's snapshot is -- missing: `Workflow "<name>": version <toVersion> is not in the definition store`; invalid: `Workflow "<name>": stored version <toVersion> is invalid: ...` |
+| Every `stateMapping` value is an own state of `toVersion`, with no `onEnter`     | `InvalidArgumentError('stateMapping maps "<from>" to "<to>", which is not a state of version <toVersion>')` (or the `onEnter` variant)                                                                                                       |
+| `instanceUuids` given, or the store implements `findInstanceUuids`               | `WorkflowError("migrateInstances without instanceUuids requires an instance store that implements findInstanceUuids")`                                                                                                                       |
+
+`stateMapping` keys are matched as own properties only (`Object.hasOwn`), never through the prototype chain (a state named `"toString"` is safe).
+
+**Per instance:** lock and re-check (`lockByUuid`) -- an instance moved off `fromVersion` since being listed is skipped, not failed; resolve the target state (`stateMapping`, or the same-named state in `toVersion`, or skip); run `transformContext` if given; relabel `currentState`, `definitionVersion`, `context`, recompute `expiresAt` from `lastTransitionAt` (elapsed time preserved), clear `timeoutRetry`, bump `version`/`updatedAt` -- `lastTransitionAt` itself is unchanged; append a `$migrated` history row (`triggerMetadata: { source: "migration", fromVersion, toVersion }`) and fire observers with `triggerEvent: "$migrated"` after commit. A throw anywhere in this sequence fails only that instance (`failed`); the batch continues.
+
+**Skip reasons** (`result.skipped[].reason`, verbatim): `not found`; `belongs to workflow <name>`; `unstamped` (null `definitionVersion`); `on version <v>, not <fromVersion>`; `state <s> has no mapping and does not exist in version <toVersion>`; `state <s> has an onEnter in version <toVersion>`.
+
+**Candidates:** `instanceUuids`, de-duplicated and in order, when given; otherwise `instanceStore.findInstanceUuids`, paged 100 at a time ascending by UUID, each page after the last UUID seen, until a page is empty or `limit` candidates have been examined -- within one call, that cursor means a candidate is never revisited. Across calls it resets: a migrated instance leaves `fromVersion` for good, but a skipped or failed one stays on it and is re-examined, from the lowest UUID, by the next call with the same input -- with `limit` set, enough of those sorting first can make a call report no migrations while migratable instances remain further along.
+
+**Dry run:** each candidate is read with `findByUuid` (no lock, no transaction); the same resolution and `transformContext` run, but nothing is written and no observers fire.
+
+---
+
 ## Observers (v1.0.0)
 
 Observers receive a notification every time the runtime enters a new state. They are intended for cross-cutting concerns — audit logging, metrics, cache invalidation, projections — that must not affect runtime correctness.
@@ -604,7 +669,7 @@ interface StateEnterEvent {
   readonly fromState: string | null; // null on initial-state entry
   readonly toState: string;
   readonly transitionUuid: string; // matches ctx.transitionUuid for the same entry
-  readonly triggerEvent: string | null; // null for initial-state entries and onEnter hops
+  readonly triggerEvent: string | null; // null: initial-state entry; "onEnter": chain hop; "$migrated": migration
   readonly context: Readonly<Record<string, unknown>>; // deep-cloned + frozen at event time
   readonly metadata: Readonly<Record<string, unknown>>; // deep-cloned + frozen
   readonly triggerMetadata: Readonly<Record<string, unknown>>; // deep-cloned + frozen
@@ -889,6 +954,7 @@ export class MyService {
 - `getInstance(uuid): Promise<WorkflowInstance | null>`
 - `getHistory(uuid, options?): Promise<WorkflowHistoryRecord[]>` _(returns newest-first; check the runtime's history store ordering)_
 - `listDefinitionVersions(workflowName): Promise<DefinitionVersionSummary[]>` _(v7.0.0)_ — delegates to the runtime
+- `migrateInstances(input: MigrateInstancesInput): Promise<MigrateInstancesResult>` _(v7.1.0)_ — delegates to the runtime; no HTTP endpoint exposes it
 - `getHandle(uuid): WorkflowHandle`
 
 **v1.0.0 (mostly invisible):** `WorkflowService` constructor now takes a single `WorkflowRuntime` argument and delegates queries to runtime methods. Affects only consumers that manually instantiate `WorkflowService` outside the NestJS DI container; standard usage is unchanged.
@@ -1089,6 +1155,7 @@ describe("MyInstanceStore conformance", () => {
 - `timeoutRetry` round-trips through `create` / `update`; `findExpired()` skips parked and not-yet-due retries and orders by due time; `findParkedTimeouts()` filtering, ordering and limit (v6.0.0)
 - `metadata` write-once enforcement (v1.0.0 contract)
 - `countInstances()` filtering by workflow, definition version and excluded states, and that an empty `excludeStates` counts everything (v7.0.0)
+- `findInstanceUuids()` paging by workflow and definition version, `afterUuid` and `limit`, ascending by `uuid`; the case is skipped (`ctx.skip()`) when the adapter doesn't implement it (v7.1.0, optional)
 - Nested-transaction reuse via `transactionRunner`
 
 Adapters that pass this suite are guaranteed to work with the runtime. `@duraflows/pg` and `@duraflows/kysely` both run it as part of their CI.
@@ -1107,7 +1174,7 @@ class WorkflowError extends Error {
 }
 ```
 
-Thrown for: instance not found, optimistic lock failure, command not in registry.
+Thrown for: instance not found, optimistic lock failure, command not in registry, `listDefinitionVersions`/`migrateInstances` without a `definitionStore`, and (v7.1.0) `migrateInstances` called without `instanceUuids` when the instance store has no `findInstanceUuids`.
 
 ### WorkflowDefinitionError
 
@@ -1117,7 +1184,7 @@ class WorkflowDefinitionError extends WorkflowError {
 }
 ```
 
-Thrown for: duplicate registration, validation failure, unknown workflow lookup, content changed without a version bump, and (v7.0.0) the startup executability check finding an unregistered command/guard or a structurally invalid snapshot (`onUnresolvable: "fail"`) or a pinned instance resolving to a missing/invalid stored snapshot.
+Thrown for: duplicate registration, validation failure, unknown workflow lookup, content changed without a version bump, (v7.0.0) the startup executability check finding an unregistered command/guard or a structurally invalid snapshot (`onUnresolvable: "fail"`) or a pinned instance resolving to a missing/invalid stored snapshot, and (v7.1.0) `migrateInstances`'s `toVersion` not being in the definition store.
 
 ### InvalidArgumentError
 
@@ -1127,7 +1194,7 @@ class InvalidArgumentError extends WorkflowError {
 }
 ```
 
-Thrown when: a caller passes an invalid numeric argument — `processExpiredWorkflows`'s `limit`, `findParkedTimeouts`'s `limit`, `getHistory`'s `limit`/`offset`, or the `WorkflowRuntime` constructor's `maxOnEnterDepth` or `timeoutRetry` options — that isn't a positive (or, for `offset`, non-negative) safe integer. Also thrown when the `WorkflowRuntime` constructor's `onUnresolvable` (v7.0.0) is provided and isn't `"fail"` or `"warn"`.
+Thrown when: a caller passes an invalid numeric argument — `processExpiredWorkflows`'s `limit`, `findParkedTimeouts`'s `limit`, `getHistory`'s `limit`/`offset`, `migrateInstances`'s `fromVersion`/`toVersion`/`limit` (v7.1.0), or the `WorkflowRuntime` constructor's `maxOnEnterDepth` or `timeoutRetry` options — that isn't a positive (or, for `offset`, non-negative) safe integer. Also thrown when: the `WorkflowRuntime` constructor's `onUnresolvable` (v7.0.0) is provided and isn't `"fail"` or `"warn"`; (v7.1.0) `migrateInstances`'s `fromVersion` equals `toVersion`, or its `stateMapping` names a state that isn't an own state of `toVersion`, or one that has an `onEnter` there.
 
 ### InvalidEventError
 

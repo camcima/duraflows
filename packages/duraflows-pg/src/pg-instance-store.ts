@@ -159,6 +159,24 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
     return (result.rows[0] as { count: number }).count;
   }
 
+  async findInstanceUuids(options: {
+    workflowName: string;
+    definitionVersion: number;
+    limit: number;
+    afterUuid?: string;
+  }): Promise<string[]> {
+    const client = this.getClient();
+    const result = await client.query(
+      `SELECT uuid FROM workflow_instances
+       WHERE workflow_name = $1 AND definition_version = $2
+         AND ($3::uuid IS NULL OR uuid > $3::uuid)
+       ORDER BY uuid
+       LIMIT $4`,
+      [options.workflowName, options.definitionVersion, options.afterUuid ?? null, options.limit],
+    );
+    return result.rows.map((row: { uuid: string }) => row.uuid);
+  }
+
   private mapRow(row: Record<string, unknown>): WorkflowInstance {
     return {
       uuid: row.uuid as string,

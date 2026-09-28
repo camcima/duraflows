@@ -338,4 +338,33 @@ describe("PgWorkflowInstanceStore", () => {
       expect(count).toBe(7);
     });
   });
+
+  describe("findInstanceUuids()", () => {
+    it("pages by uuid after the cursor", async () => {
+      const pool = createMockPool({ rows: [{ uuid: "u-1" }, { uuid: "u-2" }], rowCount: 2 });
+      const store = new PgWorkflowInstanceStore(pool);
+
+      const uuids = await store.findInstanceUuids({
+        workflowName: "order",
+        definitionVersion: 2,
+        limit: 50,
+        afterUuid: "u-0",
+      });
+
+      const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain("($3::uuid IS NULL OR uuid > $3::uuid)");
+      expect(sql).toContain("ORDER BY uuid");
+      expect(params).toEqual(["order", 2, "u-0", 50]);
+      expect(uuids).toEqual(["u-1", "u-2"]);
+    });
+
+    it("passes a null cursor on the first page", async () => {
+      const pool = createMockPool({ rows: [], rowCount: 0 });
+      const store = new PgWorkflowInstanceStore(pool);
+
+      await store.findInstanceUuids({ workflowName: "order", definitionVersion: 2, limit: 50 });
+
+      expect((pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual(["order", 2, null, 50]);
+    });
+  });
 });

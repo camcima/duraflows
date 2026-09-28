@@ -118,6 +118,24 @@ export class InMemoryInstanceStore implements WorkflowInstanceStore, Snapshotabl
     return count;
   }
 
+  async findInstanceUuids(options: {
+    workflowName: string;
+    definitionVersion: number;
+    limit: number;
+    afterUuid?: string;
+  }): Promise<string[]> {
+    return [...this.instances.values()]
+      .filter(
+        (instance) =>
+          instance.workflowName === options.workflowName &&
+          instance.definitionVersion === options.definitionVersion &&
+          (options.afterUuid === undefined || instance.uuid > options.afterUuid),
+      )
+      .map((instance) => instance.uuid)
+      .sort()
+      .slice(0, options.limit);
+  }
+
   snapshot(): unknown {
     return new Map([...this.instances.entries()].map(([uuid, instance]) => [uuid, structuredClone(instance)]));
   }

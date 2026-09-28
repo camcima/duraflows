@@ -48,7 +48,11 @@ async initialize(): Promise<void>
 3. With a `definitionStore` configured, runs the [startup executability check](#startup-executability-check).
 4. No-ops entirely when the runtime was constructed without a `definitionStore` — definition versioning (both the version-bump guard and pinning) is inert in that case.
 
-Idempotent and safe to call repeatedly or concurrently: the first call starts the sync and every caller — concurrent or later — shares that same in-flight (or already-settled) result, so definitions are synced once. A **failed** sync is not cached — the next call to `initialize()` retries from scratch rather than replaying the failure.
+_(v7.1.0)_ `initialize()` is really two cached steps -- the definition sync, then the executability check -- each idempotent and cached separately. [`migrateInstances()`](#migrateinstances) awaits only the sync, not the check: a failing check caused by instances stuck on an old version is exactly what migration fixes, so it must not block on that same check. Every other operation (`createInstance()`, `triggerEvent()`, `processExpiredWorkflows()`, `rearmTimeout()`) still awaits both, calling `initialize()` itself, unchanged from before.
+
+That split only helps once `migrateInstances()` itself gets to run, though. Your own boot sequence's `await runtime.initialize()` call (or the NestJS module's, see [Startup Validation](./nestjs-integration.md#startup-validation)) awaits both steps, so `onUnresolvable: "fail"` (the default) still stops the app from starting -- and `migrateInstances()` is never reached through it. Either run the migration from a one-off script that builds its own `WorkflowRuntime` against the same persistence and definitions and calls `migrateInstances()` without calling `initialize()` first, or deploy temporarily with `onUnresolvable: "warn"`, migrate, then restore `"fail"`.
+
+Idempotent and safe to call repeatedly or concurrently: the first call starts the sync and every caller — concurrent or later — shares that same in-flight (or already-settled) result, so definitions are synced once. A **failed** sync is not cached — the next call to `initialize()` retries from scratch rather than replaying the failure. The same holds for the executability check: it is cached independently of the sync, and a failed check is likewise not cached.
 
 Calling it explicitly is optional: `createInstance()`, `triggerEvent()`, `processExpiredWorkflows()`, and `rearmTimeout()` each call `initialize()` first, so the sync also happens lazily on whichever of them runs first. Calling it explicitly at boot is still recommended — the NestJS module does this automatically (see [Startup Validation](./nestjs-integration.md#startup-validation)) — because it makes a version-bump violation, or an unresolvable stored version, fail application startup instead of surfacing unpredictably at runtime: since a failed `initialize()` is retried on the next call, a lazily-run failure fails every one of those operations, for every workflow, until it is fixed.
 
@@ -462,6 +466,81 @@ const versions = await runtime.listDefinitionVersions("order");
 // [{ version: 1, contentHash: "...", registeredAt: ..., activeInstances: 0 }, ...]
 const drained = versions.filter((v) => v.version < 2 && v.activeInstances === 0);
 ```
+
+### migrateInstances()
+
+_(v7.1.0)_ Moves chosen instances of a workflow from one stored definition version to another: pure relabeling, with an optional state mapping and context transform. See [Migrating instances](./workflow-definitions.md#migrating-instances) for when to reach for it and what it deliberately doesn't do.
+
+```ts
+async migrateInstances(input: MigrateInstancesInput): Promise<MigrateInstancesResult>
+```
+
+**MigrateInstancesInput:**
+
+| Property           | Type                                                                         | Required | Description                                                                                                                          |
+| ------------------ | ---------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `workflowName`     | `string`                                                                     | Yes      | The workflow to migrate instances of.                                                                                                |
+| `fromVersion`      | `number`                                                                     | Yes      | The stored version candidates must currently be stamped with. Does not need to be in the definition store.                           |
+| `toVersion`        | `number`                                                                     | Yes      | The target version. Must be in the definition store (or be the in-code version) and structurally valid.                              |
+| `stateMapping`     | `Record<string, string>`                                                     | No       | Current state → target state, for renamed or removed states only. Every value must be an own state of `toVersion` with no `onEnter`. |
+| `transformContext` | `(context, instance: Readonly<WorkflowInstance>) => Record<string, unknown>` | No       | Pure. Called with a deep clone of the context and a deep-frozen clone of the instance; its result is stored as its JSON round trip.  |
+| `instanceUuids`    | `readonly string[]`                                                          | No       | Scope-down; de-duplicated, order kept. Omit to migrate every instance on `fromVersion` (requires `findInstanceUuids`).               |
+| `limit`            | `number`                                                                     | No       | Caps how many candidates this call _examines_ (migrated, skipped and failed all count). Default: no cap.                             |
+| `dryRun`           | `boolean`                                                                    | No       | Validate and report; write nothing, fire no observers.                                                                               |
+
+**MigrateInstancesResult:**
+
+| Property   | Type                                  | Description                                                            |
+| ---------- | ------------------------------------- | ---------------------------------------------------------------------- |
+| `dryRun`   | `boolean`                             | Echoes `input.dryRun` (`false` when omitted).                          |
+| `migrated` | `Array<{ uuid; fromState; toState }>` | Migrated instances (or, in a dry run, instances that would migrate).   |
+| `skipped`  | `Array<{ uuid; reason }>`             | Instances left untouched on `fromVersion`, with a reason -- see below. |
+| `failed`   | `Array<{ uuid; error }>`              | Instances whose own transaction rolled back; the batch continues.      |
+
+**Upfront validation.** Every one of these runs before any instance row is touched; the first failure throws and nothing is written:
+
+| Check                                                                       | Error                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A definition store is configured                                            | `WorkflowError("migrateInstances requires a definition store")`                                                                                                                                                                                                                                     |
+| `workflowName` is registered                                                | `WorkflowDefinitionError` (`Workflow "<name>": Workflow not found in registry`)                                                                                                                                                                                                                     |
+| `fromVersion` and `toVersion` are positive safe integers                    | `InvalidArgumentError("fromVersion must be a positive integer, got <value>")` (and likewise for `toVersion`)                                                                                                                                                                                        |
+| `fromVersion !== toVersion` (downgrades are allowed)                        | `InvalidArgumentError("fromVersion and toVersion must differ")`                                                                                                                                                                                                                                     |
+| `limit`, when given, is a positive safe integer                             | `InvalidArgumentError("limit must be a positive integer, got <value>")`                                                                                                                                                                                                                             |
+| `toVersion` is in the store and structurally valid                          | `WorkflowDefinitionError`, raised while loading the target version the same way a pinned instance's snapshot is loaded -- missing: `Workflow "<name>": version <toVersion> is not in the definition store`; invalid: `Workflow "<name>": stored version <toVersion> is invalid: <validator errors>` |
+| Every `stateMapping` value is an own state of `toVersion`                   | `InvalidArgumentError('stateMapping maps "<from>" to "<to>", which is not a state of version <toVersion>')`                                                                                                                                                                                         |
+| No `stateMapping` value is a target state with an `onEnter`                 | `InvalidArgumentError('stateMapping maps "<from>" to "<to>", which has an onEnter in version <toVersion>; migration never runs onEnter')`                                                                                                                                                           |
+| `instanceUuids` given, or the instance store implements `findInstanceUuids` | `WorkflowError("migrateInstances without instanceUuids requires an instance store that implements findInstanceUuids")`                                                                                                                                                                              |
+
+`stateMapping` keys are looked up as own properties only (`Object.hasOwn`), so a state literally named `"toString"` is never matched through the prototype chain.
+
+**Per-instance behavior**, once validation passes. Each candidate runs in its own transaction through the same observer-delivery path as `triggerEvent()`:
+
+1. Lock the row (`lockByUuid`) and re-check it — this also catches an instance another worker migrated or re-stamped after it was listed.
+2. Resolve the target state: the `stateMapping` entry for the current state, or the same-named state in `toVersion` when one exists, or skip.
+3. Run `transformContext`, if given.
+4. Relabel: `currentState` and `definitionVersion` move to the target; `expiresAt` is recomputed from `lastTransitionAt` (elapsed time is preserved, so a deadline already in the past fires on the next sweep); `timeoutRetry` is cleared; `version` and `updatedAt` bump. `lastTransitionAt` is **unchanged** — migration is not a transition.
+5. Append a `$migrated` history row (`outcome: "success"`, `commandResultsJson: []`, `triggerMetadata: { source: "migration", fromVersion, toVersion }`) and queue an observer event with `triggerEvent: "$migrated"` and a fresh `transitionUuid`, fired after commit — even when the state name didn't change.
+
+A throw anywhere in this per-instance sequence -- locking the row, resolving the target state, running `transformContext`, updating the instance, or appending the history row -- rolls back that instance's transaction only and records it in `failed` (for example an invalid or throwing `transformContext`, an optimistic-lock conflict, or a database error); the batch continues with the next candidate.
+
+**Skip reasons** (`result.skipped[].reason`, verbatim):
+
+| Reason                                                               | When                                                                                                                         |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `not found`                                                          | `findByUuid`/`lockByUuid` returned nothing for that UUID                                                                     |
+| `belongs to workflow <name>`                                         | The UUID exists but belongs to a different workflow                                                                          |
+| `unstamped`                                                          | `definitionVersion` is `null` (a pre-5.0 instance)                                                                           |
+| `on version <v>, not <fromVersion>`                                  | Already migrated, or re-stamped, since it was listed -- or an explicit `instanceUuids` entry that was never on `fromVersion` |
+| `state <s> has no mapping and does not exist in version <toVersion>` | No `stateMapping` entry for the current state, and no same-named state in `toVersion`                                        |
+| `state <s> has an onEnter in version <toVersion>`                    | Keeps its current name, but that state now has an `onEnter` in `toVersion`                                                   |
+
+**Candidates and paging.** With `instanceUuids`, candidates are exactly those UUIDs, de-duplicated and in order. Without it, candidates come from `instanceStore.findInstanceUuids`, in pages of 100, ascending by UUID, each page starting strictly after the last UUID seen; paging stops when a page comes back empty or `limit` candidates have been examined. That cursor only holds within one call, so a single call never revisits a candidate. Across calls it resets to the lowest UUID: a migrated instance has left `fromVersion` for good and won't reappear, but a skipped or failed instance stays on `fromVersion` and is examined again — and counted against `limit` again — by the next call with the same input. With `limit` set, enough unmigratable instances sorting first can make a call report `migrated: []` while migratable ones still wait further along in UUID order. See [Migrating instances](./workflow-definitions.md#migrating-instances) for how to drive a batch loop around this.
+
+**Dry run.** Each candidate is read with `findByUuid` (no lock, no transaction); steps 1–3 above still run, including `transformContext`. Nothing is written and no observers fire; the result reports what would happen.
+
+**Throws:** the upfront validation errors above; see also `initialize()`'s [split](#initialize) — `migrateInstances` awaits only the definition sync, not the startup executability check, since fixing that check is often the point of migrating.
+
+**Example:** see [Migrating instances](./workflow-definitions.md#migrating-instances).
 
 ### getHandle()
 

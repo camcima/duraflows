@@ -148,6 +148,24 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
     return Number(row?.count ?? 0);
   }
 
+  async findInstanceUuids(options: {
+    workflowName: string;
+    definitionVersion: number;
+    limit: number;
+    afterUuid?: string;
+  }): Promise<string[]> {
+    let query = this.getExecutor()
+      .selectFrom("workflow_instances")
+      .select("uuid")
+      .where("workflow_name", "=", options.workflowName)
+      .where("definition_version", "=", options.definitionVersion);
+    if (options.afterUuid !== undefined) {
+      query = query.where("uuid", ">", options.afterUuid);
+    }
+    const rows = await query.orderBy("uuid").limit(options.limit).execute();
+    return rows.map((row) => row.uuid);
+  }
+
   private mapRow(row: Selectable<WorkflowInstancesTable>): WorkflowInstance {
     return {
       uuid: row.uuid,

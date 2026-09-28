@@ -456,4 +456,35 @@ describe("KyselyWorkflowInstanceStore", () => {
       expect(count).toBe(0);
     });
   });
+
+  describe("findInstanceUuids()", () => {
+    it("filters by workflow and version, pages after the cursor, ordered by uuid", async () => {
+      const { db, calls } = createMockDb([{ uuid: "u-1" }]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      const uuids = await store.findInstanceUuids({
+        workflowName: "order",
+        definitionVersion: 2,
+        limit: 50,
+        afterUuid: "u-0",
+      });
+
+      expect(calls).toContainEqual({ method: "select", args: ["uuid"] });
+      expect(calls).toContainEqual({ method: "where", args: ["workflow_name", "=", "order"] });
+      expect(calls).toContainEqual({ method: "where", args: ["definition_version", "=", 2] });
+      expect(calls).toContainEqual({ method: "where", args: ["uuid", ">", "u-0"] });
+      expect(calls).toContainEqual({ method: "orderBy", args: ["uuid"] });
+      expect(calls).toContainEqual({ method: "limit", args: [50] });
+      expect(uuids).toEqual(["u-1"]);
+    });
+
+    it("omits the cursor filter on the first page", async () => {
+      const { db, calls } = createMockDb([]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      await store.findInstanceUuids({ workflowName: "order", definitionVersion: 2, limit: 50 });
+
+      expect(calls.some((c) => c.method === "where" && c.args[0] === "uuid")).toBe(false);
+    });
+  });
 });

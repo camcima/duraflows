@@ -373,6 +373,94 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     });
   });
 
+  describe("pg instance migration", () => {
+    const v1: WorkflowDefinition = {
+      name: "migrating-order",
+      initialState: "new",
+      states: {
+        new: { events: { Submit: { targetState: "review" } } },
+        review: { events: { Approve: { targetState: "approved" } } },
+        approved: {},
+      },
+    };
+    const v2: WorkflowDefinition = {
+      name: "migrating-order",
+      version: 2,
+      initialState: "new",
+      states: {
+        new: { events: { Submit: { targetState: "checking" } } },
+        checking: { events: { Approve: { targetState: "accepted" } } },
+        accepted: {},
+      },
+    };
+
+    function buildRuntime(definition: WorkflowDefinition): WorkflowRuntime {
+      const definitionRegistry = new InMemoryDefinitionRegistry({
+        validator: new WorkflowValidator(),
+        compiler: new WorkflowCompiler(),
+      });
+      definitionRegistry.register(definition);
+      return new WorkflowRuntime({
+        definitionRegistry,
+        commandRegistry: new InMemoryCommandRegistry(),
+        ...pgWorkflowProviders(pool),
+        clock: { now: () => new Date() },
+      });
+    }
+
+    afterEach(async () => {
+      await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
+      await pool.query("TRUNCATE workflow_definitions");
+    });
+
+    it("pages through every v1 instance, relabels them and records $migrated", async () => {
+      const runtimeV1 = buildRuntime(v1);
+      const uuids: string[] = [];
+      for (let i = 0; i < 105; i++) {
+        const instance = await runtimeV1.createInstance({ workflowName: "migrating-order" });
+        await runtimeV1.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Submit" });
+        uuids.push(instance.uuid);
+      }
+
+      const runtimeV2 = buildRuntime(v2);
+      const dry = await runtimeV2.migrateInstances({
+        workflowName: "migrating-order",
+        fromVersion: 1,
+        toVersion: 2,
+        stateMapping: { review: "checking" },
+        dryRun: true,
+      });
+      expect(dry.migrated).toHaveLength(105);
+
+      const result = await runtimeV2.migrateInstances({
+        workflowName: "migrating-order",
+        fromVersion: 1,
+        toVersion: 2,
+        stateMapping: { review: "checking" },
+      });
+
+      expect(result.migrated).toHaveLength(105);
+      expect(result.skipped).toEqual([]);
+      expect(result.failed).toEqual([]);
+      const sample = (await runtimeV2.getInstance(uuids[0]))!;
+      expect([sample.currentState, sample.definitionVersion]).toEqual(["checking", 2]);
+      const row = (await runtimeV2.getHistory(uuids[0])).find((h) => h.eventName === "$migrated");
+      expect(row).toMatchObject({
+        fromState: "review",
+        toState: "checking",
+        definitionVersion: 2,
+        triggerMetadata: { source: "migration", fromVersion: 1, toVersion: 2 },
+      });
+      const versions = await runtimeV2.listDefinitionVersions("migrating-order");
+      expect(versions.map((v) => [v.version, v.activeInstances])).toEqual([
+        [1, 0],
+        [2, 105],
+      ]);
+      await runtimeV2.triggerEvent({ workflowInstanceUuid: uuids[0], eventName: "Approve" });
+      expect((await runtimeV2.getInstance(uuids[0]))!.currentState).toBe("accepted");
+    });
+  });
+
   describe("pg definition version pinning", () => {
     // v1 omits `version` (defaults to 1). v2 renames the review state and
     // retargets Approve, so each version's rules are distinguishable.
