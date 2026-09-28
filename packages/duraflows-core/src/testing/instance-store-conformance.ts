@@ -385,5 +385,46 @@ export function runInstanceStoreConformance(label: string, harness: InstanceStor
         await teardown();
       }
     });
+
+    it("findInstanceUuids honours the state hints, or ignores them consistently (optional)", async (ctx) => {
+      const { store, transactionRunner, teardown } = await harness.setup();
+      try {
+        if (!store.findInstanceUuids) {
+          ctx.skip();
+          return;
+        }
+        const u = (n: number) => `00000000-0000-0000-0000-0000000000${n}`;
+        const rows = [
+          makeInstance({ uuid: u(80), definitionVersion: 1, currentState: "open" }),
+          makeInstance({ uuid: u(81), definitionVersion: 1, currentState: "closed" }),
+          makeInstance({ uuid: u(82), definitionVersion: 1, currentState: "open" }),
+          makeInstance({ uuid: u(83), definitionVersion: 1, currentState: "review" }),
+          makeInstance({ uuid: u(84), definitionVersion: 1, currentState: "closed" }),
+        ];
+        for (const row of rows) {
+          await transactionRunner.runInTransaction(() => store.create(row));
+        }
+        const find = (hints: { states?: readonly string[]; excludeStates?: readonly string[] }) =>
+          store.findInstanceUuids!({ workflowName: "test-workflow", definitionVersion: 1, limit: 100, ...hints });
+        const all = await find({});
+
+        // Exact stores return exactly `matching`; stores that ignore hints return `all`. Both pass.
+        const expectHint = async (
+          hints: { states?: readonly string[]; excludeStates?: readonly string[] },
+          matching: string[],
+        ) => {
+          const got = await find(hints);
+          expect(got).toEqual(expect.arrayContaining(matching));
+          for (const uuid of got) expect(all).toContain(uuid);
+          expect([...got].sort()).toEqual(got);
+        };
+        await expectHint({ states: ["open"] }, [u(80), u(82)]);
+        await expectHint({ excludeStates: ["closed"] }, [u(80), u(82), u(83)]);
+        await expectHint({ states: ["open", "closed"], excludeStates: ["closed"] }, [u(80), u(82)]);
+        await expectHint({ excludeStates: [] }, [u(80), u(81), u(82), u(83), u(84)]);
+      } finally {
+        await teardown();
+      }
+    });
   });
 }

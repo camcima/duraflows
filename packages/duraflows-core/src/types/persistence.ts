@@ -86,14 +86,20 @@ export interface WorkflowInstanceStore {
    * Optional. UUIDs of instances of `workflowName` stamped with
    * `definitionVersion`, ascending, strictly after `afterUuid` when given, at
    * most `limit`. Instances with a null `definitionVersion` never match.
-   * Without it, `migrateInstances` requires explicit `instanceUuids`. A plain
-   * read: no transaction required.
+   * `states` / `excludeStates` are hints: stores should keep only instances
+   * whose current state is in `states` (an empty list matches nothing) and
+   * drop those in `excludeStates` (an empty list excludes nothing). Callers
+   * re-check, so a store that ignores them is correct, only slower.
+   * Without this method, `migrateInstances` requires explicit
+   * `instanceUuids`. A plain read: no transaction required.
    */
   findInstanceUuids?(options: {
     workflowName: string;
     definitionVersion: number;
     limit: number;
     afterUuid?: string;
+    states?: readonly string[];
+    excludeStates?: readonly string[];
   }): Promise<string[]>;
 }
 

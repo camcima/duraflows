@@ -486,5 +486,34 @@ describe("KyselyWorkflowInstanceStore", () => {
 
       expect(calls.some((c) => c.method === "where" && c.args[0] === "uuid")).toBe(false);
     });
+
+    it("findInstanceUuids applies non-empty state hints", async () => {
+      const { db, calls } = createMockDb([]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      await store.findInstanceUuids({
+        workflowName: "order",
+        definitionVersion: 2,
+        limit: 50,
+        states: ["open"],
+        excludeStates: ["done"],
+      });
+
+      expect(calls).toContainEqual({ method: "where", args: ["current_state", "in", ["open"]] });
+      expect(calls).toContainEqual({ method: "where", args: ["current_state", "not in", ["done"]] });
+    });
+
+    it("findInstanceUuids matches nothing for an empty states hint and ignores an empty excludeStates", async () => {
+      const { db, calls, executeMock } = createMockDb([{ uuid: "u-1" }]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      expect(
+        await store.findInstanceUuids({ workflowName: "order", definitionVersion: 2, limit: 50, states: [] }),
+      ).toEqual([]);
+      expect(executeMock).not.toHaveBeenCalled();
+
+      await store.findInstanceUuids({ workflowName: "order", definitionVersion: 2, limit: 50, excludeStates: [] });
+      expect(calls.some((c) => c.method === "where" && c.args[0] === "current_state")).toBe(false);
+    });
   });
 });
