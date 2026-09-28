@@ -9,6 +9,9 @@ import {
   MigrationInterruptedError,
 } from "@duraflows/core";
 import { WorkflowExceptionFilter } from "../../src/filters/workflow-exception.filter.js";
+// Imported statically: a dynamic import of the whole entry point can exceed the 5s test timeout
+// under coverage instrumentation.
+import * as nest from "../../src/index.js";
 
 // The filter must stay platform-agnostic: it may only call `.status(...).send(...)`,
 // which exists on both Express and Fastify replies (`.json()` is Express-only).
@@ -115,13 +118,11 @@ describe("WorkflowExceptionFilter", () => {
     }
   });
 
-  it("re-exports IncompatibleDefinitionError from the package entry point", async () => {
-    const nest = await import("../../src/index.js");
+  it("re-exports IncompatibleDefinitionError from the package entry point", () => {
     expect(nest.IncompatibleDefinitionError).toBe(IncompatibleDefinitionError);
   });
 
-  it("re-exports MigrationInterruptedError from the package entry point", async () => {
-    const nest = await import("../../src/index.js");
+  it("re-exports MigrationInterruptedError from the package entry point", () => {
     expect(nest.MigrationInterruptedError).toBe(MigrationInterruptedError);
   });
 });
