@@ -30,6 +30,8 @@
   * `MigrateInstancesResult` gains the required fields `nextCursor` and `warnings` (update hand-built results, mocks and exact `toEqual` assertions).
 * **Custom adapters:** `findInstanceUuids` accepts optional `states` / `excludeStates` hints, which may be ignored. Its pages must ascend by UUID string comparison: an adapter whose native UUID order differs (for example SQL Server `uniqueidentifier`) must order by the canonical lowercase text form. A custom runner should reject a COMMIT that PostgreSQL silently turned into a ROLLBACK, as both bundled adapters now do.
 * **Definitions with an own `"__proto__"` key** (possible after `JSON.parse`) now hash differently than in 7.1, so `initialize()` reports that their content changed. Bump their `version` when upgrading. Ordinary definitions hash exactly as before.
+* **Testing peer:** `@duraflows/core` now accepts vitest 5 as its optional peer (`^4.0.0 || ^5.0.0`) for the `@duraflows/core/testing` conformance suites.
+* **Docs, skills and evals** were brought in line with 7.2 (#113).
 * **A state with no events is terminal even if it has an `onEnter`**, so a final state that only sends an entry notification no longer keeps its version active forever.
 
 ## [7.1.0](https://github.com/camcima/duraflows/compare/v7.0.0...v7.1.0) (2026-09-28)
