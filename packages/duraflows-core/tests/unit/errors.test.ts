@@ -6,6 +6,7 @@ import {
   OnEnterDepthExceededError,
   CommandFailureError,
   WorkflowInstanceNotFoundError,
+  IncompatibleDefinitionError,
 } from "../../src/errors/index.js";
 
 describe("WorkflowError", () => {
@@ -114,5 +115,20 @@ describe("WorkflowInstanceNotFoundError", () => {
     expect(err.name).toBe("WorkflowInstanceNotFoundError");
     expect(err.workflowInstanceUuid).toBe("abc-123");
     expect(err.message).toBe('Workflow instance "abc-123" not found');
+  });
+});
+
+describe("IncompatibleDefinitionError", () => {
+  it("IncompatibleDefinitionError names the instance, state, workflow and version", () => {
+    const error = new IncompatibleDefinitionError("abc", "order", "review", 2);
+    expect(error).toBeInstanceOf(WorkflowError);
+    expect(error.name).toBe("IncompatibleDefinitionError");
+    expect(error.message).toBe(
+      'Instance "abc" is in state "review", which version 2 of workflow "order" does not define',
+    );
+    expect(error.workflowInstanceUuid).toBe("abc");
+    expect(error.workflowName).toBe("order");
+    expect(error.currentState).toBe("review");
+    expect(error.version).toBe(2);
   });
 });

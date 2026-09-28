@@ -269,6 +269,18 @@ describe("InMemoryDefinitionRegistry", () => {
       WorkflowDefinitionError,
     );
   });
+
+  it("rejects a versionPolicy other than pinned or latest", () => {
+    const registry = new InMemoryDefinitionRegistry();
+    expect(() =>
+      registry.register({
+        name: "wf",
+        versionPolicy: "pinnned" as "pinned",
+        initialState: "a",
+        states: { a: {} },
+      }),
+    ).toThrow('Workflow "wf": versionPolicy must be "pinned" or "latest", got "pinnned"');
+  });
 });
 
 describe("InMemoryDefinitionRegistry onValidationWarning", () => {

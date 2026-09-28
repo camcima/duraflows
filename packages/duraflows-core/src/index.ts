@@ -53,6 +53,7 @@ export {
   InvalidEventError,
   CommandFailureError,
   OnEnterDepthExceededError,
+  IncompatibleDefinitionError,
 } from "./errors/index.js";
 
 // Registries

@@ -48,6 +48,30 @@ export class InvalidEventError extends WorkflowError {
   }
 }
 
+/**
+ * Thrown under `versionPolicy: "latest"` when an instance's current state does
+ * not exist in the latest registered definition, instead of running the
+ * instance on a definition that cannot describe it.
+ */
+export class IncompatibleDefinitionError extends WorkflowError {
+  public readonly workflowInstanceUuid: string;
+  public readonly workflowName: string;
+  public readonly currentState: string;
+  public readonly version: number;
+
+  constructor(workflowInstanceUuid: string, workflowName: string, currentState: string, version: number) {
+    super(
+      `Instance "${workflowInstanceUuid}" is in state "${currentState}", ` +
+        `which version ${version} of workflow "${workflowName}" does not define`,
+    );
+    this.name = "IncompatibleDefinitionError";
+    this.workflowInstanceUuid = workflowInstanceUuid;
+    this.workflowName = workflowName;
+    this.currentState = currentState;
+    this.version = version;
+  }
+}
+
 export class OnEnterDepthExceededError extends WorkflowError {
   public readonly workflowInstanceUuid: string;
   public readonly stateName: string;

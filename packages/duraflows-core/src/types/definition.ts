@@ -6,6 +6,15 @@ export interface WorkflowDefinition<TState extends string = string> {
    * `WorkflowRuntime.initialize()` enforces this against the definition store.
    */
   version?: number;
+  /**
+   * Which definition governs existing instances. `"pinned"` (the default):
+   * each instance executes the version it was stamped with, loaded from the
+   * definition store. `"latest"`: every instance executes this definition,
+   * and one whose current state it lacks fails with
+   * `IncompatibleDefinitionError`. The latest registered definition's policy
+   * governs all instances of the workflow. Excluded from the content hash.
+   */
+  versionPolicy?: "pinned" | "latest";
   initialState: TState;
   states: Record<TState, WorkflowStateDefinition<TState>>;
 }
