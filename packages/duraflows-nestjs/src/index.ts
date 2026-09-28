@@ -73,6 +73,8 @@ export type {
   WorkflowHistoryStore,
   WorkflowHistoryRecord,
   DefinitionVersionSummary,
+  MigrateInstancesInput,
+  MigrateInstancesResult,
   WorkflowTransactionRunner,
   WorkflowClock,
   WorkflowPersistenceProvider,

@@ -11,6 +11,7 @@ function createMocks() {
     getInstance: vi.fn().mockResolvedValue({ uuid: "inst-uuid", currentState: "pending" }),
     getHistory: vi.fn().mockResolvedValue([{ eventName: "Created" }]),
     listDefinitionVersions: vi.fn().mockResolvedValue([{ version: 1, activeInstances: 2 }]),
+    migrateInstances: vi.fn().mockResolvedValue({ dryRun: false, migrated: [], skipped: [], failed: [] }),
   };
 
   const service = new WorkflowService(runtime as unknown as WorkflowRuntime);
@@ -88,6 +89,16 @@ describe("WorkflowService", () => {
 
     expect(runtime.listDefinitionVersions).toHaveBeenCalledWith("order");
     expect(result).toEqual([{ version: 1, activeInstances: 2 }]);
+  });
+
+  it("migrateInstances() delegates to runtime", async () => {
+    const { service, runtime } = createMocks();
+    const input = { workflowName: "order", fromVersion: 1, toVersion: 2, dryRun: true };
+
+    const result = await service.migrateInstances(input);
+
+    expect(runtime.migrateInstances).toHaveBeenCalledWith(input);
+    expect(result).toEqual({ dryRun: false, migrated: [], skipped: [], failed: [] });
   });
 
   it("getHandle() returns a WorkflowHandle with the correct uuid", () => {
