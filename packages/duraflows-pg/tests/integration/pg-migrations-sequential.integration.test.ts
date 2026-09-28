@@ -12,7 +12,7 @@ import {
   PgTransactionRunner,
 } from "@duraflows/pg";
 
-// This suite proves that the four *shipped* dbmate migration artifacts, applied
+// This suite proves that the shipped dbmate migration artifacts, applied
 // in order against a real database, produce a schema the adapters can write
 // to. `pg-adapter.integration.test.ts` and its kysely equivalent both bootstrap
 // from `generateMigrationSql()` (the fresh-install path) — neither ever runs
@@ -29,6 +29,7 @@ const MIGRATION_FILENAMES = [
   "003_event_guards.sql",
   "004_definition_versions.sql",
   "005_timeout_retries.sql",
+  "006_definition_version_index.sql",
 ];
 
 const dbmateDir = fileURLToPath(new URL("../../sql/dbmate/", import.meta.url));
@@ -112,7 +113,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     await pool.end();
   });
 
-  describe("pg sequential dbmate migrations (001 -> 005 applied in order)", () => {
+  describe("pg sequential dbmate migrations (001 -> 006 applied in order)", () => {
     it("produces a schema the instance store can write to, including definitionVersion", async () => {
       const instance = {
         uuid: randomUUID(),
@@ -248,6 +249,24 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
         );
         expect(columns.rows).toEqual([]);
         expect(indexes.rows).toEqual([]);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    });
+
+    it("006 creates the definition-version index and its down migration drops it", async () => {
+      const client = await pool.connect();
+      const indexQuery = `SELECT indexname FROM pg_indexes
+        WHERE schemaname = 'duraflows_pg_it_migrations'
+          AND indexname = 'workflow_instances_definition_version_idx'`;
+      try {
+        await client.query("BEGIN");
+        expect((await client.query(indexQuery)).rows).toHaveLength(1);
+        await client.query(extractUpSql("006_definition_version_index.sql"));
+        expect((await client.query(indexQuery)).rows).toHaveLength(1);
+        await client.query(extractDownSql("006_definition_version_index.sql"));
+        expect((await client.query(indexQuery)).rows).toEqual([]);
       } finally {
         await client.query("ROLLBACK");
         client.release();

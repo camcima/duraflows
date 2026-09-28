@@ -98,4 +98,10 @@ describe("generateMigrationSql", () => {
     expect(up).toContain("CREATE INDEX workflow_instances_timeout_parked_idx");
     expect(up).toContain("WHERE timeout_parked_at IS NOT NULL");
   });
+
+  it("indexes workflow_instances by (workflow_name, definition_version)", () => {
+    const { up } = generateMigrationSql();
+    expect(up).toContain("CREATE INDEX workflow_instances_definition_version_idx");
+    expect(up).toContain("ON workflow_instances (workflow_name, definition_version);");
+  });
 });
