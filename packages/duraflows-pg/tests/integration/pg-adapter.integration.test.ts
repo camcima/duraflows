@@ -6,7 +6,12 @@ import {
   runDefinitionStoreConformance,
   runTransactionRunnerConformance,
 } from "@duraflows/core/testing";
-import type { WorkflowInstance, WorkflowHistoryRecord, WorkflowDefinition } from "@duraflows/core";
+import type {
+  WorkflowInstance,
+  WorkflowHistoryRecord,
+  WorkflowDefinition,
+  WorkflowDefinitionRegistry,
+} from "@duraflows/core";
 import {
   WorkflowRuntime,
   InMemoryDefinitionRegistry,
@@ -568,6 +573,76 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
 
       expect(await snapshots()).toBe(1);
       expect(await runtime.getInstance(instance.uuid)).not.toBeNull();
+    });
+
+    it("persists the snapshot even when a custom registry returns a fresh object on every get()", async () => {
+      const inner = new InMemoryDefinitionRegistry();
+      inner.register(definition);
+      const cloningRegistry: WorkflowDefinitionRegistry = {
+        get: (name) => structuredClone(inner.get(name)),
+        has: (name) => inner.has(name),
+        getAll: () => inner.getAll().map((d) => structuredClone(d)),
+      };
+      const providers = pgWorkflowProviders(pool);
+      const runtime = new WorkflowRuntime({
+        definitionRegistry: cloningRegistry,
+        commandRegistry: new InMemoryCommandRegistry(),
+        ...providers,
+        clock: { now: () => new Date() },
+      });
+
+      await providers.transactionRunner
+        .runInTransaction(async () => {
+          await runtime.createInstance({ workflowName: "sync-rollback" });
+          throw new Error("caller rolls back");
+        })
+        .catch(() => undefined);
+      expect(await snapshots()).toBe(0);
+
+      await runtime.createInstance({ workflowName: "sync-rollback" });
+      expect(await snapshots()).toBe(1);
+    });
+
+    it("re-establishes a cached migration target whose snapshot row was rolled back", async () => {
+      const versioned = (version: number): WorkflowDefinition => ({
+        ...definition,
+        version,
+        states: { ...definition.states, open: { events: { Close: { targetState: "closed" } }, metadata: { version } } },
+      });
+      const build = (def: WorkflowDefinition) => {
+        const registry = new InMemoryDefinitionRegistry();
+        registry.register(def);
+        return new WorkflowRuntime({
+          definitionRegistry: registry,
+          commandRegistry: new InMemoryCommandRegistry(),
+          ...pgWorkflowProviders(pool),
+          clock: { now: () => new Date() },
+        });
+      };
+      const instance = await build(versioned(1)).createInstance({ workflowName: "sync-rollback" });
+      const runtimeV3 = build(versioned(3));
+      await runtimeV3.initialize();
+      const toV2 = { workflowName: "sync-rollback", fromVersion: 1, toVersion: 2 };
+
+      // v2's row only exists inside this transaction; the migration loads (and caches) it, then all rolls back.
+      await pgWorkflowProviders(pool)
+        .transactionRunner.runInTransaction(async () => {
+          await build(versioned(2)).initialize();
+          await runtimeV3.migrateInstances(toV2);
+          throw new Error("caller rolls back");
+        })
+        .catch(() => undefined);
+
+      const retry = await runtimeV3.migrateInstances(toV2);
+
+      expect(retry.migrated.map((m) => m.uuid)).toEqual([instance.uuid]);
+      const v2Rows = await pool.query(
+        "SELECT count(*)::int AS n FROM workflow_definitions WHERE workflow_name = $1 AND version = 2",
+        ["sync-rollback"],
+      );
+      expect(v2Rows.rows[0].n).toBe(1);
+      await build(versioned(3)).triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Close" });
+      expect((await runtimeV3.getInstance(instance.uuid))!.currentState).toBe("closed");
     });
 
     it("gives an instance created during another request's rolled-back sync its own snapshot", async () => {

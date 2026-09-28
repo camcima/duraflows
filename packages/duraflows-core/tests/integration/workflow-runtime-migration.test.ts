@@ -983,7 +983,7 @@ describe("migrateInstances: 7.2 validation and hardening", () => {
 });
 
 describe("migrateInstances: snapshot written with the instance", () => {
-  it("writes the in-code target's snapshot in each migration, but not a stored target's", async () => {
+  it("writes the target's snapshot in each migration, whether it is in code or loaded from the store", async () => {
     const { store, runtimeV1, runtimeV2 } = world();
     await runtimeV1.createInstance({ workflowName: "order" });
     await runtimeV2.initialize();
@@ -994,8 +994,11 @@ describe("migrateInstances: snapshot written with the instance", () => {
     expect(ensure).toHaveBeenCalledTimes(1);
     expect(ensure.mock.calls[0][0]).toMatchObject({ workflowName: "order", version: 2 });
 
+    // A stored target may have been read from a row a since-rolled-back transaction wrote,
+    // so it is re-ensured in the migrating transaction too.
     ensure.mockClear();
     await runtimeV2.migrateInstances({ workflowName: "order", fromVersion: 2, toVersion: 1 });
-    expect(ensure).not.toHaveBeenCalled();
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect(ensure.mock.calls[0][0]).toMatchObject({ workflowName: "order", version: 1 });
   });
 });

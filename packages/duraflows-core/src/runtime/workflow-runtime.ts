@@ -297,17 +297,30 @@ export class WorkflowRuntime {
   }
 
   /**
-   * Writes the registered definition's snapshot in the current transaction, just before an
-   * instance is stamped with its version for the first time: a new instance, a legacy or
-   * "latest"-policy instance adopting the latest version, a migration. The instance row and its
-   * version's snapshot then commit or roll back together, whoever owns the transaction — so an
-   * instance can never commit pinned to a version the store lacks, even if `initialize()`'s sync
-   * ran in a transaction that later rolled back. Snapshots loaded from the store already exist.
+   * Writes the snapshot of the version an instance is about to be stamped with, in the current
+   * transaction: a new instance, a legacy or "latest"-policy instance adopting the latest version,
+   * a migration. The instance row and its version's snapshot then commit or roll back together,
+   * whoever owns the transaction — so an instance can never commit pinned to a version the store
+   * lacks. Keyed by name and version only: neither a cached definition (it may have been read from
+   * a row a since-rolled-back transaction wrote) nor a registry's object identity proves a
+   * snapshot is persisted.
    */
   private async ensureSnapshot(definition: WorkflowDefinition): Promise<void> {
     if (!this.definitionStore) return;
-    if (this.definitionRegistry.get(definition.name) !== definition) return;
-    await this.writeSnapshot(this.definitionStore, definition);
+    const version = this.definitionVersionOf(definition);
+    const registered = this.definitionRegistry.get(definition.name);
+    if (version === this.definitionVersionOf(registered)) {
+      // The registered version: also enforce the version-bump guard.
+      await this.writeSnapshot(this.definitionStore, registered);
+      return;
+    }
+    // Another version (a migration target): re-insert it from the content we hold if it is gone.
+    await this.definitionStore.ensure({
+      workflowName: definition.name,
+      version,
+      contentHash: computeDefinitionHash(definition),
+      definitionJson: definition,
+    });
   }
 
   async createInstance(input: CreateWorkflowInstanceInput): Promise<WorkflowInstance> {
