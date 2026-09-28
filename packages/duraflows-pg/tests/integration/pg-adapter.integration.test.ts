@@ -6,7 +6,7 @@ import {
   runDefinitionStoreConformance,
   runTransactionRunnerConformance,
 } from "@duraflows/core/testing";
-import type { WorkflowInstance, WorkflowHistoryRecord } from "@duraflows/core";
+import type { WorkflowInstance, WorkflowHistoryRecord, WorkflowDefinition } from "@duraflows/core";
 import {
   WorkflowRuntime,
   InMemoryDefinitionRegistry,
@@ -370,6 +370,80 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       const lastError = (await runtime.getInstance(instance.uuid))!.timeoutRetry!.lastError;
       expect(lastError).toContain("\uFFFD");
       expect(lastError).not.toContain("\u0000");
+    });
+  });
+
+  describe("pg definition version pinning", () => {
+    // v1 omits `version` (defaults to 1). v2 renames the review state and
+    // retargets Approve, so each version's rules are distinguishable.
+    const v1: WorkflowDefinition = {
+      name: "pinned-order",
+      initialState: "new",
+      states: {
+        new: { events: { Submit: { targetState: "review" } } },
+        review: { events: { Approve: { targetState: "approved", commands: [{ name: "notify" }] } } },
+        approved: {},
+      },
+    };
+    const v2: WorkflowDefinition = {
+      name: "pinned-order",
+      version: 2,
+      initialState: "new",
+      states: {
+        new: { events: { Submit: { targetState: "checking" } } },
+        checking: { events: { Approve: { targetState: "accepted", commands: [{ name: "notify" }] } } },
+        accepted: {},
+      },
+    };
+
+    function buildRuntime(definition: WorkflowDefinition): WorkflowRuntime {
+      const definitionRegistry = new InMemoryDefinitionRegistry({
+        validator: new WorkflowValidator(),
+        compiler: new WorkflowCompiler(),
+      });
+      definitionRegistry.register(definition);
+      const commandRegistry = new InMemoryCommandRegistry();
+      commandRegistry.register("notify", { execute: async () => ({ ok: true }) });
+      return new WorkflowRuntime({
+        definitionRegistry,
+        commandRegistry,
+        ...pgWorkflowProviders(pool),
+        clock: { now: () => new Date() },
+      });
+    }
+
+    afterEach(async () => {
+      await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
+      await pool.query("TRUNCATE workflow_definitions");
+    });
+
+    it("runs an in-flight instance on its v1 snapshot after v2 is deployed", async () => {
+      const runtimeV1 = buildRuntime(v1);
+      const instance = await runtimeV1.createInstance({ workflowName: "pinned-order" });
+      await runtimeV1.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Submit" });
+
+      const runtimeV2 = buildRuntime(v2);
+      await runtimeV2.initialize();
+      expect(await runtimeV2.getAvailableEvents({ workflowInstanceUuid: instance.uuid })).toEqual([
+        expect.objectContaining({ eventName: "Approve", targetState: "approved" }),
+      ]);
+      const result = await runtimeV2.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Approve" });
+
+      expect(result.toState).toBe("approved");
+      const stored = (await runtimeV2.getInstance(instance.uuid))!;
+      expect([stored.currentState, stored.definitionVersion]).toEqual(["approved", 1]);
+      expect((await runtimeV2.getHistory(instance.uuid))[0].definitionVersion).toBe(1);
+
+      const fresh = await runtimeV2.createInstance({ workflowName: "pinned-order" });
+      await runtimeV2.triggerEvent({ workflowInstanceUuid: fresh.uuid, eventName: "Submit" });
+      expect((await runtimeV2.getInstance(fresh.uuid))!.currentState).toBe("checking");
+
+      // v1's only instance rests in the terminal "approved" state.
+      const versions = await runtimeV2.listDefinitionVersions("pinned-order");
+      expect(versions.map((v) => [v.version, v.activeInstances])).toEqual([
+        [1, 0],
+        [2, 1],
+      ]);
     });
   });
 

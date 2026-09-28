@@ -699,7 +699,7 @@ WorkflowModule.forRoot({
 
 The module also registers a `WorkflowRuntimeInitializer` (implementing `OnModuleInit`) that calls `runtime.initialize()` during module init, so definition snapshots sync at boot rather than on the first workflow operation:
 
-- A definition whose content changed without its `version` being bumped throws `WorkflowDefinitionError` at application startup, instead of surfacing later on the first `createInstance()`, `triggerEvent()`, or `processExpiredWorkflows()` call.
+- A definition whose content changed without its `version` being bumped throws `WorkflowDefinitionError` at application startup, instead of surfacing later on the first `createInstance()`, `triggerEvent()`, `processExpiredWorkflows()`, or `rearmTimeout()` call.
 - With a `definitionStore` configured, it also runs the [startup executability check](./core-runtime.md#startup-executability-check): if a stored definition version that still has active instances references a command or guard that isn't registered, or its snapshot is structurally invalid, startup fails with `WorkflowDefinitionError` by default. Set `onUnresolvable: "warn"` on `WorkflowModuleOptions` / `WorkflowModuleFactoryConfig` to log instead of failing.
 - This is inert when the configured `persistence` has no `definitionStore` — the bundled `pgWorkflowProviders()` and `kyselyWorkflowProviders()` always supply one, so it applies automatically whenever you use either.
 
