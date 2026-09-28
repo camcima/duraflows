@@ -5,11 +5,19 @@
  * Domain:  Travel booking -- reserve flight, reserve hotel, charge payment.
  *          If payment fails, cancel hotel and flight reservations.
  *
- * Flow:
- *   initiated -> (Book) -> reserving_flight -> reserving_hotel -> charging_payment -> confirmed
- *                          |                    |                    |
- *                          v                    v                    v (compensation chain)
- *                       flight_failed      cancelling_flight    cancelling_hotel -> cancelling_flight -> booking_failed
+ * Flow ([gateway] = onEnter state that moves on in the same transaction):
+ *   initiated -(Book)-> [reserving_flight: reserveFlight]
+ *     ok    -> [reserving_hotel: reserveHotel]
+ *     error -> flight_failed -(Retry)-> reserving_flight
+ *   [reserving_hotel]
+ *     ok    -> [charging_payment: chargePayment]
+ *     error -> [hotel_failed_cancelling_flight: cancelFlight] -> booking_failed
+ *   [charging_payment]
+ *     ok    -> confirmed
+ *     error -> [payment_failed_cancelling_hotel: cancelHotel]
+ *                -> [payment_failed_cancelling_flight: cancelFlight] -> booking_failed
+ *   booking_failed -(Retry)-> reserving_flight
+ *   confirmed -(Cancel)-> [cancelling_hotel: cancelHotel] -> [cancelling_flight: cancelFlight] -> cancelled
  *
  * Key design points:
  * - Forward steps use onEnter chains (gateway states)

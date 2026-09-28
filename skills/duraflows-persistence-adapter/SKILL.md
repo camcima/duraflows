@@ -325,15 +325,18 @@ Back it with the same `workflow_instances_definition_version_idx` recommended fo
 - **Reject a COMMIT that PostgreSQL rolled back.** After a statement fails and its error is caught, PostgreSQL answers `COMMIT` with `ROLLBACK` and no error. Check the command tag, or (if your driver discards it, as Kysely does) probe `SELECT 1` just before `COMMIT` -- it fails in an aborted transaction -- and throw `WorkflowError`, so the caller never sees a success and no observers fire.
 - The callback may call store methods that need the transaction context
 
-**Pattern (using AsyncLocalStorage):**
+**Pattern (using AsyncLocalStorage; shown with the `pg` driver -- adapt the client calls to yours):**
 
 ```ts
 import { AsyncLocalStorage } from "node:async_hooks";
-import { WorkflowError } from "@duraflows/core";
+import type { Pool, PoolClient } from "pg";
+import { WorkflowError, type WorkflowTransactionRunner } from "@duraflows/core";
 
-const storage = new AsyncLocalStorage<{ client: TransactionClient; savepoints: number }>();
+const storage = new AsyncLocalStorage<{ client: PoolClient; savepoints: number }>();
 
 class MyTransactionRunner implements WorkflowTransactionRunner {
+  constructor(private readonly pool: Pool) {}
+
   async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
     // Nested: isolate the callback in a savepoint on the active connection
     const active = storage.getStore();
@@ -350,8 +353,9 @@ class MyTransactionRunner implements WorkflowTransactionRunner {
       }
     }
 
-    // Start new transaction
-    const client = await this.getClient();
+    // Start new transaction on a dedicated connection
+    const client = await this.pool.connect();
+    let brokenConnection: Error | undefined;
     try {
       await client.query("BEGIN");
       const result = await storage.run({ client, savepoints: 0 }, callback);
@@ -364,10 +368,15 @@ class MyTransactionRunner implements WorkflowTransactionRunner {
       }
       return result;
     } catch (error) {
-      await client.query("ROLLBACK").catch(() => {}); // never mask the original error
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        // Never mask the original error; destroy the connection instead of pooling it
+        brokenConnection = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+      }
       throw error;
     } finally {
-      client.release();
+      client.release(brokenConnection);
     }
   }
 }
@@ -377,13 +386,13 @@ class MyTransactionRunner implements WorkflowTransactionRunner {
 
 ```ts
 class MyInstanceStore implements WorkflowInstanceStore {
-  private getClient(): TransactionClient | Pool {
+  private getClient(): PoolClient | Pool {
     return storage.getStore()?.client ?? this.pool; // use transaction client if available
   }
 }
 ```
 
-See `runOwnedPgTransaction` in `@duraflows/pg` (command-tag check) and `runOwnedKyselyTransaction` in `@duraflows/kysely` (`SELECT 1` probe) for the reference implementations, and verify with `runTransactionRunnerConformance` (see [Testing Your Adapter](#testing-your-adapter)).
+The reference implementations live in the adapters' source (internal helpers, not exported): `packages/duraflows-pg/src/pg-transaction-context.ts` (command-tag check) and `packages/duraflows-kysely/src/kysely-transaction-context.ts` (`SELECT 1` probe). Verify yours with `runTransactionRunnerConformance` (see [Testing Your Adapter](#testing-your-adapter)).
 
 ### ensure -- Insert-If-Absent, Never Overwrite
 
@@ -839,7 +848,7 @@ The suite verifies the persistence contract: `create`/`findByUuid` round-trips (
 
 ### Transaction Runner — Use the Runner Conformance Suite
 
-`runTransactionRunnerConformance(label, harness)` (also from `@duraflows/core/testing`) verifies a runner that implements `afterCommit`: callbacks run after the outermost commit, in order, are dropped on rollback, and a throwing one doesn't stop the rest; a failed nested call rolls back only its own writes and callbacks (savepoints); the outer transaction stays usable after a caught nested database error (supply `failWithDatabaseError`, e.g. running `SELECT 1/0`, or that case is skipped); `afterCommit` outside a transaction throws `WorkflowError`; and a transaction started from a callback is a fresh outermost one. Its harness returns `{ runner, store, failWithDatabaseError?, teardown }`.
+`runTransactionRunnerConformance(label, harness)` (also from `@duraflows/core/testing`) verifies a runner that implements `afterCommit`: callbacks run after the outermost commit, in order, are dropped on rollback, and a throwing one doesn't stop the rest; a failed nested call rolls back only its own writes and callbacks (savepoints); the outer transaction stays usable after a caught nested database error (supply `failWithDatabaseError`, e.g. running `SELECT 1/0`, or that case is skipped); `afterCommit` outside a transaction throws `WorkflowError`; and a transaction started from a callback is a fresh outermost one. Its harness is `{ setup() }`, where `setup()` resolves to `{ runner, store, failWithDatabaseError?, teardown }` for each test.
 
 ### Definition Versioning — Use the Definition-Store Conformance Suite
 
