@@ -140,8 +140,9 @@ export const travelBookingWorkflow: WorkflowDefinition = {
       },
     },
 
-    // --- Terminal states ---
+    // --- Outcome states ---
 
+    // Not terminal: the Retry event starts the booking over.
     booking_failed: {
       context: { status: "booking_failed" },
       events: {
@@ -150,6 +151,8 @@ export const travelBookingWorkflow: WorkflowDefinition = {
         },
       },
     },
+
+    // --- Terminal states ---
 
     cancelled: {
       context: { status: "cancelled" },

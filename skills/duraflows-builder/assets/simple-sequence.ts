@@ -5,9 +5,12 @@
  * Domain:  Document processing pipeline.
  *
  * Flow:
- *   draft -> submitted -> (onEnter: validate) -> validated -> processing -> completed
- *                                              -> validation_failed -> submitted (retry)
- *   completed -> (timeout 30 days) -> archived
+ *   draft -(Submit)-> submitted -(StartValidation)-> validating [gateway, onEnter: validateDocument]
+ *     validating -> validated          (validation ok)
+ *     validating -> validation_failed  (validation failed) -(Resubmit)-> submitted
+ *   validated -(Process: processDocument, sendConfirmation)-> completed
+ *     validated -> processing_failed   (processDocument failed) -(Retry)-> validated
+ *   completed -(AutoArchive, timeout 30 days)-> archived
  */
 
 import type { WorkflowDefinition, WorkflowCommand, CommandResult, WorkflowExecutionContext } from "@duraflows/core";

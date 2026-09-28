@@ -28,7 +28,7 @@ Use these in-memory implementations instead of PostgreSQL for unit and integrati
 ### InMemoryInstanceStore
 
 ```ts
-import type { WorkflowInstanceStore, WorkflowInstance } from "@duraflows/core";
+import { WorkflowError, type WorkflowInstanceStore, type WorkflowInstance } from "@duraflows/core";
 
 class InMemoryInstanceStore implements WorkflowInstanceStore {
   private readonly instances = new Map<string, WorkflowInstance>();
@@ -46,8 +46,18 @@ class InMemoryInstanceStore implements WorkflowInstanceStore {
     return this.findByUuid(uuid); // no real locking needed in memory
   }
 
+  // Optimistic locking, as the SQL adapters do it: the runtime pre-increments
+  // `version`, so the stored row must still be at `version - 1`. `metadata` is
+  // immutable, so keep the stored copy.
   async update(instance: WorkflowInstance): Promise<void> {
-    this.instances.set(instance.uuid, structuredClone(instance));
+    const existing = this.instances.get(instance.uuid);
+    const expectedVersion = instance.version - 1;
+    if (!existing || existing.version !== expectedVersion) {
+      throw new WorkflowError(
+        `Optimistic locking failure: workflow instance "${instance.uuid}" was modified concurrently (expected version ${expectedVersion})`,
+      );
+    }
+    this.instances.set(instance.uuid, structuredClone({ ...instance, metadata: existing.metadata }));
   }
 
   // Due: expired, not parked (v6.0.0), and no retry scheduled or the retry is due.
@@ -1339,7 +1349,7 @@ import { MyInstanceStore } from "../src/my-instance-store.js";
 import { MyTransactionRunner } from "../src/my-transaction-runner.js";
 
 describe("MyInstanceStore (conformance)", () => {
-  runInstanceStoreConformance({
+  runInstanceStoreConformance("my-adapter", {
     setup: async () => {
       // Construct your store + transaction runner against a real (or in-memory) database
       const store = new MyInstanceStore(db);
@@ -1358,13 +1368,16 @@ describe("MyInstanceStore (conformance)", () => {
 
 The suite verifies:
 
-- `lockByUuid` acquires a row-level lock and throws if called outside a transaction
-- `update` enforces optimistic concurrency on `version` and throws `WorkflowError` on mismatch
-- `update` does NOT modify `metadata` (write-once after `create`)
-- `findExpired` honors limit + ordering and skips already-locked rows
+- `create`/`findByUuid` round-trip an instance; `findByUuid` returns `null` for an unknown UUID
+- `update` persists the mutable fields, enforces optimistic concurrency on `version` (a stale version throws), and does NOT modify `metadata` (write-once after `create`)
+- `findExpired` returns past-due instances and honors `limit`
 - **(v6.0.0)** `timeoutRetry` round-trips; `findExpired` skips parked and not-yet-due retries and orders by `timeoutRetry?.retryAt ?? expiresAt`; `findParkedTimeouts` filters, orders and limits parked instances
+- `definitionVersion` round-trips through `create`/`update`/`findByUuid`
 - **(v7.0.0)** `countInstances` filters by workflow, definition version and excluded states; an empty `excludeStates` counts every matching instance
-- Nested-transaction reuse via `transactionRunner.runInTransaction`
+- **(v7.1.0, optional)** `findInstanceUuids` pages one workflow version's UUIDs ascending, honoring `afterUuid` and `limit` -- skipped when the store doesn't implement it
+- **(v7.2.0, optional)** `findInstanceUuids`'s `states`/`excludeStates` hints -- tolerant: a store that filters exactly and one that ignores the hints both pass; skipped when the store doesn't implement the method
+
+It does not exercise row locking or `SKIP LOCKED`; cover those in your adapter's own integration tests. Sibling suites in the same subpath: `runDefinitionStoreConformance` for a `WorkflowDefinitionStore`, and `runTransactionRunnerConformance` for a runner that implements `afterCommit` (after-commit delivery and savepoint isolation of nested calls).
 
 A passing run is the contract guarantee that your adapter works with the runtime. `@duraflows/pg` and `@duraflows/kysely` both run it in CI.
 
