@@ -385,6 +385,8 @@ interface WorkflowInstanceStore {
     definitionVersion: number;
     limit: number;
     afterUuid?: string;
+    states?: readonly string[]; // v7.2.0; hint, honoring it is optional
+    excludeStates?: readonly string[]; // v7.2.0; hint, honoring it is optional
   }): Promise<string[]>; // v7.1.0: optional; no transaction required
 }
 ```
@@ -408,6 +410,10 @@ interface WorkflowInstanceStore {
 **v7.1.0 contract notes:**
 
 - `findInstanceUuids` is a **new optional method** -- unlike `countInstances`, no existing adapter breaks by omitting it. UUIDs of instances of `workflowName` stamped with `definitionVersion`, ascending, strictly after `afterUuid` when given, at most `limit`; instances with a `null` `definitionVersion` never match. A plain read -- no transaction required. Backs `migrateInstances()`'s candidate paging; without it, `migrateInstances()` throws unless the caller passes `instanceUuids` explicitly. See [Instance Migration (v7.1.0)](#instance-migration-v710).
+
+**v7.2.0 contract notes:**
+
+- `findInstanceUuids` gained two more parameters, `states`/`excludeStates` -- both optional **hints**: a store should keep only instances whose current state is in `states` (an empty array matches nothing) and drop those in `excludeStates` (an empty array excludes nothing), but `migrateInstances()` re-checks the same condition on every candidate regardless, so honoring either or both is optional -- a store that ignores them is still correct, just slower. An adapter that already implements `findInstanceUuids` without them still compiles and runs unchanged.
 
 ### WorkflowDefinitionStore (v5.0.0)
 
@@ -599,6 +605,8 @@ Runs at the end of `initialize()`, after the definition sync, only with a `defin
 
 `runtime.migrateInstances(input)` and `WorkflowService.migrateInstances(input)` move chosen instances of a workflow from one stored definition version to another: pure relabeling -- no commands, guards or `onEnter` run. See [Migrating instances](../docs/workflow-definitions.md#migrating-instances) for when to use it, and [`migrateInstances()`](../docs/core-runtime.md#migrateinstances) for the full walkthrough.
 
+**(v7.2.0) Three behavior changes reach every caller**, even one passing none of `states`/`excludeStates`/`cursor` below: a non-plain-object `transformContext` result now fails that instance instead of being stored; a bad `findInstanceUuids` page (not ascending past the cursor, or containing a non-string entry) now throws `MigrationInterruptedError` instead of being trusted, and an over-long page is truncated to the requested size; and a `findInstanceUuids` rejection now arrives wrapped as `MigrationInterruptedError`, `cause` set to the original error -- an `instanceof <YourStoreError>` check must test `error.cause`, not `error`. See [MigrationInterruptedError](#migrationinterruptederror-v720).
+
 ```ts
 interface MigrateInstancesInput {
   workflowName: string;
@@ -608,10 +616,13 @@ interface MigrateInstancesInput {
   transformContext?: (
     context: Record<string, unknown>,
     instance: Readonly<WorkflowInstance>,
-  ) => Record<string, unknown>; // pure; result stored as its JSON round trip
-  instanceUuids?: readonly string[]; // omit to migrate every instance on fromVersion (needs findInstanceUuids)
+  ) => Record<string, unknown>; // pure; must return a plain object (v7.2.0); result stored as its JSON round trip
+  instanceUuids?: readonly string[]; // omit to migrate every instance on fromVersion (needs findInstanceUuids); not with cursor
   limit?: number; // caps candidates examined, not just migrated; default: no cap
   dryRun?: boolean; // validate and report; write nothing, fire no observers
+  states?: readonly string[]; // v7.2.0; only these current states; must not be empty
+  excludeStates?: readonly string[]; // v7.2.0; never these current states; may be empty
+  cursor?: string; // v7.2.0; resume paging strictly after this UUID (a previous result's nextCursor); not with instanceUuids
 }
 
 interface MigrateInstancesResult {
@@ -619,30 +630,36 @@ interface MigrateInstancesResult {
   migrated: Array<{ uuid: string; fromState: string; toState: string }>; // would-migrate, in a dry run
   skipped: Array<{ uuid: string; reason: string }>;
   failed: Array<{ uuid: string; error: string }>;
+  nextCursor: string | null; // v7.2.0; last UUID examined; null when fully drained or instanceUuids was given
+  warnings: string[]; // v7.2.0; e.g. toVersion referencing unregistered commands/guards
 }
 ```
 
 **Upfront validation** -- every row runs before any instance row is touched; the first failure throws and nothing is written:
 
-| Check                                                                            | Error                                                                                                                                                                                                                                        |
-| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A definition store is configured                                                 | `WorkflowError("migrateInstances requires a definition store")`                                                                                                                                                                              |
-| `workflowName` is registered                                                     | `WorkflowDefinitionError` (`Workflow not found in registry`)                                                                                                                                                                                 |
-| `fromVersion`/`toVersion` are positive safe integers, and differ (downgrades OK) | `InvalidArgumentError` (`fromVersion must be a positive integer, got <value>`; `fromVersion and toVersion must differ`)                                                                                                                      |
-| `limit`, when given, is a positive safe integer                                  | `InvalidArgumentError("limit must be a positive integer, got <value>")`                                                                                                                                                                      |
-| `toVersion` is in the store and structurally valid                               | `WorkflowDefinitionError`, loaded the same way a pinned instance's snapshot is -- missing: `Workflow "<name>": version <toVersion> is not in the definition store`; invalid: `Workflow "<name>": stored version <toVersion> is invalid: ...` |
-| Every `stateMapping` value is an own state of `toVersion`, with no `onEnter`     | `InvalidArgumentError('stateMapping maps "<from>" to "<to>", which is not a state of version <toVersion>')` (or the `onEnter` variant)                                                                                                       |
-| `instanceUuids` given, or the store implements `findInstanceUuids`               | `WorkflowError("migrateInstances without instanceUuids requires an instance store that implements findInstanceUuids")`                                                                                                                       |
+| Check                                                                                        | Error                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A definition store is configured                                                             | `WorkflowError("migrateInstances requires a definition store")`                                                                                                                                                                              |
+| `workflowName` is registered                                                                 | `WorkflowDefinitionError` (`Workflow "<name>": Workflow not found in registry`)                                                                                                                                                              |
+| `fromVersion`/`toVersion` are positive safe integers, and differ (downgrades OK)             | `InvalidArgumentError` (`fromVersion must be a positive integer, got <value>`; `fromVersion and toVersion must differ`)                                                                                                                      |
+| `limit`, when given, is a positive safe integer                                              | `InvalidArgumentError("limit must be a positive integer, got <value>")`                                                                                                                                                                      |
+| `states`/`excludeStates`, when given, contain only strings; `states` isn't empty (v7.2.0)    | `InvalidArgumentError` (`states must not be empty`; `states must contain only strings`; `excludeStates must contain only strings`)                                                                                                           |
+| `cursor`, when given, is a non-empty string and isn't combined with `instanceUuids` (v7.2.0) | `InvalidArgumentError` (`cursor must be a non-empty string`; `cursor cannot be combined with instanceUuids`)                                                                                                                                 |
+| `toVersion` is in the store and structurally valid                                           | `WorkflowDefinitionError`, loaded the same way a pinned instance's snapshot is -- missing: `Workflow "<name>": version <toVersion> is not in the definition store`; invalid: `Workflow "<name>": stored version <toVersion> is invalid: ...` |
+| Every `stateMapping` value is an own state of `toVersion`, with no `onEnter`                 | `InvalidArgumentError('stateMapping maps "<from>" to "<to>", which is not a state of version <toVersion>')` (or the `onEnter` variant)                                                                                                       |
+| `instanceUuids` given, or the store implements `findInstanceUuids`                           | `WorkflowError("migrateInstances without instanceUuids requires an instance store that implements findInstanceUuids")`                                                                                                                       |
 
 `stateMapping` keys are matched as own properties only (`Object.hasOwn`), never through the prototype chain (a state named `"toString"` is safe).
 
-**Per instance:** lock and re-check (`lockByUuid`) -- an instance moved off `fromVersion` since being listed is skipped, not failed; resolve the target state (`stateMapping`, or the same-named state in `toVersion`, or skip); run `transformContext` if given; relabel `currentState`, `definitionVersion`, `context`, recompute `expiresAt` from `lastTransitionAt` (elapsed time preserved), clear `timeoutRetry`, bump `version`/`updatedAt` -- `lastTransitionAt` itself is unchanged; append a `$migrated` history row (`triggerMetadata: { source: "migration", fromVersion, toVersion }`) and fire observers with `triggerEvent: "$migrated"` after commit. A throw anywhere in this sequence fails only that instance (`failed`); the batch continues.
+**Per instance:** lock and re-check (`lockByUuid`) -- an instance moved off `fromVersion` since being listed is skipped, not failed; check `states`/`excludeStates` against the current state (v7.2.0), skipping a non-matching one; resolve the target state (`stateMapping`, or the same-named state in `toVersion`, or skip); run `transformContext` if given, requiring its result to be a plain object (v7.2.0); relabel `currentState`, `definitionVersion`, `context`, recompute `expiresAt` from `lastTransitionAt` (elapsed time preserved), clear `timeoutRetry`, bump `version`/`updatedAt` -- `lastTransitionAt` itself is unchanged; append a `$migrated` history row (`triggerMetadata: { source: "migration", fromVersion, toVersion }`) and fire observers with `triggerEvent: "$migrated"` after commit. A throw anywhere in this sequence fails only that instance (`failed`); the batch continues -- distinct from a failure _listing_ candidates, which stops the whole call (see `MigrationInterruptedError` below).
 
-**Skip reasons** (`result.skipped[].reason`, verbatim): `not found`; `belongs to workflow <name>`; `unstamped` (null `definitionVersion`); `on version <v>, not <fromVersion>`; `state <s> has no mapping and does not exist in version <toVersion>`; `state <s> has an onEnter in version <toVersion>`.
+**Skip reasons** (`result.skipped[].reason`, verbatim): `not found`; `belongs to workflow <name>`; `unstamped` (null `definitionVersion`); `on version <v>, not <fromVersion>`; `state <s> is excluded by the state filter` (v7.2.0); `state <s> has no mapping and does not exist in version <toVersion>`; `state <s> has an onEnter in version <toVersion>`.
 
-**Candidates:** `instanceUuids`, de-duplicated and in order, when given; otherwise `instanceStore.findInstanceUuids`, paged 100 at a time ascending by UUID, each page after the last UUID seen, until a page is empty or `limit` candidates have been examined -- within one call, that cursor means a candidate is never revisited. Across calls it resets: a migrated instance leaves `fromVersion` for good, but a skipped or failed one stays on it and is re-examined, from the lowest UUID, by the next call with the same input -- with `limit` set, enough of those sorting first can make a call report no migrations while migratable instances remain further along.
+**Candidates:** `instanceUuids`, de-duplicated and in order, when given (`states`/`excludeStates` still apply per candidate, and a filtered-out UUID counts against `limit`); otherwise `instanceStore.findInstanceUuids`, called with `states`/`excludeStates` as optional hints, paged 100 at a time ascending by UUID, each page after the last UUID seen (`cursor` on the first page), until a page is empty or `limit` candidates have been examined -- a page longer than requested is truncated to it, and a page that isn't strictly ascending past the previous one, or that contains a non-string entry, throws (v7.2.0; see `MigrationInterruptedError`). Within one call, that cursor means a candidate is never revisited. Across calls, passing `cursor` (from the previous result's `nextCursor`) extends the same guarantee; without it, each call still resets to the lowest UUID -- a migrated instance leaves `fromVersion` for good, but a skipped or failed one stays on it and is re-examined, from the lowest UUID, by the next call with the same input -- with `limit` set and no `cursor`, enough of those sorting first can make a call report no migrations while migratable instances remain further along.
 
 **Dry run:** each candidate is read with `findByUuid` (no lock, no transaction); the same resolution and `transformContext` run, but nothing is written and no observers fire.
+
+**`MigrationInterruptedError` (v7.2.0):** thrown instead of returning when _listing_ candidates fails -- `findInstanceUuids` rejects, or returns a bad page (see **Candidates** above). Never thrown for a per-instance failure (those land in `result.failed`). `error.result` is the partial `MigrateInstancesResult`, with `nextCursor` set to the last UUID examined (or the input `cursor`, or `null`, if none was examined). `error.cause` is the original error -- test `error.cause instanceof <YourStoreError>`, not `error instanceof`. Resume with `{ ...input, cursor: error.result.nextCursor ?? undefined }`. See [MigrationInterruptedError](#migrationinterruptederror-v720) under Error Types.
 
 ---
 
@@ -669,7 +686,7 @@ interface StateEnterEvent {
   readonly fromState: string | null; // null on initial-state entry
   readonly toState: string;
   readonly transitionUuid: string; // matches ctx.transitionUuid for the same entry
-  readonly triggerEvent: string | null; // null: initial-state entry; "onEnter": chain hop; "$migrated": migration
+  readonly triggerEvent: string | null; // null: initial-state entry; the event name: event/timeout transitions; "onEnter": chain hop; "$migrated": migration
   readonly context: Readonly<Record<string, unknown>>; // deep-cloned + frozen at event time
   readonly metadata: Readonly<Record<string, unknown>>; // deep-cloned + frozen
   readonly triggerMetadata: Readonly<Record<string, unknown>>; // deep-cloned + frozen
@@ -1156,6 +1173,7 @@ describe("MyInstanceStore conformance", () => {
 - `metadata` write-once enforcement (v1.0.0 contract)
 - `countInstances()` filtering by workflow, definition version and excluded states, and that an empty `excludeStates` counts everything (v7.0.0)
 - `findInstanceUuids()` paging by workflow and definition version, `afterUuid` and `limit`, ascending by `uuid`; the case is skipped (`ctx.skip()`) when the adapter doesn't implement it (v7.1.0, optional)
+- `findInstanceUuids()`'s `states`/`excludeStates` hints: a store may filter server-side (returning exactly the matching UUIDs) or ignore them entirely (returning every UUID) -- both pass, since `migrateInstances()` re-checks the filter itself either way; skipped when the adapter doesn't implement `findInstanceUuids` (v7.2.0, optional)
 - Nested-transaction reuse via `transactionRunner`
 
 Adapters that pass this suite are guaranteed to work with the runtime. `@duraflows/pg` and `@duraflows/kysely` both run it as part of their CI.
@@ -1194,7 +1212,7 @@ class InvalidArgumentError extends WorkflowError {
 }
 ```
 
-Thrown when: a caller passes an invalid numeric argument — `processExpiredWorkflows`'s `limit`, `findParkedTimeouts`'s `limit`, `getHistory`'s `limit`/`offset`, `migrateInstances`'s `fromVersion`/`toVersion`/`limit` (v7.1.0), or the `WorkflowRuntime` constructor's `maxOnEnterDepth` or `timeoutRetry` options — that isn't a positive (or, for `offset`, non-negative) safe integer. Also thrown when: the `WorkflowRuntime` constructor's `onUnresolvable` (v7.0.0) is provided and isn't `"fail"` or `"warn"`; (v7.1.0) `migrateInstances`'s `fromVersion` equals `toVersion`, or its `stateMapping` names a state that isn't an own state of `toVersion`, or one that has an `onEnter` there.
+Thrown when: a caller passes an invalid numeric argument — `processExpiredWorkflows`'s `limit`, `findParkedTimeouts`'s `limit`, `getHistory`'s `limit`/`offset`, `migrateInstances`'s `fromVersion`/`toVersion`/`limit` (v7.1.0), or the `WorkflowRuntime` constructor's `maxOnEnterDepth` or `timeoutRetry` options — that isn't a positive (or, for `offset`, non-negative) safe integer. Also thrown when: the `WorkflowRuntime` constructor's `onUnresolvable` (v7.0.0) is provided and isn't `"fail"` or `"warn"`; (v7.1.0) `migrateInstances`'s `fromVersion` equals `toVersion`, or its `stateMapping` names a state that isn't an own state of `toVersion`, or one that has an `onEnter` there; (v7.2.0) `migrateInstances`'s `states` is empty or has a non-string entry, its `excludeStates` has a non-string entry, or its `cursor` is an empty string or is combined with `instanceUuids` -- all upfront, before any instance is touched. `migrateInstances`'s `transformContext` returning something other than a plain object (v7.2.0) uses this same class internally, but never reaches the caller as a thrown error: it's caught per instance and surfaces as that instance's `result.failed[].error` message instead (`transformContext must return a plain object`).
 
 ### InvalidEventError
 
@@ -1245,3 +1263,13 @@ class OnEnterDepthExceededError extends WorkflowError {
 ```
 
 Thrown when: onEnter chain exceeds `maxOnEnterDepth`.
+
+### MigrationInterruptedError (v7.2.0)
+
+```ts
+class MigrationInterruptedError extends WorkflowError {
+  readonly result: MigrateInstancesResult;
+}
+```
+
+Thrown when: `migrateInstances()` fails while _listing_ candidates -- `instanceStore.findInstanceUuids` rejects, or returns a page that isn't strictly ascending past the cursor or that contains an entry that isn't a non-empty UUID string. Never thrown for a per-instance failure (a throwing `transformContext`, an optimistic-lock conflict, a database error migrating one instance); those land in `result.failed` and the batch continues. `result` is the same `MigrateInstancesResult` the call would otherwise have returned, complete up to the interruption, with `nextCursor` set to the last UUID examined (or the input `cursor`, or `null`, if none was examined yet) -- pass it back as `cursor` to resume. `cause` (inherited from `WorkflowError`) is the original error: the store's rejection, or the `WorkflowError` this class itself raised over a bad page. An `instanceof <YourStoreError>` check on a wrapped store failure must test `error.cause`, not `error`. See [Instance Migration (v7.1.0)](#instance-migration-v710).

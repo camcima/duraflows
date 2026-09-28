@@ -16,6 +16,8 @@ How to implement custom persistence adapters for duraflows. The core runtime is 
 > **v7.0.0 — definition-version pinning; two new required store methods (breaking).** Instances now execute the definition version they were stamped with by default, loaded from the store when it differs from the latest registered one (`versionPolicy: "latest"` opts a workflow back into always-latest execution). This needs `WorkflowInstanceStore.countInstances({ workflowName, definitionVersion, excludeStates })` -- a **new required method on every adapter**, not just ones with a `WorkflowDefinitionStore` -- plus `WorkflowDefinitionStore.listVersions(workflowName)` for adapters that implement the optional definition store. Both back `WorkflowRuntime.initialize()`'s startup executability check and `runtime.listDefinitionVersions()`. `@duraflows/pg` ships a recommended (not required) index as `006_definition_version_index.sql`. See [countInstances](#countinstances----active-instance-counting), [listVersions](#listversions----all-stored-snapshots), and [Adding definition-version pinning to an existing adapter](#v700--adding-definition-version-pinning-to-an-existing-adapter).
 >
 > **v7.1.0 — `findInstanceUuids`, one new _optional_ store method (non-breaking).** `runtime.migrateInstances()` relabels instances from one stored definition version to another. Without an explicit `instanceUuids` list, it needs `WorkflowInstanceStore.findInstanceUuids({ workflowName, definitionVersion, limit, afterUuid? })` to find candidates -- unlike `countInstances()`, this one is optional: an adapter that omits it still compiles and runs, migration just requires callers to pass `instanceUuids` themselves. See [findInstanceUuids](#findinstanceuuids----optional-migration-support-v710).
+>
+> **v7.2.0 — `findInstanceUuids` gains `states`/`excludeStates`, two more optional hint parameters (non-breaking).** `migrateInstances()` can now filter candidates by current state; it forwards `states`/`excludeStates` to `findInstanceUuids` as hints so a store can filter server-side, but honoring them is optional the same way the method itself is -- `migrateInstances()` re-checks the same condition on every candidate regardless, so a store that ignores the new parameters is still correct, just slower. An adapter that already implements `findInstanceUuids` without them still compiles and runs unchanged against 7.2.0. Also non-breaking: a `transformContext` that returns something other than a plain object now fails that one instance instead of being silently serialized, and a bad page from `findInstanceUuids` (not ascending, or a non-string entry) now throws `MigrationInterruptedError` instead of being trusted -- neither needs any adapter change. See [findInstanceUuids](#findinstanceuuids----optional-migration-support-v710) and [v7.2.0 — Adding the state hints to an existing `findInstanceUuids`](#v720--adding-the-state-hints-to-an-existing-findinstanceuuids).
 
 ---
 
@@ -41,6 +43,8 @@ interface WorkflowInstanceStore {
     definitionVersion: number;
     limit: number;
     afterUuid?: string;
+    states?: readonly string[]; // v7.2.0, hint -- honoring it is optional
+    excludeStates?: readonly string[]; // v7.2.0, hint -- honoring it is optional
   }): Promise<string[]>; // v7.1.0, optional
 }
 ```
@@ -266,6 +270,7 @@ Back it with the recommended index `workflow_instances_definition_version_idx ON
 - Filter: `workflow_name = workflowName AND definition_version = definitionVersion`, and `uuid > afterUuid` when `afterUuid` is given
 - Order **ascending** by `uuid`, capped at `limit`
 - Instances with a `null` `definition_version` never match
+- **(v7.2.0)** `states`/`excludeStates` are **hints, not a contract**: filter by them if you can (`current_state IN states`, `current_state NOT IN excludeStates`), but it's fine to ignore either or both -- `migrateInstances()` re-checks the same condition on every candidate itself, so an adapter that skips server-side filtering is still correct, just slower. If you do filter: an empty `states` array must match nothing (not "no filter"); an empty `excludeStates` array must exclude nothing, same as `countInstances()`'s contract
 - A plain read: **no transaction required**
 
 **SQL pattern (what `@duraflows/pg` uses):**
@@ -274,15 +279,20 @@ Back it with the recommended index `workflow_instances_definition_version_idx ON
 SELECT uuid FROM workflow_instances
 WHERE workflow_name = $1 AND definition_version = $2
   AND ($3::uuid IS NULL OR uuid > $3::uuid)
+  AND ($5::text[] IS NULL OR current_state = ANY($5::text[]))
+  AND ($6::text[] IS NULL OR NOT (current_state = ANY($6::text[])))
 ORDER BY uuid
 LIMIT $4
 ```
 
-PostgreSQL orders `uuid` the same way as comparing lowercase hex strings, so an in-memory string-comparison implementation pages identically.
+An empty `states` array binds `$5` to `'{}'`; `current_state = ANY('{}')` is never true, so every row is filtered out, matching the "empty `states` matches nothing" contract. PostgreSQL orders `uuid` the same way as comparing lowercase hex strings, so an in-memory string-comparison implementation pages identically.
 
-**Kysely equivalent** (the `afterUuid` filter is added only when given, same shape as `countInstances`'s empty-array branch):
+**Kysely equivalent** (the `afterUuid` filter is added only when given, same shape as `countInstances`'s empty-array branch; `states`/`excludeStates` are optional, so a minimal implementation can skip both `if` blocks entirely and still be correct):
 
 ```ts
+if (states !== undefined && states.length === 0) {
+  return []; // empty `states` matches nothing
+}
 let query = db
   .selectFrom("workflow_instances")
   .select("uuid")
@@ -291,11 +301,19 @@ let query = db
 if (afterUuid !== undefined) {
   query = query.where("uuid", ">", afterUuid);
 }
+if (states !== undefined) {
+  query = query.where("current_state", "in", [...states]);
+}
+if (excludeStates !== undefined && excludeStates.length > 0) {
+  query = query.where("current_state", "not in", [...excludeStates]);
+}
 const rows = await query.orderBy("uuid").limit(limit).execute();
 return rows.map((row) => row.uuid);
 ```
 
 Back it with the same `workflow_instances_definition_version_idx` recommended for `countInstances()` -- it covers this filter too.
+
+**Tolerant conformance.** `runInstanceStoreConformance`'s state-hints case accepts either a store that filters exactly (returns only the matching UUIDs) or one that ignores `states`/`excludeStates` entirely (returns every UUID) -- both pass, because `migrateInstances()` applies the same filter itself either way. See [Testing Your Adapter](#testing-your-adapter).
 
 ### runInTransaction -- Nested Transaction Support
 
@@ -668,6 +686,10 @@ CREATE INDEX IF NOT EXISTS workflow_instances_definition_version_idx
 
 No schema or type change is required -- `findInstanceUuids` is a new **optional** method on `WorkflowInstanceStore`, so an adapter that skips it still typechecks and runs against 7.1.0; `runtime.migrateInstances()` simply requires its callers to pass `instanceUuids` explicitly. Add it only to support migrating without an explicit UUID list -- see [findInstanceUuids](#findinstanceuuids----optional-migration-support-v710). It reuses the same `(workflow_name, definition_version)` index migration `006` already recommends.
 
+### v7.2.0 — Adding the state hints to an existing findInstanceUuids
+
+No schema or type change is required either -- if your adapter already implements `findInstanceUuids`, it still typechecks and runs against 7.2.0 without touching `states`/`excludeStates` at all; `migrateInstances()` just filters those candidates itself, a little less efficiently. Add server-side filtering only as an optimization -- see [findInstanceUuids](#findinstanceuuids----optional-migration-support-v710) for the SQL pattern and the empty-array contract (`states: []` matches nothing, `excludeStates: []` excludes nothing). If your adapter doesn't implement `findInstanceUuids` at all, this doesn't apply to you.
+
 ---
 
 ## Wiring the Adapter
@@ -756,6 +778,8 @@ WorkflowModule.forRootAsync({
 - [ ] **(v7.0.0)** Recommended: index `(workflow_name, definition_version)` on `workflow_instances` so `countInstances()` stays cheap on large tables
 - [ ] **(v7.1.0, optional)** If implemented, `findInstanceUuids({ workflowName, definitionVersion, limit, afterUuid? })` orders ascending by `uuid`, filters `uuid > afterUuid` only when given, and never matches a `null` `definition_version`
 - [ ] **(v7.1.0)** `runInstanceStoreConformance` still passes -- its `findInstanceUuids` case exercises the method when present and calls `ctx.skip()` when it's absent
+- [ ] **(v7.2.0, optional)** If `findInstanceUuids` filters by `states`/`excludeStates`, an empty `states` matches nothing and an empty `excludeStates` excludes nothing; if it doesn't filter by them at all, that's fine too -- both are correct
+- [ ] **(v7.2.0)** `runInstanceStoreConformance` still passes -- its state-hints case accepts either an exact-filtering store or one that ignores `states`/`excludeStates` entirely
 
 ---
 
