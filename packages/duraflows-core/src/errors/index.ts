@@ -1,15 +1,23 @@
 import type { CommandResult, MigrateInstancesResult } from "../types/runtime.js";
 
 /**
- * `String(value)`, falling back to a generic classification when that itself
- * throws — e.g. a null-prototype object (no inherited `toString`), or a
- * `toString`/`Symbol.toPrimitive` that throws.
+ * A thrown value as text: an `Error`'s `message`, otherwise `String(value)`,
+ * otherwise its `Object.prototype.toString` tag (e.g. a null-prototype object
+ * with no inherited `toString`), otherwise "unknown error". Never throws, so a
+ * hostile throw — a throwing `message` getter, `toString` or
+ * `Symbol.toPrimitive` — cannot escape from formatting it. Internal: not
+ * re-exported from the package.
  */
-function safeString(value: unknown): string {
+export function describeThrown(value: unknown): string {
   try {
-    return String(value);
+    if (value instanceof Error) return String(value.message);
+    try {
+      return String(value);
+    } catch {
+      return Object.prototype.toString.call(value);
+    }
   } catch {
-    return Object.prototype.toString.call(value);
+    return "unknown error";
   }
 }
 
@@ -128,8 +136,7 @@ export class MigrationInterruptedError extends WorkflowError {
   public readonly result: MigrateInstancesResult;
 
   constructor(result: MigrateInstancesResult, examined: number, cause: unknown) {
-    const reason = cause instanceof Error ? cause.message : safeString(cause);
-    super(`migrateInstances was interrupted after examining ${examined} candidates: ${reason}`, cause);
+    super(`migrateInstances was interrupted after examining ${examined} candidates: ${describeThrown(cause)}`, cause);
     this.name = "MigrationInterruptedError";
     this.result = result;
   }

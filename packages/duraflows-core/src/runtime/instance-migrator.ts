@@ -11,7 +11,7 @@ import { buildStateEnterEvent } from "./state-enter-event.js";
 import { referencedNames } from "./definition-executability.js";
 import { deepFreeze } from "../util/deep-freeze.js";
 import { assertPositiveSafeInteger } from "../util/assert.js";
-import { InvalidArgumentError, MigrationInterruptedError, WorkflowError } from "../errors/index.js";
+import { describeThrown, InvalidArgumentError, MigrationInterruptedError, WorkflowError } from "../errors/index.js";
 
 /** Candidates fetched per findInstanceUuids call. */
 const PAGE_SIZE = 100;
@@ -55,25 +55,16 @@ function passesStateFilter(state: string, input: MigrateInstancesInput): boolean
   return true;
 }
 
+/**
+ * A non-null object whose prototype is null or is some realm's
+ * `Object.prototype` (a prototype whose own prototype is null), so plain
+ * objects from another realm — e.g. a Jest vm context — pass. Arrays, Dates,
+ * Maps and class instances do not.
+ */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== "object") return false;
   const prototype: unknown = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-/**
- * `String(value)`, falling back to a generic classification when that itself
- * throws — e.g. a null-prototype object (no inherited `toString`), or a
- * `toString`/`Symbol.toPrimitive` that throws. Used to format a thrown value
- * that is not an `Error`, so a hostile throw can never itself escape as an
- * uncaught exception.
- */
-function safeString(value: unknown): string {
-  try {
-    return String(value);
-  } catch {
-    return Object.prototype.toString.call(value);
-  }
+  return prototype === null || Object.getPrototypeOf(prototype) === null;
 }
 
 /**
@@ -151,7 +142,7 @@ export class InstanceMigrator {
             result.skipped.push({ uuid, reason: plan.reason });
           }
         } catch (error: unknown) {
-          result.failed.push({ uuid, error: error instanceof Error ? error.message : safeString(error) });
+          result.failed.push({ uuid, error: describeThrown(error) });
         }
       }
     } catch (error: unknown) {
@@ -273,7 +264,13 @@ export class InstanceMigrator {
     if (!isPlainObject(transformed)) {
       throw new InvalidArgumentError("transformContext must return a plain object");
     }
-    return JSON.parse(JSON.stringify(transformed)) as Record<string, unknown>;
+    // Checked again after the JSON round trip: a `toJSON` can turn a plain object into a non-object.
+    const json = JSON.stringify(transformed) as string | undefined;
+    const stored: unknown = json === undefined ? undefined : JSON.parse(json);
+    if (!isPlainObject(stored)) {
+      throw new InvalidArgumentError("transformContext must return a plain object");
+    }
+    return stored;
   }
 
   private async apply(

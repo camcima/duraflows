@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   WorkflowRuntime,
@@ -876,6 +877,89 @@ describe("migrateInstances: 7.2 validation and hardening", () => {
 
     expect(result.migrated).toHaveLength(1);
     expect((await runtimeV2.getInstance(instance.uuid))!.context).toEqual({ tier: "gold" });
+  });
+
+  it("accepts a plain object from another realm (e.g. a Jest vm context)", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    const instance = await runtimeV1.createInstance({ workflowName: "order" });
+    const foreign = runInNewContext("({ tier: 'gold' })") as Record<string, unknown>;
+    expect(Object.getPrototypeOf(foreign)).not.toBe(Object.prototype);
+
+    const result = await runtimeV2.migrateInstances({ ...toV2, transformContext: () => foreign });
+
+    expect(result.failed).toEqual([]);
+    expect(result.migrated.map((m) => m.uuid)).toEqual([instance.uuid]);
+    expect((await runtimeV2.getInstance(instance.uuid))!.context).toEqual({ tier: "gold" });
+  });
+
+  it("accepts the context argument mutated and returned", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    const instance = await runtimeV1.createInstance({ workflowName: "order", context: { id: 7 } });
+
+    const result = await runtimeV2.migrateInstances({
+      ...toV2,
+      transformContext: (context) => {
+        context.tier = "gold";
+        return context;
+      },
+    });
+
+    expect(result.migrated.map((m) => m.uuid)).toEqual([instance.uuid]);
+    expect((await runtimeV2.getInstance(instance.uuid))!.context).toEqual({ id: 7, tier: "gold" });
+  });
+
+  it.each([
+    ["a string", () => "x"],
+    ["undefined", () => undefined],
+  ])("fails an instance whose transformContext result serializes to %s via toJSON", async (_kind, toJSON) => {
+    const { runtimeV1, runtimeV2 } = world();
+    const instance = await runtimeV1.createInstance({ workflowName: "order" });
+
+    const result = await runtimeV2.migrateInstances({ ...toV2, transformContext: () => ({ toJSON }) });
+
+    expect(result.failed).toEqual([{ uuid: instance.uuid, error: "transformContext must return a plain object" }]);
+    expect((await runtimeV2.getInstance(instance.uuid))!.definitionVersion).toBe(1);
+  });
+
+  it("fails an instance whose thrown error has a throwing message getter, not an interruption", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    const bad = await runtimeV1.createInstance({ workflowName: "order", context: { bad: true } });
+    const good = await runtimeV1.createInstance({ workflowName: "order" });
+    const hostile = new Error("hidden");
+    Object.defineProperty(hostile, "message", {
+      get() {
+        throw new Error("message getter");
+      },
+    });
+
+    const result = await runtimeV2.migrateInstances({
+      ...toV2,
+      instanceUuids: [bad.uuid, good.uuid],
+      transformContext: (context) => {
+        if (context.bad) throw hostile;
+        return context;
+      },
+    });
+
+    expect(result.failed).toEqual([{ uuid: bad.uuid, error: "unknown error" }]);
+    expect(result.migrated.map((m) => m.uuid)).toEqual([good.uuid]);
+  });
+
+  it("interrupts with a generic reason when the paging error has a throwing message getter", async () => {
+    const { persistence, runtimeV2 } = world();
+    const hostile = new Error("hidden");
+    Object.defineProperty(hostile, "message", {
+      get() {
+        throw new Error("message getter");
+      },
+    });
+    vi.spyOn(persistence.instanceStore, "findInstanceUuids").mockRejectedValue(hostile);
+
+    const error = (await runtimeV2.migrateInstances({ ...toV2 }).catch((caught: unknown) => caught)) as Error;
+
+    expect(error).toBeInstanceOf(MigrationInterruptedError);
+    expect(error.message).toBe("migrateInstances was interrupted after examining 0 candidates: unknown error");
+    expect(error.cause).toBe(hostile);
   });
 
   it("fails an instance whose transformContext throws a null-prototype object, not an interruption", async () => {
