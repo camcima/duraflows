@@ -41,6 +41,7 @@ function createTransactableDb() {
   };
 
   const mockTrx = {
+    executeQuery: vi.fn().mockResolvedValue({ rows: [] }),
     selectNoFrom: vi.fn((callback: (eb: typeof expressionBuilder) => unknown) => {
       callback(expressionBuilder);
       return { executeTakeFirst: vi.fn().mockResolvedValue(undefined) };

@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { CompiledQuery, Kysely, Transaction } from "kysely";
-import { ScopedTransactionContext, runAfterCommitCallbacks, type TransactionScope } from "@duraflows/core";
+import {
+  ScopedTransactionContext,
+  WorkflowError,
+  runAfterCommitCallbacks,
+  type TransactionScope,
+} from "@duraflows/core";
 import type { WorkflowDatabase } from "./kysely-database.js";
 
 type WorkflowTransaction = Transaction<WorkflowDatabase>;
@@ -35,6 +40,24 @@ function executeRawStatement(trx: WorkflowTransaction, sql: string): Promise<unk
  * savepoint statements on that scope's own transaction. Every kysely entry
  * point that nests (the runners and `transaction()`) goes through here.
  */
+/**
+ * Kysely discards COMMIT's command tag, so a transaction PostgreSQL already
+ * aborted (an earlier statement failed and the error was caught) would "commit"
+ * as a silent ROLLBACK and still look successful. Probing before COMMIT fails
+ * in that state, which rolls the transaction back and rejects — matching the pg
+ * adapter, which checks the command tag instead.
+ */
+async function assertNotAborted(trx: WorkflowTransaction): Promise<void> {
+  try {
+    await executeRawStatement(trx, "SELECT 1");
+  } catch (error: unknown) {
+    throw new WorkflowError(
+      "COMMIT was rolled back by PostgreSQL because an earlier statement in the transaction failed",
+      error,
+    );
+  }
+}
+
 export function runInKyselySavepoint<T>(
   owner: Kysely<WorkflowDatabase>,
   scope: TransactionScope<WorkflowTransaction>,
@@ -61,7 +84,9 @@ export async function runOwnedKyselyTransaction<T>(
     await setup(trx);
     const scope = kyselyTransactionScopes.createRoot(trx);
     root = scope;
-    return kyselyTransactionScopes.run(db, scope, () => callback(trx));
+    const value = await kyselyTransactionScopes.run(db, scope, () => callback(trx));
+    await assertNotAborted(trx);
+    return value;
   });
   if (root) {
     await runAfterCommitCallbacks(root.callbacks);

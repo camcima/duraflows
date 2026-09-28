@@ -15,6 +15,7 @@ import {
   InMemoryCommandRegistry,
   WorkflowValidator,
   WorkflowCompiler,
+  WorkflowError,
 } from "@duraflows/core";
 import { generateMigrationSql } from "@duraflows/pg";
 import {
@@ -619,6 +620,28 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
         }),
       ).rejects.toThrow("outer failure");
 
+      expect(events).toEqual([]);
+      expect(await stateOf(runtime, instance.uuid)).toBe("a");
+    });
+
+    it("a swallowed SQL error makes the helper reject instead of firing observers", { timeout: 15_000 }, async () => {
+      const runtime = buildRuntime({ relay: false });
+      const instance = await runtime.createInstance({ workflowName: "relay" });
+      events.length = 0;
+
+      const outcome = KyselyTransactionContext.transaction(sharingDb, async (trx) => {
+        await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "next" });
+        try {
+          await sql`SELECT 1/0`.execute(trx);
+        } catch {
+          // swallowed on purpose: PostgreSQL now answers COMMIT with ROLLBACK
+        }
+      });
+
+      await expect(outcome).rejects.toThrow(WorkflowError);
+      await expect(outcome).rejects.toThrow(
+        "COMMIT was rolled back by PostgreSQL because an earlier statement in the transaction failed",
+      );
       expect(events).toEqual([]);
       expect(await stateOf(runtime, instance.uuid)).toBe("a");
     });

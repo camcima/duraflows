@@ -172,7 +172,8 @@ describe("KyselyTransactionRunner", () => {
 
     expect(value).toBe(7);
     expect(order).toEqual(["body done", "callback"]);
-    expect(executedSql).toEqual(["SAVEPOINT duraflows_sp_1", "RELEASE SAVEPOINT duraflows_sp_1"]);
+    // The owned transaction ends with the aborted-transaction probe before COMMIT.
+    expect(executedSql).toEqual(["SAVEPOINT duraflows_sp_1", "RELEASE SAVEPOINT duraflows_sp_1", "SELECT 1"]);
   });
 
   it("KyselyTransactionContext.transaction drops its callbacks when the commit fails", async () => {
@@ -215,7 +216,28 @@ describe("KyselyTransactionRunner", () => {
       "RELEASE SAVEPOINT duraflows_sp_1",
       "SAVEPOINT duraflows_sp_2",
       "RELEASE SAVEPOINT duraflows_sp_2",
+      "SELECT 1",
     ]);
+  });
+
+  it("rejects and drops its callbacks when PostgreSQL has already aborted the transaction", async () => {
+    const { db, mockTrx } = createMockDb();
+    (mockTrx.executeQuery as ReturnType<typeof vi.fn>).mockImplementation(async (query: { sql: string }) => {
+      if (query.sql === "SELECT 1") {
+        throw new Error("current transaction is aborted, commands ignored until end of transaction block");
+      }
+      return { rows: [] };
+    });
+    const runner = new KyselyTransactionRunner(db);
+    const callback = vi.fn(async () => {});
+
+    const outcome = runner.runInTransaction(async () => runner.afterCommit(callback));
+
+    await expect(outcome).rejects.toBeInstanceOf(WorkflowError);
+    await expect(outcome).rejects.toThrow(
+      "COMMIT was rolled back by PostgreSQL because an earlier statement in the transaction failed",
+    );
+    expect(callback).not.toHaveBeenCalled();
   });
 
   it("afterCommit outside a transaction throws WorkflowError", () => {
