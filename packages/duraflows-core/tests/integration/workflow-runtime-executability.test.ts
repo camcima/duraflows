@@ -209,6 +209,37 @@ describe("startup executability check", () => {
     });
   });
 
+  it("names only the commands when every guard is registered", async () => {
+    const { persistence, store } = await worldWithActiveV1();
+    const runtimeV2 = makeRuntime(v2, persistence, store, { commands: ["charge"], guards: ["isVip"] });
+    const error = await runtimeV2.initialize().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(WorkflowDefinitionError);
+    expect((error as Error).message).toContain("references unregistered commands [legacyCharge]. ");
+    expect((error as Error).message).not.toContain("guards [");
+  });
+
+  it("re-runs the check on the next initialize() after a failure", async () => {
+    const { persistence, store } = await worldWithActiveV1();
+    const definitionRegistry = new InMemoryDefinitionRegistry();
+    definitionRegistry.register(v2);
+    const commandRegistry = new InMemoryCommandRegistry();
+    commandRegistry.register("charge", { execute: async () => ({ ok: true }) });
+    const guardRegistry = new InMemoryGuardRegistry();
+    guardRegistry.register("isVip", { name: "isVip", evaluate: () => true });
+    const runtimeV2 = new WorkflowRuntime({
+      definitionRegistry,
+      commandRegistry,
+      guardRegistry,
+      ...persistence,
+      definitionStore: store,
+      clock,
+    });
+
+    await expect(runtimeV2.initialize()).rejects.toThrow("unregistered commands [legacyCharge]");
+    commandRegistry.register("legacyCharge", { execute: async () => ({ ok: true }) });
+    await expect(runtimeV2.initialize()).resolves.toBeUndefined();
+  });
+
   it("does not run without a definition store", async () => {
     const persistence = createInMemoryPersistence();
     const runtime = makeRuntime(v2, persistence, new InMemoryDefinitionStore(), { commands: [], withStore: false });
@@ -241,6 +272,20 @@ describe("listDefinitionVersions", () => {
     expect(versions).toEqual([
       { version: 1, contentHash: computeDefinitionHash(v1), registeredAt: expect.any(Date), activeInstances: 1 },
       { version: 2, contentHash: computeDefinitionHash(v2), registeredAt: expect.any(Date), activeInstances: 1 },
+    ]);
+  });
+
+  it("works while initialize() is failing the startup check", async () => {
+    const { persistence, store } = await worldWithActiveV1();
+    const runtimeV2 = makeRuntime(v2, persistence, store, { commands: ["charge"], guards: [] });
+    await expect(runtimeV2.initialize()).rejects.toThrow(WorkflowDefinitionError);
+
+    const versions = await runtimeV2.listDefinitionVersions("order");
+
+    // The sync ran before the check failed, so v2 is stored too.
+    expect(versions.map((v) => [v.version, v.activeInstances])).toEqual([
+      [1, 1],
+      [2, 0],
     ]);
   });
 
