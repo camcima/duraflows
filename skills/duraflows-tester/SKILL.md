@@ -1220,7 +1220,7 @@ Notes for this pattern:
 
 - Without a `definitionStore`, this doesn't apply -- every instance resolves the latest registered definition regardless of what it was created under, and a `console.warn` fires once per runtime the first time a pinned definition is resolved.
 - To test `versionPolicy: "latest"` instead, register `v2` with `versionPolicy: "latest"` and drop a state the instance is sitting in (rather than renaming a target); assert `runtimeV2.triggerEvent(...)` rejects with `IncompatibleDefinitionError` (imported from `@duraflows/core`). A compatible instance (whose current state the new definition still has) resolves and adopts v2 normally.
-- `runtime.listDefinitionVersions("order")` after the above returns `[{ version: 1, activeInstances: 1, ... }, { version: 2, activeInstances: 1, ... }]` -- both versions have one non-terminal instance stamped with them.
+- `runtime.listDefinitionVersions("order")` after the above returns `[{ version: 1, activeInstances: 0, ... }, { version: 2, activeInstances: 1, ... }]`. The v1 instance rests in `submitted`, which v1 defines as `submitted: {}` -- no events and no `onEnter` -- so `terminalStates()` excludes it from the count; the fresh v2 instance sits in `new`, which still has an event, so it counts as active.
 
 ---
 
