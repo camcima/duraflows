@@ -186,6 +186,16 @@ do {
 } while (batch.migrated.length > 0);
 ```
 
+The loop stops as soon as a call migrates nothing. Before assuming
+`fromVersion` has drained, check that last batch's `skipped` and `failed` --
+an instance that can't be placed stays on `fromVersion` and is examined
+again, from the lowest UUID, by every later call, so enough of them can make
+the loop stop early while migratable instances are still waiting further
+along. Confirm with `runtime.listDefinitionVersions(name)`. If you expect
+many skips, fix them first -- the dry run lists them -- or drop `limit`: one
+call without it pages through every candidate internally and never revisits
+one.
+
 For each candidate instance:
 
 - its current state is looked up in `stateMapping`, or kept as-is when the
@@ -227,9 +237,11 @@ there would strand it.
 
 **Batching with `limit`.** `limit` caps how many candidates one call
 examines -- skipped and failed instances count against it too, not just
-migrated ones. A migrated instance no longer matches `fromVersion`, so
-calling `migrateInstances` again with the same input picks up where the last
-call left off; re-running it is always harmless.
+migrated ones. Its cursor holds only within that one call, so a call never
+revisits a candidate itself. Across calls it resets to the lowest UUID: a
+migrated instance has left `fromVersion` for good, but a skipped or failed
+one stays on it and is examined again by the next call with the same input
+-- see the loop example above for what that means in practice.
 
 **Rescue cases.** Migration reads only the instance's current state name and
 the _target_ version, never the old version's snapshot, so it rescues

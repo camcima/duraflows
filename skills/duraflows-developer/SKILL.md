@@ -87,15 +87,23 @@ const preview = await runtime.migrateInstances({
 
 let batch;
 do {
-  batch = await runtime.migrateInstances({ workflowName: "order", fromVersion: 3, toVersion: 4, limit: 500 });
+  batch = await runtime.migrateInstances({
+    workflowName: "order",
+    fromVersion: 3,
+    toVersion: 4,
+    stateMapping: { awaiting_review: "awaiting_approval" },
+    limit: 500,
+  });
 } while (batch.migrated.length > 0);
 ```
+
+The loop stops as soon as a call migrates nothing -- that doesn't mean `fromVersion` has drained. Check that batch's `skipped`/`failed` and `runtime.listDefinitionVersions(name)`: a skip/failure stays on `fromVersion` and is re-examined, from the lowest UUID, by every later call, so enough of them can starve migratable instances sitting further along in UUID order. Fix likely skips first (the dry run lists them), or drop `limit` -- one call without it pages through everything internally and never revisits an instance.
 
 Per instance: `stateMapping` (or a same-named state in `toVersion`) picks the target state; `transformContext(context, instance)`, if given, must be pure and its result is stored as its JSON round trip (a `Date` comes back a string); `expiresAt` is recomputed from `lastTransitionAt` (elapsed time preserved, not reset); `timeoutRetry` is cleared; `lastTransitionAt` itself is unchanged (migration is not a transition); a `$migrated` history row is written (`triggerMetadata: { source: "migration", fromVersion, toVersion }`) and observers fire with `triggerEvent: "$migrated"` after commit, even when the state name didn't change.
 
 **Mapping into a state with an `onEnter` never runs it.** A `stateMapping` target with an `onEnter` in `toVersion` throws `InvalidArgumentError` up front, before any instance is touched; an instance that would keep its current name into a state that has since grown an `onEnter` is skipped instead, not migrated. Skip reasons (`result.skipped[].reason`, verbatim): `not found`, `belongs to workflow <name>`, `unstamped`, `on version <v>, not <fromVersion>`, `state <s> has no mapping and does not exist in version <toVersion>`, `state <s> has an onEnter in version <toVersion>`. A throwing or invalid `transformContext`, or an optimistic-lock conflict, lands that one instance in `failed` and the batch continues.
 
-`limit` caps candidates _examined_ per call (skipped/failed count too, not just migrated); a migrated instance no longer matches `fromVersion`, so re-running the same call is always harmless. Without `instanceUuids`, candidates come from the optional `WorkflowInstanceStore.findInstanceUuids`, paged 100 at a time -- an adapter without it requires `instanceUuids` to be passed explicitly.
+`limit` caps candidates _examined_ per call (skipped/failed count too, not just migrated), and its cursor holds only within that call: a migrated instance leaves `fromVersion` for good, but a skipped or failed one stays on it and is re-examined, from the lowest UUID, by the next call with the same input. Without `instanceUuids`, candidates come from the optional `WorkflowInstanceStore.findInstanceUuids`, paged 100 at a time -- an adapter without it requires `instanceUuids` to be passed explicitly.
 
 **Rescue cases.** Migration reads only the instance's current state and the target version, never the old version's snapshot, so it rescues instances a pinned read can't reach: a missing/invalid stored snapshot for `fromVersion`, an `IncompatibleDefinitionError` under `versionPolicy: "latest"`, and parked instances (their `timeoutRetry` is cleared). It syncs definitions but **skips the startup executability check** -- a failing check is often exactly what a migration is fixing.
 

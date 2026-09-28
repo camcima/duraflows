@@ -640,7 +640,7 @@ interface MigrateInstancesResult {
 
 **Skip reasons** (`result.skipped[].reason`, verbatim): `not found`; `belongs to workflow <name>`; `unstamped` (null `definitionVersion`); `on version <v>, not <fromVersion>`; `state <s> has no mapping and does not exist in version <toVersion>`; `state <s> has an onEnter in version <toVersion>`.
 
-**Candidates:** `instanceUuids`, de-duplicated and in order, when given; otherwise `instanceStore.findInstanceUuids`, paged 100 at a time ascending by UUID, each page after the last UUID seen, until a page is empty or `limit` candidates have been examined. A migrated instance no longer matches `fromVersion`, so re-running the same call is harmless and continues where the last one left off.
+**Candidates:** `instanceUuids`, de-duplicated and in order, when given; otherwise `instanceStore.findInstanceUuids`, paged 100 at a time ascending by UUID, each page after the last UUID seen, until a page is empty or `limit` candidates have been examined -- within one call, that cursor means a candidate is never revisited. Across calls it resets: a migrated instance leaves `fromVersion` for good, but a skipped or failed one stays on it and is re-examined, from the lowest UUID, by the next call with the same input -- with `limit` set, enough of those sorting first can make a call report no migrations while migratable instances remain further along.
 
 **Dry run:** each candidate is read with `findByUuid` (no lock, no transaction); the same resolution and `transformContext` run, but nothing is written and no observers fire.
 
