@@ -69,7 +69,7 @@ class WorkflowDefinitionError extends WorkflowError {
 - Compilation failure during `register()` (e.g., non-existent target/error state in finita process)
 - Looking up a workflow that doesn't exist in the registry (via `get()`)
 - `initialize()` finding that a known `(workflowName, version)` pair's stored content hash differs from the registered definition's — i.e., the definition's content changed without its `version` being bumped
-- `initialize()`'s startup executability check (`onUnresolvable: "fail"`, the default): a stored definition version that still has active instances references a command or guard that is not registered
+- `initialize()`'s startup executability check (`onUnresolvable: "fail"`, the default): a stored definition version that still has active instances references a command or guard that is not registered, or its snapshot is structurally invalid
 - A pinned instance resolving to a stored version that is missing from the definition store, or whose stored snapshot fails structural validation
 - Startup validation in NestJS: a command name referenced in a workflow definition has no registered implementation (neither via `@WorkflowCommand` decorator nor explicit `commands` array)
 

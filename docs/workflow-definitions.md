@@ -108,7 +108,9 @@ longer exists on a state it does have keeps surfacing as the existing
    deleting one that a still-active pinned instance needs breaks it, and
    `WorkflowRuntime.initialize()`'s startup check (see
    [startup executability check](./core-runtime.md#startup-executability-check)) fails startup by
-   default if you delete them too early.
+   default if you delete them too early. The same check also fails startup when
+   a stored version that still has active instances is structurally invalid --
+   for example a snapshot written by 6.x with a `$`-prefixed event name.
 3. Once the old version has no active instances left, its commands and guards
    can be retired. Check with `runtime.listDefinitionVersions(name)`:
 

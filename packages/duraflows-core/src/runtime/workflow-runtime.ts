@@ -152,8 +152,9 @@ export interface WorkflowRuntimeOptions {
   timeoutRetry?: WorkflowTimeoutRetryOptions;
   /**
    * What `initialize()` does when a stored definition version that still has
-   * active instances references a command or guard that is not registered:
-   * `"fail"` (default) throws `WorkflowDefinitionError`, `"warn"` logs it.
+   * active instances references a command or guard that is not registered, or
+   * is structurally invalid: `"fail"` (default) throws
+   * `WorkflowDefinitionError`, `"warn"` logs it.
    * Only runs with a `definitionStore`.
    */
   onUnresolvable?: "fail" | "warn";

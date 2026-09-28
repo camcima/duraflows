@@ -3,6 +3,7 @@ import type { StoredWorkflowDefinition, WorkflowDefinitionStore, WorkflowInstanc
 import type { WorkflowDefinitionRegistry } from "../registry/definition-registry.js";
 import type { WorkflowCommandRegistry } from "../registry/command-registry.js";
 import type { WorkflowGuardRegistry } from "../registry/guard-registry.js";
+import { WorkflowValidator } from "../validation/workflow-validator.js";
 
 /**
  * States an instance never leaves: no events and no onEnter. Instances resting
@@ -47,15 +48,20 @@ export function activeInstancesLabel(count: number): string {
 
 export interface UnresolvableVersion {
   workflowName: string;
-  /** e.g. `Workflow "order": version 3 (12 active instances) references unregistered commands [a], guards [b]` */
+  /**
+   * e.g. `Workflow "order": version 3 (12 active instances) references unregistered commands [a], guards [b]`,
+   * or `... (1 active instance) is invalid: <validation errors>`.
+   */
   description: string;
 }
 
 /**
- * Stored versions that still have active instances but reference a command
- * or guard that is not registered. Workflows whose registered definition uses
- * `versionPolicy: "latest"` are skipped: their instances never execute a
- * stored snapshot. Without a guard registry, every guard reference is missing.
+ * Stored versions that still have active instances but cannot execute: they
+ * reference a command or guard that is not registered, or their snapshot is
+ * structurally invalid (validated as `DefinitionResolver` does, structure only).
+ * Workflows whose registered definition uses `versionPolicy: "latest"` are
+ * skipped: their instances never execute a stored snapshot. Without a guard
+ * registry, every guard reference is missing.
  */
 export async function findUnresolvableVersions(deps: {
   definitionRegistry: WorkflowDefinitionRegistry;
@@ -64,6 +70,7 @@ export async function findUnresolvableVersions(deps: {
   commandRegistry: WorkflowCommandRegistry;
   guardRegistry?: WorkflowGuardRegistry;
 }): Promise<UnresolvableVersion[]> {
+  const validator = new WorkflowValidator();
   const problems: UnresolvableVersion[] = [];
   for (const registered of deps.definitionRegistry.getAll()) {
     if (registered.versionPolicy === "latest") continue;
@@ -73,16 +80,24 @@ export async function findUnresolvableVersions(deps: {
       const refs = referencedNames(stored.definitionJson);
       const commands = refs.commands.filter((name) => !deps.commandRegistry.has(name));
       const guards = refs.guards.filter((name) => !deps.guardRegistry?.has(name));
-      if (commands.length === 0 && guards.length === 0) continue;
-      const missing = [
-        ...(commands.length > 0 ? [`commands [${commands.join(", ")}]`] : []),
-        ...(guards.length > 0 ? [`guards [${guards.join(", ")}]`] : []),
-      ].join(", ");
+      const validation = validator.validate(stored.definitionJson);
+      const reasons: string[] = [];
+      if (commands.length > 0 || guards.length > 0) {
+        const missing = [
+          ...(commands.length > 0 ? [`commands [${commands.join(", ")}]`] : []),
+          ...(guards.length > 0 ? [`guards [${guards.join(", ")}]`] : []),
+        ].join(", ");
+        reasons.push(`references unregistered ${missing}`);
+      }
+      if (!validation.valid) {
+        reasons.push(`is invalid: ${validation.errors.map((e) => e.message).join("; ")}`);
+      }
+      if (reasons.length === 0) continue;
       problems.push({
         workflowName: registered.name,
         description:
           `Workflow "${registered.name}": version ${stored.version} (${activeInstancesLabel(active)}) ` +
-          `references unregistered ${missing}`,
+          reasons.join(" and "),
       });
     }
   }

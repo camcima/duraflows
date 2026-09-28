@@ -134,6 +134,81 @@ describe("startup executability check", () => {
     await expect(runtimeV2.initialize()).resolves.toBeUndefined();
   });
 
+  describe("a structurally invalid stored version with an active instance", () => {
+    // Accepted by 6.x validation, rejected since 7.0: "$"-prefixed event names are reserved.
+    const invalidV1: WorkflowDefinition = {
+      name: "order",
+      initialState: "new",
+      states: {
+        new: {
+          events: {
+            $Retry: { targetState: "new" },
+            Pay: { targetState: "paid", commands: [{ name: "legacyCharge" }] },
+          },
+        },
+        paid: {},
+      },
+    };
+
+    async function worldWithInvalidV1() {
+      const persistence = createInMemoryPersistence();
+      const store = new InMemoryDefinitionStore();
+      await store.ensure({
+        workflowName: "order",
+        version: 1,
+        contentHash: computeDefinitionHash(invalidV1),
+        definitionJson: invalidV1,
+      });
+      const now = clock.now();
+      await persistence.instanceStore.create({
+        uuid: "00000000-0000-4000-8000-000000000001",
+        workflowName: "order",
+        currentState: "new",
+        version: 1,
+        definitionVersion: 1,
+        expiresAt: null,
+        timeoutRetry: null,
+        lastTransitionAt: now,
+        context: {},
+        metadata: {},
+        createdAt: now,
+        updatedAt: now,
+      });
+      return { persistence, store };
+    }
+
+    it("fails initialize()", async () => {
+      const { persistence, store } = await worldWithInvalidV1();
+      const runtimeV2 = makeRuntime(v2, persistence, store, { commands: ["charge", "legacyCharge"], guards: [] });
+      const promise = runtimeV2.initialize();
+      await expect(promise).rejects.toBeInstanceOf(WorkflowDefinitionError);
+      await expect(promise).rejects.toThrow(
+        'version 1 (1 active instance) is invalid: Event names starting with "$" are reserved',
+      );
+    });
+
+    it("reports missing references and structural errors together", async () => {
+      const { persistence, store } = await worldWithInvalidV1();
+      const runtimeV2 = makeRuntime(v2, persistence, store, { commands: ["charge"], guards: [] });
+      await expect(runtimeV2.initialize()).rejects.toThrow(
+        "version 1 (1 active instance) references unregistered commands [legacyCharge] and is invalid: " +
+          'Event names starting with "$" are reserved',
+      );
+    });
+
+    it('only warns with onUnresolvable: "warn"', async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { persistence, store } = await worldWithInvalidV1();
+      const runtimeV2 = makeRuntime(v2, persistence, store, {
+        commands: ["charge", "legacyCharge"],
+        guards: [],
+        onUnresolvable: "warn",
+      });
+      await expect(runtimeV2.initialize()).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/version 1 \(1 active instance\) is invalid/));
+    });
+  });
+
   it("does not run without a definition store", async () => {
     const persistence = createInMemoryPersistence();
     const runtime = makeRuntime(v2, persistence, new InMemoryDefinitionStore(), { commands: [], withStore: false });

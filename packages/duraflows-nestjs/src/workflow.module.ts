@@ -68,8 +68,9 @@ export interface WorkflowModuleOptions {
   timeoutRetry?: WorkflowTimeoutRetryOptions;
   /**
    * What module init does when a stored definition version that still has
-   * active instances references an unregistered command or guard: `"fail"`
-   * (default) fails application startup, `"warn"` logs and continues.
+   * active instances references an unregistered command or guard, or is
+   * structurally invalid: `"fail"` (default) fails application startup,
+   * `"warn"` logs and continues.
    */
   onUnresolvable?: "fail" | "warn";
   enableControllers?: boolean;
