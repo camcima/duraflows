@@ -6,6 +6,7 @@ import {
   InvalidEventError,
   InvalidArgumentError,
   IncompatibleDefinitionError,
+  MigrationInterruptedError,
 } from "@duraflows/core";
 import { WorkflowExceptionFilter } from "../../src/filters/workflow-exception.filter.js";
 
@@ -117,5 +118,10 @@ describe("WorkflowExceptionFilter", () => {
   it("re-exports IncompatibleDefinitionError from the package entry point", async () => {
     const nest = await import("../../src/index.js");
     expect(nest.IncompatibleDefinitionError).toBe(IncompatibleDefinitionError);
+  });
+
+  it("re-exports MigrationInterruptedError from the package entry point", async () => {
+    const nest = await import("../../src/index.js");
+    expect(nest.MigrationInterruptedError).toBe(MigrationInterruptedError);
   });
 });

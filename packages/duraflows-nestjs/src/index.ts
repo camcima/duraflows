@@ -93,6 +93,7 @@ export {
   WorkflowInstanceNotFoundError,
   InvalidEventError,
   IncompatibleDefinitionError,
+  MigrationInterruptedError,
   CommandFailureError,
   OnEnterDepthExceededError,
   WorkflowValidator,

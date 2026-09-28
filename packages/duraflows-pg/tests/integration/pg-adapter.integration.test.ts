@@ -459,6 +459,47 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       await runtimeV2.triggerEvent({ workflowInstanceUuid: uuids[0], eventName: "Approve" });
       expect((await runtimeV2.getInstance(uuids[0]))!.currentState).toBe("accepted");
     });
+
+    it("filters by state in the query and finishes with a cursor loop", async () => {
+      const runtimeV1 = buildRuntime(v1);
+      const approved: string[] = [];
+      const reviewing: string[] = [];
+      for (let i = 0; i < 30; i++) {
+        const instance = await runtimeV1.createInstance({ workflowName: "migrating-order" });
+        await runtimeV1.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Submit" });
+        if (i % 3 === 0) {
+          await runtimeV1.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Approve" });
+          approved.push(instance.uuid);
+        } else {
+          reviewing.push(instance.uuid);
+        }
+      }
+
+      const runtimeV2 = buildRuntime(v2);
+      const migrated: string[] = [];
+      const skipped: unknown[] = [];
+      let cursor: string | undefined;
+      do {
+        const batch = await runtimeV2.migrateInstances({
+          workflowName: "migrating-order",
+          fromVersion: 1,
+          toVersion: 2,
+          stateMapping: { review: "checking" },
+          excludeStates: ["approved"],
+          limit: 7,
+          cursor,
+        });
+        migrated.push(...batch.migrated.map((m) => m.uuid));
+        skipped.push(...batch.skipped);
+        cursor = batch.nextCursor ?? undefined;
+      } while (cursor);
+
+      expect(skipped).toEqual([]);
+      expect([...migrated].sort()).toEqual([...reviewing].sort());
+      for (const uuid of approved) {
+        expect((await runtimeV2.getInstance(uuid))!.definitionVersion).toBe(1);
+      }
+    });
   });
 
   describe("pg definition version pinning", () => {
