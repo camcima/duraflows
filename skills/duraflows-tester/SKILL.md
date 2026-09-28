@@ -1248,6 +1248,20 @@ Reuse the two-runtime-sharing-one-store setup from pattern 3: create instances u
 
 ```ts
 it("moves a pinned instance onto the target version and records $migrated", async () => {
+  // Same v1/v2 as pattern 3 above.
+  const v1: WorkflowDefinition = {
+    name: "order",
+    version: 1,
+    initialState: "new",
+    states: { new: { events: { Submit: { targetState: "submitted" } } }, submitted: {} },
+  };
+  const v2: WorkflowDefinition = {
+    name: "order",
+    version: 2,
+    initialState: "new",
+    states: { new: { events: { Submit: { targetState: "approved" } } }, approved: {} },
+  };
+
   const runtimeV1 = makeRuntime(v1);
   const instance = await runtimeV1.createInstance({ workflowName: "order" });
   await runtimeV1.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Submit" }); // now in "submitted"

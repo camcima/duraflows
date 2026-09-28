@@ -152,13 +152,16 @@ system-generated events unambiguous -- don't name your own events `$foo`.
 ### Migrating instances
 
 _(v7.1.0)_ `runtime.migrateInstances(input)` moves chosen instances from one
-stored definition version to another. Reach for it when a bug fix or a
-required change must reach in-flight instances, or when an old version can't
-be retired because its instances won't finish on their own -- draining, or
-switching the whole workflow to `versionPolicy: "latest"`
-(see [above](#versionpolicy-latest)), don't cover those cases. Migration is
-**pure relabeling**: no commands, guards or `onEnter` run, and
-`transformContext` is the one tool for adjusting context.
+stored definition version to another. `versionPolicy: "latest"`
+(see [above](#versionpolicy-latest)) already brings a fix to every in-flight
+instance on its very next transition -- reach for `migrateInstances` instead
+when that isn't enough: the change renames or removes a state (`"latest"`
+throws `IncompatibleDefinitionError` for an instance sitting in one instead),
+it needs to reshape context, only some of the workflow's instances should
+move, or an old version can't be retired because its instances won't finish
+on their own and draining isn't an option. Migration is **pure relabeling**:
+no commands, guards or `onEnter` run, and `transformContext` is the one tool
+for adjusting context.
 
 Dry run first, then migrate in batches:
 
@@ -216,6 +219,25 @@ For each candidate instance:
   observers fire with `triggerEvent: "$migrated"` after commit -- even when
   the state name didn't change.
 
+**Observers see migrations too.** `$migrated` fires through the same
+post-commit observer path as any other transition, so an observer with side
+effects -- sending an email, publishing an integration event -- should
+ignore it:
+
+```ts
+onEnter: async (event) => {
+  if (event.triggerEvent === "$migrated") return;
+  await sendCustomerEmail(event);
+},
+```
+
+Candidates are every instance stamped with `fromVersion`, terminal
+(completed) ones included -- unlike the startup executability check and
+`listDefinitionVersions`, which only count active instances. A migration run
+without `instanceUuids` therefore relabels completed instances too, appending
+a `$migrated` history row and firing observers for them; pass `instanceUuids`
+for just the active ones if leaving finished instances alone matters.
+
 **Mapping into a state with an `onEnter` never happens.** If `stateMapping`
 names a target state that has an `onEnter` in the target version,
 `migrateInstances` throws before touching any instance. If an instance would
@@ -226,14 +248,14 @@ there would strand it.
 
 **Skip reasons** (verbatim, `result.skipped[].reason`):
 
-| Reason                                                               | When                                                           |
-| -------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `not found`                                                          | The UUID doesn't exist                                         |
-| `belongs to workflow <name>`                                         | The UUID belongs to a different workflow                       |
-| `unstamped`                                                          | `definitionVersion` is `null` (a pre-5.0 instance)             |
-| `on version <v>, not <fromVersion>`                                  | Already migrated, or re-stamped, since being listed            |
-| `state <s> has no mapping and does not exist in version <toVersion>` | No `stateMapping` entry, and no same-named state in the target |
-| `state <s> has an onEnter in version <toVersion>`                    | Keeps its name, but that state now has an `onEnter`            |
+| Reason                                                               | When                                                                                                                        |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `not found`                                                          | The UUID doesn't exist                                                                                                      |
+| `belongs to workflow <name>`                                         | The UUID belongs to a different workflow                                                                                    |
+| `unstamped`                                                          | `definitionVersion` is `null` (a pre-5.0 instance)                                                                          |
+| `on version <v>, not <fromVersion>`                                  | Already migrated, or re-stamped, since being listed -- or an explicit `instanceUuids` entry that was never on `fromVersion` |
+| `state <s> has no mapping and does not exist in version <toVersion>` | No `stateMapping` entry, and no same-named state in the target                                                              |
+| `state <s> has an onEnter in version <toVersion>`                    | Keeps its name, but that state now has an `onEnter`                                                                         |
 
 **Batching with `limit`.** `limit` caps how many candidates one call
 examines -- skipped and failed instances count against it too, not just
@@ -242,6 +264,18 @@ revisits a candidate itself. Across calls it resets to the lowest UUID: a
 migrated instance has left `fromVersion` for good, but a skipped or failed
 one stays on it and is examined again by the next call with the same input
 -- see the loop example above for what that means in practice.
+
+Dropping `limit` avoids that cross-call starvation -- one call pages through
+every candidate internally and never revisits one -- at the cost of holding
+the whole result (every migrated, skipped and failed entry) in memory for as
+long as that one call runs.
+
+A workflow's `fromVersion` won't drain, batched or not, while any worker's
+in-code registered `version` is still `fromVersion`: `createInstance()`
+always stamps new instances with the latest version a worker has registered,
+so such a worker keeps handing the migration fresh candidates on the very
+version it's meant to be leaving. Deploy `toVersion` to every worker before
+expecting a migration loop to reach zero.
 
 **Rescue cases.** Migration reads only the instance's current state name and
 the _target_ version, never the old version's snapshot, so it rescues
@@ -253,6 +287,19 @@ Migration runs even while `initialize()`'s
 [startup executability check](./core-runtime.md#startup-executability-check)
 is failing for the workflow -- fixing that is often exactly what a migration
 is for.
+
+**When the check blocks boot entirely.** That only helps once
+`migrateInstances` itself runs. NestJS's `WorkflowRuntimeInitializer` (and
+any app that calls `await runtime.initialize()` at boot) awaits the _full_
+`initialize()`, check included; with `onUnresolvable: "fail"` a failing check
+stops the app from booting, so `WorkflowService.migrateInstances` /
+`runtime.migrateInstances` is never reached through it. Either:
+
+- run the migration from a one-off script that builds its own
+  `WorkflowRuntime` against the same persistence and definitions and calls
+  `migrateInstances` directly, without calling `initialize()` first; or
+- deploy temporarily with `onUnresolvable: "warn"`, migrate, then restore
+  `"fail"`.
 
 **Adapters without `findInstanceUuids`.** The optional
 `WorkflowInstanceStore.findInstanceUuids` (see

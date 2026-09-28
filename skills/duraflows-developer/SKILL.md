@@ -74,7 +74,7 @@ const versions = await runtime.listDefinitionVersions("order");
 
 ### Migrating instances (v7.1.0)
 
-`runtime.migrateInstances(input)` (and `WorkflowService.migrateInstances(input)` in NestJS -- no HTTP endpoint) moves chosen instances from one stored version to another. Reach for it when a fix must reach in-flight instances, or an old version can't retire because its instances won't finish on their own; draining or `versionPolicy: "latest"` don't cover those cases. It is **pure relabeling**: no commands, guards or `onEnter` run.
+`runtime.migrateInstances(input)` (and `WorkflowService.migrateInstances(input)` in NestJS -- no HTTP endpoint) moves chosen instances from one stored version to another. `versionPolicy: "latest"` already gets a fix to every in-flight instance on its very next transition; reach for `migrateInstances` when that's not enough -- the change renames/removes a state (`"latest"` throws `IncompatibleDefinitionError` for an instance sitting in one instead), needs to reshape context, only some instances should move, or an old version can't retire because its instances won't finish on their own and draining isn't an option. It is **pure relabeling**: no commands, guards or `onEnter` run.
 
 ```ts
 const preview = await runtime.migrateInstances({
@@ -97,7 +97,7 @@ do {
 } while (batch.migrated.length > 0);
 ```
 
-The loop stops as soon as a call migrates nothing -- that doesn't mean `fromVersion` has drained. Check that batch's `skipped`/`failed` and `runtime.listDefinitionVersions(name)`: a skip/failure stays on `fromVersion` and is re-examined, from the lowest UUID, by every later call, so enough of them can starve migratable instances sitting further along in UUID order. Fix likely skips first (the dry run lists them), or drop `limit` -- one call without it pages through everything internally and never revisits an instance.
+The loop stops as soon as a call migrates nothing -- that doesn't mean `fromVersion` has drained. Check that batch's `skipped`/`failed` and `runtime.listDefinitionVersions(name)`: a skip/failure stays on `fromVersion` and is re-examined, from the lowest UUID, by every later call, so enough of them can starve migratable instances sitting further along in UUID order. Fix likely skips first (the dry run lists them), or drop `limit` -- one call without it pages through everything internally and never revisits an instance, at the cost of holding the whole result (every migrated/skipped/failed entry) in memory for that call's whole run. Also: a worker still running code whose in-code registered `version` is `fromVersion` keeps handing the migration fresh candidates via `createInstance()`, so upgrade every worker to `toVersion` before expecting the count to reach zero.
 
 Per instance: `stateMapping` (or a same-named state in `toVersion`) picks the target state; `transformContext(context, instance)`, if given, must be pure and its result is stored as its JSON round trip (a `Date` comes back a string); `expiresAt` is recomputed from `lastTransitionAt` (elapsed time preserved, not reset); `timeoutRetry` is cleared; `lastTransitionAt` itself is unchanged (migration is not a transition); a `$migrated` history row is written (`triggerMetadata: { source: "migration", fromVersion, toVersion }`) and observers fire with `triggerEvent: "$migrated"` after commit, even when the state name didn't change.
 
@@ -106,6 +106,8 @@ Per instance: `stateMapping` (or a same-named state in `toVersion`) picks the ta
 `limit` caps candidates _examined_ per call (skipped/failed count too, not just migrated), and its cursor holds only within that call: a migrated instance leaves `fromVersion` for good, but a skipped or failed one stays on it and is re-examined, from the lowest UUID, by the next call with the same input. Without `instanceUuids`, candidates come from the optional `WorkflowInstanceStore.findInstanceUuids`, paged 100 at a time -- an adapter without it requires `instanceUuids` to be passed explicitly.
 
 **Rescue cases.** Migration reads only the instance's current state and the target version, never the old version's snapshot, so it rescues instances a pinned read can't reach: a missing/invalid stored snapshot for `fromVersion`, an `IncompatibleDefinitionError` under `versionPolicy: "latest"`, and parked instances (their `timeoutRetry` is cleared). It syncs definitions but **skips the startup executability check** -- a failing check is often exactly what a migration is fixing.
+
+**When the check blocks boot entirely.** That skip only helps once `migrateInstances` itself runs -- NestJS's `WorkflowRuntimeInitializer.onModuleInit` (and any app calling `await runtime.initialize()` at boot) awaits the _full_ `initialize()`, check included, so `onUnresolvable: "fail"` (the default) still stops the app from booting and `migrateInstances` is never reached through it. Either run the migration from a one-off script that builds its own `WorkflowRuntime` against the same persistence/definitions and calls `migrateInstances` without calling `initialize()` first, or deploy temporarily with `onUnresolvable: "warn"`, migrate, then restore `"fail"`.
 
 See [Migrating instances](../../docs/workflow-definitions.md#migrating-instances) and [`migrateInstances()`](../../docs/core-runtime.md#migrateinstances) for the full validation table and semantics.
 

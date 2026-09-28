@@ -624,15 +624,15 @@ interface MigrateInstancesResult {
 
 **Upfront validation** -- every row runs before any instance row is touched; the first failure throws and nothing is written:
 
-| Check                                                                            | Error                                                                                                                                  |
-| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| A definition store is configured                                                 | `WorkflowError("migrateInstances requires a definition store")`                                                                        |
-| `workflowName` is registered                                                     | `WorkflowDefinitionError` (`Workflow not found in registry`)                                                                           |
-| `fromVersion`/`toVersion` are positive safe integers, and differ (downgrades OK) | `InvalidArgumentError` (`fromVersion must be a positive integer, got <value>`; `fromVersion and toVersion must differ`)                |
-| `limit`, when given, is a positive safe integer                                  | `InvalidArgumentError("limit must be a positive integer, got <value>")`                                                                |
-| `toVersion` is in the store and structurally valid                               | `WorkflowDefinitionError("version <toVersion> is not in the definition store")`, loaded the same way a pinned instance's snapshot is   |
-| Every `stateMapping` value is an own state of `toVersion`, with no `onEnter`     | `InvalidArgumentError('stateMapping maps "<from>" to "<to>", which is not a state of version <toVersion>')` (or the `onEnter` variant) |
-| `instanceUuids` given, or the store implements `findInstanceUuids`               | `WorkflowError("migrateInstances without instanceUuids requires an instance store that implements findInstanceUuids")`                 |
+| Check                                                                            | Error                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A definition store is configured                                                 | `WorkflowError("migrateInstances requires a definition store")`                                                                                                                                                                              |
+| `workflowName` is registered                                                     | `WorkflowDefinitionError` (`Workflow not found in registry`)                                                                                                                                                                                 |
+| `fromVersion`/`toVersion` are positive safe integers, and differ (downgrades OK) | `InvalidArgumentError` (`fromVersion must be a positive integer, got <value>`; `fromVersion and toVersion must differ`)                                                                                                                      |
+| `limit`, when given, is a positive safe integer                                  | `InvalidArgumentError("limit must be a positive integer, got <value>")`                                                                                                                                                                      |
+| `toVersion` is in the store and structurally valid                               | `WorkflowDefinitionError`, loaded the same way a pinned instance's snapshot is -- missing: `Workflow "<name>": version <toVersion> is not in the definition store`; invalid: `Workflow "<name>": stored version <toVersion> is invalid: ...` |
+| Every `stateMapping` value is an own state of `toVersion`, with no `onEnter`     | `InvalidArgumentError('stateMapping maps "<from>" to "<to>", which is not a state of version <toVersion>')` (or the `onEnter` variant)                                                                                                       |
+| `instanceUuids` given, or the store implements `findInstanceUuids`               | `WorkflowError("migrateInstances without instanceUuids requires an instance store that implements findInstanceUuids")`                                                                                                                       |
 
 `stateMapping` keys are matched as own properties only (`Object.hasOwn`), never through the prototype chain (a state named `"toString"` is safe).
 
@@ -669,7 +669,7 @@ interface StateEnterEvent {
   readonly fromState: string | null; // null on initial-state entry
   readonly toState: string;
   readonly transitionUuid: string; // matches ctx.transitionUuid for the same entry
-  readonly triggerEvent: string | null; // null for initial-state entries and onEnter hops
+  readonly triggerEvent: string | null; // null: initial-state entry; "onEnter": chain hop; "$migrated": migration
   readonly context: Readonly<Record<string, unknown>>; // deep-cloned + frozen at event time
   readonly metadata: Readonly<Record<string, unknown>>; // deep-cloned + frozen
   readonly triggerMetadata: Readonly<Record<string, unknown>>; // deep-cloned + frozen
