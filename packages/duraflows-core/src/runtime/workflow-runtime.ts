@@ -256,10 +256,14 @@ export class WorkflowRuntime {
       console.warn(`[duraflows] ${summary}`);
       return;
     }
+    // WorkflowDefinitionError prefixes `Workflow "<first>": `; drop the first
+    // description's own copy so every workflow is named exactly once.
+    const first = problems[0];
+    const details = summary.slice(`Workflow "${first.workflowName}": `.length);
     throw new WorkflowDefinitionError(
-      problems[0].workflowName,
-      `stored versions with active instances cannot execute: ${summary}. ` +
-        `Register the missing commands and guards, or set onUnresolvable: "warn".`,
+      first.workflowName,
+      `${details}. Register the missing commands and guards, set versionPolicy: "latest" on the workflow, ` +
+        `or set onUnresolvable: "warn".`,
     );
   }
 

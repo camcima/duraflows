@@ -40,6 +40,11 @@ export function countActiveInstances(
   });
 }
 
+/** "1 active instance", "12 active instances". */
+export function activeInstancesLabel(count: number): string {
+  return `${count} active instance${count === 1 ? "" : "s"}`;
+}
+
 export interface UnresolvableVersion {
   workflowName: string;
   /** e.g. `Workflow "order": version 3 (12 active instances) references unregistered commands [a], guards [b]` */
@@ -76,7 +81,7 @@ export async function findUnresolvableVersions(deps: {
       problems.push({
         workflowName: registered.name,
         description:
-          `Workflow "${registered.name}": version ${stored.version} (${active} active instances) ` +
+          `Workflow "${registered.name}": version ${stored.version} (${activeInstancesLabel(active)}) ` +
           `references unregistered ${missing}`,
       });
     }

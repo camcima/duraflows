@@ -85,8 +85,14 @@ describe("startup executability check", () => {
     const promise = runtimeV2.initialize();
     await expect(promise).rejects.toBeInstanceOf(WorkflowDefinitionError);
     await expect(promise).rejects.toThrow(
-      'Workflow "order": version 1 (1 active instances) references unregistered commands [legacyCharge], guards [isVip]',
+      new WorkflowDefinitionError(
+        "order",
+        "version 1 (1 active instance) references unregistered commands [legacyCharge], guards [isVip]. " +
+          'Register the missing commands and guards, set versionPolicy: "latest" on the workflow, ' +
+          'or set onUnresolvable: "warn".',
+      ).message,
     );
+    await expect(promise).rejects.toThrow(/^Workflow "order": version 1 \(/);
   });
 
   it('only warns with onUnresolvable: "warn"', async () => {

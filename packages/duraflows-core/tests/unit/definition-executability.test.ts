@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { terminalStates, referencedNames } from "../../src/runtime/definition-executability.js";
+import { activeInstancesLabel, terminalStates, referencedNames } from "../../src/runtime/definition-executability.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
 
 const definition: WorkflowDefinition = {
@@ -22,5 +22,13 @@ describe("terminalStates", () => {
 describe("referencedNames", () => {
   it("collects each command and guard once, in definition order", () => {
     expect(referencedNames(definition)).toEqual({ commands: ["c1", "c2", "c3"], guards: ["g1"] });
+  });
+});
+
+describe("activeInstancesLabel", () => {
+  it("pluralizes the instance count", () => {
+    expect(activeInstancesLabel(1)).toBe("1 active instance");
+    expect(activeInstancesLabel(0)).toBe("0 active instances");
+    expect(activeInstancesLabel(12)).toBe("12 active instances");
   });
 });
