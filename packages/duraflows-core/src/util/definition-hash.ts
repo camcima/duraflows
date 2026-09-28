@@ -18,7 +18,9 @@ function canonicalize(value: unknown): unknown {
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, v]) => v !== undefined)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    const result: Record<string, unknown> = {};
+    // Null prototype: assigning "__proto__" must create an own key, not call
+    // Object.prototype's setter (which would silently drop that content).
+    const result = Object.create(null) as Record<string, unknown>;
     for (const [key, v] of entries) {
       result[key] = canonicalize(v);
     }

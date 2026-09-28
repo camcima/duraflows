@@ -68,4 +68,38 @@ describe("computeDefinitionHash", () => {
     swapped.states.new.events!.Submit.commands = [{ name: "b" }, { name: "a" }];
     expect(computeDefinitionHash(twoCommands)).not.toBe(computeDefinitionHash(swapped));
   });
+
+  it("keeps an own __proto__ key as content", () => {
+    // JSON.parse creates "__proto__" as an ordinary own key; it must count like any other.
+    const json = '{"name":"wf","initialState":"a","states":{"a":{"metadata":{"__proto__":{"owner":"X"}}}}}';
+    const a = JSON.parse(json) as WorkflowDefinition;
+    const b = JSON.parse(json.replace('"X"', '"Y"')) as WorkflowDefinition;
+    expect(computeDefinitionHash(a)).not.toBe(computeDefinitionHash(b));
+  });
+
+  it("hashes an ordinary definition exactly as before (no forced version bumps)", () => {
+    const definition: WorkflowDefinition = {
+      name: "order",
+      version: 3,
+      versionPolicy: "latest",
+      initialState: "new",
+      states: {
+        new: {
+          context: { tier: "silver", tags: ["a", "b"] },
+          events: {
+            Submit: {
+              targetState: "done",
+              guard: { name: "g" },
+              commands: [{ name: "c", metadata: { retries: 2 } }],
+              timeout: { afterMinutes: 5 },
+            },
+          },
+        },
+        done: { onEnter: { commands: [{ name: "notify" }] }, metadata: { final: true } },
+      },
+    };
+    expect(computeDefinitionHash(definition)).toBe(
+      "sha256:707d90bfda1b60e804fa96a897bcfbb3ee9b0cd2fbff1da1399992e51682f935",
+    );
+  });
 });
