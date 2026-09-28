@@ -10,6 +10,7 @@ function createMocks() {
     getAvailableEvents: vi.fn().mockResolvedValue([{ eventName: "Go" }]),
     getInstance: vi.fn().mockResolvedValue({ uuid: "inst-uuid", currentState: "pending" }),
     getHistory: vi.fn().mockResolvedValue([{ eventName: "Created" }]),
+    listDefinitionVersions: vi.fn().mockResolvedValue([{ version: 1, activeInstances: 2 }]),
   };
 
   const service = new WorkflowService(runtime as unknown as WorkflowRuntime);
@@ -78,6 +79,15 @@ describe("WorkflowService", () => {
     await service.getHistory("inst-uuid");
 
     expect(runtime.getHistory).toHaveBeenCalledWith("inst-uuid", undefined);
+  });
+
+  it("listDefinitionVersions() delegates to runtime", async () => {
+    const { service, runtime } = createMocks();
+
+    const result = await service.listDefinitionVersions("order");
+
+    expect(runtime.listDefinitionVersions).toHaveBeenCalledWith("order");
+    expect(result).toEqual([{ version: 1, activeInstances: 2 }]);
   });
 
   it("getHandle() returns a WorkflowHandle with the correct uuid", () => {

@@ -10,6 +10,7 @@ import type {
   WorkflowExecutionResult,
   AvailableWorkflowEvent,
   WorkflowHistoryRecord,
+  DefinitionVersionSummary,
 } from "@duraflows/core";
 import { WORKFLOW_RUNTIME } from "../providers/injection-tokens.js";
 
@@ -84,6 +85,10 @@ export class WorkflowService {
     options?: { limit?: number; offset?: number },
   ): Promise<WorkflowHistoryRecord[]> {
     return this.runtime.getHistory(workflowInstanceUuid, options);
+  }
+
+  async listDefinitionVersions(workflowName: string): Promise<DefinitionVersionSummary[]> {
+    return this.runtime.listDefinitionVersions(workflowName);
   }
 
   getHandle(uuid: string): WorkflowHandle {

@@ -66,6 +66,12 @@ export interface WorkflowModuleOptions {
    * fails: exponential backoff, then parking. Defaults apply when omitted.
    */
   timeoutRetry?: WorkflowTimeoutRetryOptions;
+  /**
+   * What module init does when a stored definition version that still has
+   * active instances references an unregistered command or guard: `"fail"`
+   * (default) fails application startup, `"warn"` logs and continues.
+   */
+  onUnresolvable?: "fail" | "warn";
   enableControllers?: boolean;
 }
 
@@ -79,6 +85,8 @@ export interface WorkflowModuleFactoryConfig {
   onObserverError?: ObserverErrorHandler;
   /** See {@link WorkflowModuleOptions.timeoutRetry}. */
   timeoutRetry?: WorkflowTimeoutRetryOptions;
+  /** See {@link WorkflowModuleOptions.onUnresolvable}. */
+  onUnresolvable?: "fail" | "warn";
 }
 
 export interface WorkflowModuleAsyncOptions<TArgs extends unknown[] = unknown[]> {
@@ -244,6 +252,7 @@ function buildWorkflowProviders(explicitCommands: WorkflowCommandRegistration[])
           observers: config.observers,
           onObserverError: config.onObserverError,
           timeoutRetry: config.timeoutRetry,
+          onUnresolvable: config.onUnresolvable,
         }),
       inject: [
         WORKFLOW_MODULE_OPTIONS,

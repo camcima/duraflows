@@ -1,6 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 import { Logger, type ArgumentsHost } from "@nestjs/common";
-import { WorkflowError, WorkflowInstanceNotFoundError, InvalidEventError, InvalidArgumentError } from "@duraflows/core";
+import {
+  WorkflowError,
+  WorkflowInstanceNotFoundError,
+  InvalidEventError,
+  InvalidArgumentError,
+  IncompatibleDefinitionError,
+} from "@duraflows/core";
 import { WorkflowExceptionFilter } from "../../src/filters/workflow-exception.filter.js";
 
 // The filter must stay platform-agnostic: it may only call `.status(...).send(...)`,
@@ -31,6 +37,14 @@ describe("WorkflowExceptionFilter", () => {
     new WorkflowExceptionFilter().catch(new InvalidEventError("abc", "draft", "approve"), host);
     expect(status).toHaveBeenCalledWith(409);
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 409, error: "Conflict" }));
+  });
+
+  it("maps IncompatibleDefinitionError to 409 with its message", () => {
+    const { host, status, send } = mockHost();
+    const error = new IncompatibleDefinitionError("abc", "order", "review", 2);
+    new WorkflowExceptionFilter().catch(error, host);
+    expect(status).toHaveBeenCalledWith(409);
+    expect(send).toHaveBeenCalledWith({ statusCode: 409, error: "Conflict", message: error.message });
   });
 
   it("maps InvalidArgumentError to 400 Bad Request", () => {
@@ -98,5 +112,10 @@ describe("WorkflowExceptionFilter", () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+
+  it("re-exports IncompatibleDefinitionError from the package entry point", async () => {
+    const nest = await import("../../src/index.js");
+    expect(nest.IncompatibleDefinitionError).toBe(IncompatibleDefinitionError);
   });
 });

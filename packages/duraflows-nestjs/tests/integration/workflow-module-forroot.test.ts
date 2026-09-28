@@ -563,4 +563,64 @@ describe("WorkflowModule.forRoot()", () => {
 
     await moduleRef.close();
   });
+
+  describe("onUnresolvable", () => {
+    const staleVersionStore = {
+      ensure: async (record: {
+        workflowName: string;
+        version: number;
+        contentHash: string;
+        definitionJson: unknown;
+      }) => ({
+        workflowName: record.workflowName,
+        version: record.version,
+        contentHash: record.contentHash,
+        definitionJson: record.definitionJson as WorkflowDefinition,
+        registeredAt: new Date(),
+      }),
+      findByNameAndVersion: async () => null,
+      listVersions: async () => [
+        {
+          workflowName: testWorkflow.name,
+          version: 1,
+          contentHash: "sha256:stale",
+          definitionJson: {
+            ...testWorkflow,
+            states: {
+              pending: { events: { approve: { targetState: "approved", commands: [{ name: "gone" }] } } },
+              approved: {},
+            },
+          } as WorkflowDefinition,
+          registeredAt: new Date(),
+        },
+      ],
+    };
+    const persistenceWithActiveInstances = {
+      ...stubPersistence,
+      instanceStore: { ...stubInstanceStore, countInstances: async () => 3 },
+      definitionStore: staleVersionStore,
+    };
+
+    it("fails module init by default when an active stored version cannot execute", async () => {
+      const mod = await Test.createTestingModule({
+        imports: [WorkflowModule.forRoot(defaultOptions({ persistence: persistenceWithActiveInstances }))],
+      }).compile();
+      await expect(mod.init()).rejects.toThrow(/unregistered commands \[gone\]/);
+    });
+
+    it('lets module init succeed with a warning when onUnresolvable is "warn"', async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const mod = await Test.createTestingModule({
+        imports: [
+          WorkflowModule.forRoot(
+            defaultOptions({ persistence: persistenceWithActiveInstances, onUnresolvable: "warn" }),
+          ),
+        ],
+      }).compile();
+      await expect(mod.init()).resolves.toBeDefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/unregistered commands \[gone\]/));
+      warn.mockRestore();
+      await mod.close();
+    });
+  });
 });
