@@ -47,6 +47,7 @@ import { assertNonNegativeSafeInteger, assertPositiveSafeInteger } from "../util
 import { TimeoutRetryPolicy } from "./timeout-retry-policy.js";
 import { DefinitionResolver } from "./definition-resolver.js";
 import { countActiveInstances, findUnresolvableVersions } from "./definition-executability.js";
+import { buildStateEnterEvent } from "./state-enter-event.js";
 
 const DEFAULT_MAX_ON_ENTER_DEPTH = 10;
 
@@ -91,38 +92,6 @@ function extractErrorMessage(
   // `ok` here is defensive: the executor stops at the first failure, so a
   // "failure" outcome always ends on a failed result.
   return lastResult.ok ? undefined : (lastResult.message ?? lastResult.code ?? "Command failed");
-}
-
-/**
- * Builds the post-commit observer payload for a state entry. Context and
- * metadata are cloned and frozen so an observer cannot reach back into the live
- * instance. `triggerMetadata` is frozen in place, so callers must pass an object
- * they own — a fresh literal or a clone, never the caller's input directly.
- */
-function buildStateEnterEvent(
-  instance: WorkflowInstance,
-  params: {
-    fromState: string | null;
-    toState: string;
-    transitionUuid: string;
-    triggerEvent: string | null;
-    triggerMetadata: Record<string, unknown>;
-    occurredAt: Date;
-  },
-): StateEnterEvent {
-  return {
-    workflowName: instance.workflowName,
-    instanceUuid: instance.uuid,
-    state: params.toState,
-    fromState: params.fromState,
-    toState: params.toState,
-    transitionUuid: params.transitionUuid,
-    triggerEvent: params.triggerEvent,
-    context: deepFreeze(structuredClone(instance.context)),
-    metadata: deepFreeze(structuredClone(instance.metadata)),
-    triggerMetadata: deepFreeze(params.triggerMetadata),
-    occurredAt: params.occurredAt,
-  };
 }
 
 export interface WorkflowRuntimeOptions {

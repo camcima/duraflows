@@ -4,7 +4,7 @@ import type { WorkflowDefinitionStore } from "../types/persistence.js";
 import type { WorkflowDefinitionRegistry } from "../registry/definition-registry.js";
 import type { CompiledWorkflow, WorkflowCompiler } from "../compilation/workflow-compiler.js";
 import { WorkflowValidator } from "../validation/workflow-validator.js";
-import { IncompatibleDefinitionError, WorkflowDefinitionError } from "../errors/index.js";
+import { IncompatibleDefinitionError, WorkflowDefinitionError, WorkflowError } from "../errors/index.js";
 import { deepFreeze } from "../util/deep-freeze.js";
 
 export interface ResolvedDefinition {
@@ -72,7 +72,33 @@ export class DefinitionResolver {
     if (instance.definitionVersion === latestVersion) {
       return latest;
     }
-    return this.snapshot(this.definitionStore, instance);
+    return this.snapshot(
+      this.definitionStore,
+      instance.workflowName,
+      instance.definitionVersion,
+      `instance ${instance.uuid} is pinned to version ${instance.definitionVersion}, which is not in the definition store`,
+    );
+  }
+
+  /**
+   * The definition for a specific stored version: the registered definition
+   * when `version` is the in-code version, otherwise the stored snapshot
+   * (validated, frozen, compiled and cached like a pinned instance's).
+   */
+  async forVersion(workflowName: string, version: number): Promise<ResolvedDefinition> {
+    const latest = this.latest(workflowName);
+    if (version === (latest.definition.version ?? 1)) {
+      return latest;
+    }
+    if (!this.definitionStore) {
+      throw new WorkflowError(`Loading version ${version} of workflow "${workflowName}" requires a definition store`);
+    }
+    return this.snapshot(
+      this.definitionStore,
+      workflowName,
+      version,
+      `version ${version} is not in the definition store`,
+    );
   }
 
   private latest(workflowName: string): ResolvedDefinition {
@@ -80,19 +106,19 @@ export class DefinitionResolver {
     return { definition, compiled: this.compiler.compile(definition) };
   }
 
-  private async snapshot(store: WorkflowDefinitionStore, instance: WorkflowInstance): Promise<ResolvedDefinition> {
-    const { workflowName } = instance;
-    const version = instance.definitionVersion as number;
+  private async snapshot(
+    store: WorkflowDefinitionStore,
+    workflowName: string,
+    version: number,
+    missingMessage: string,
+  ): Promise<ResolvedDefinition> {
     const key = `${workflowName}@${version}`;
     const cached = this.snapshots.get(key);
     if (cached) return cached;
 
     const stored = await store.findByNameAndVersion(workflowName, version);
     if (!stored) {
-      throw new WorkflowDefinitionError(
-        workflowName,
-        `instance ${instance.uuid} is pinned to version ${version}, which is not in the definition store`,
-      );
+      throw new WorkflowDefinitionError(workflowName, missingMessage);
     }
     const definition = deepFreeze(structuredClone(stored.definitionJson));
     // Structure only: whether its commands and guards are registered is the

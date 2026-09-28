@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { DefinitionResolver } from "../../src/runtime/definition-resolver.js";
 import { InMemoryDefinitionRegistry } from "../../src/registry/definition-registry.js";
 import { WorkflowCompiler } from "../../src/compilation/workflow-compiler.js";
-import { IncompatibleDefinitionError, WorkflowDefinitionError } from "../../src/errors/index.js";
+import { IncompatibleDefinitionError, WorkflowDefinitionError, WorkflowError } from "../../src/errors/index.js";
 import { computeDefinitionHash } from "../../src/util/definition-hash.js";
 import { InMemoryDefinitionStore } from "../helpers/in-memory-persistence.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
@@ -187,5 +187,37 @@ describe("DefinitionResolver.forInstance", () => {
         IncompatibleDefinitionError,
       );
     });
+  });
+});
+
+describe("DefinitionResolver.forVersion", () => {
+  it("returns the registered definition for the in-code version without reading the store", async () => {
+    const { resolver, definitionRegistry, definitionStore } = await setup(v2);
+    const find = vi.spyOn(definitionStore!, "findByNameAndVersion");
+    const resolved = await resolver.forVersion("order", 2);
+    expect(resolved.definition).toBe(definitionRegistry.get("order"));
+    expect(find).not.toHaveBeenCalled();
+  });
+
+  it("loads another version from its snapshot and shares the cache with forInstance", async () => {
+    const { resolver, definitionStore } = await setup(v2, { snapshots: [v1] });
+    const find = vi.spyOn(definitionStore!, "findByNameAndVersion");
+    const byVersion = await resolver.forVersion("order", 1);
+    const byInstance = await resolver.forInstance(instanceOf());
+    expect(Object.hasOwn(byVersion.definition.states, "review")).toBe(true);
+    expect(byInstance).toBe(byVersion);
+    expect(find).toHaveBeenCalledOnce();
+  });
+
+  it("throws WorkflowDefinitionError when the version is not in the store", async () => {
+    const { resolver } = await setup(v2);
+    await expect(resolver.forVersion("order", 7)).rejects.toThrow(
+      'Workflow "order": version 7 is not in the definition store',
+    );
+  });
+
+  it("throws WorkflowError for a version other than the in-code one without a store", async () => {
+    const { resolver } = await setup(v2, { withStore: false });
+    await expect(resolver.forVersion("order", 1)).rejects.toBeInstanceOf(WorkflowError);
   });
 });
