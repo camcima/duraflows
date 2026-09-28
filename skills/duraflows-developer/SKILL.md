@@ -76,36 +76,59 @@ const versions = await runtime.listDefinitionVersions("order");
 
 `runtime.migrateInstances(input)` (and `WorkflowService.migrateInstances(input)` in NestJS -- no HTTP endpoint) moves chosen instances from one stored version to another. `versionPolicy: "latest"` already gets a fix to every in-flight instance on its very next transition; reach for `migrateInstances` when that's not enough -- the change renames/removes a state (`"latest"` throws `IncompatibleDefinitionError` for an instance sitting in one instead), needs to reshape context, only some instances should move, or an old version can't retire because its instances won't finish on their own and draining isn't an option. It is **pure relabeling**: no commands, guards or `onEnter` run.
 
-**(v7.2.0) Three behavior changes reach every caller**, even one that passes none of the new inputs below: a `transformContext` returning something other than a plain object now fails that instance with `transformContext must return a plain object`; a `findInstanceUuids` page that isn't strictly ascending past the cursor, or that contains a non-string entry, now interrupts the call (`MigrationInterruptedError`, below) instead of being trusted, and an over-long page is truncated to the requested size; and a `findInstanceUuids` rejection now arrives wrapped as `MigrationInterruptedError`, `cause` set to the original error -- so an `instanceof <YourStoreError>` check must test `error.cause`, not `error`.
+**(v7.2.0) Three behavior changes reach every caller**, even one that passes none of the new inputs below: a `transformContext` returning an object whose prototype isn't a plain object prototype (a `Date`, `Map`, class instance), or one whose `toJSON` turns it into a non-object, now fails that instance with `transformContext must return a plain object` (non-objects and arrays already did in 7.1; plain objects from another realm, such as Jest's vm contexts, are accepted); a `findInstanceUuids` page that isn't strictly ascending past the cursor, or that contains an entry that is not a non-empty string, now interrupts the call (`MigrationInterruptedError`, below) instead of being trusted, and an over-long page is truncated to the requested size; and a `findInstanceUuids` rejection now arrives wrapped as `MigrationInterruptedError`, `cause` set to the original error -- so an `instanceof <YourStoreError>` check must test `error.cause`, not `error`. `MigrateInstancesResult` also gains two required fields, `nextCursor` and `warnings` -- hand-built results, mocks and exact `toEqual` assertions need both.
 
 ```ts
-const preview = await runtime.migrateInstances({
+import { MigrationInterruptedError, type MigrateInstancesResult } from "@duraflows/core";
+
+const input = {
   workflowName: "order",
   fromVersion: 3,
   toVersion: 4,
   stateMapping: { awaiting_review: "awaiting_approval" }, // renamed/removed states only
-  dryRun: true, // always try this first
-});
+  excludeStates: ["completed", "cancelled"], // leave finished instances alone
+};
 
-// Migrate in batches; the cursor means no instance is ever examined twice.
+// Always dry-run first, with the same filter as the real run.
+const preview = await runtime.migrateInstances({ ...input, dryRun: true });
+console.log(preview.migrated.length, preview.skipped, preview.failed, preview.warnings);
+
+const skipped: MigrateInstancesResult["skipped"] = [];
+const failed: MigrateInstancesResult["failed"] = [];
 let cursor: string | undefined;
-do {
-  const batch = await runtime.migrateInstances({
-    workflowName: "order",
-    fromVersion: 3,
-    toVersion: 4,
-    stateMapping: { awaiting_review: "awaiting_approval" },
-    excludeStates: ["completed", "cancelled"], // leave finished instances alone
-    limit: 500,
-    cursor,
-  });
+let interruptions = 0;
+for (;;) {
+  let batch: MigrateInstancesResult;
+  try {
+    batch = await runtime.migrateInstances({ ...input, limit: 500, cursor });
+    interruptions = 0;
+  } catch (error) {
+    // Listing candidates failed: keep the partial result, resume where it stopped.
+    if (!(error instanceof MigrationInterruptedError) || ++interruptions > 3) throw error;
+    batch = error.result;
+  }
+  skipped.push(...batch.skipped);
+  failed.push(...batch.failed);
+  if (interruptions === 0 && batch.nextCursor === null) break; // every candidate examined
   cursor = batch.nextCursor ?? undefined;
-} while (cursor);
+}
+
+// The cursor never re-examines a failure: retry those once by UUID.
+if (failed.length > 0) {
+  const retry = await runtime.migrateInstances({ ...input, instanceUuids: failed.map((f) => f.uuid) });
+  skipped.push(...retry.skipped);
+  failed.splice(0, failed.length, ...retry.failed);
+}
+console.warn("left on v3:", skipped, failed);
+
+// Confirm the version drained.
+const v3 = (await runtime.listDefinitionVersions("order")).find((v) => v.version === 3);
+console.log(`v3 active instances: ${v3?.activeInstances ?? 0}`);
 ```
 
-With a `cursor`, the loop is complete: `nextCursor` becomes the next call's `cursor`, so every candidate is examined exactly once and a skip/failure never makes the loop stop early. Without a `cursor` -- the 7.1 caveat, now scoped to cursor-less calls -- a call migrating nothing doesn't mean `fromVersion` has drained: check that call's `skipped`/`failed` and `runtime.listDefinitionVersions(name)`, since a skip/failure stays on `fromVersion` and is re-examined, from the lowest UUID, by every later call, so enough of them can starve migratable instances sitting further along in UUID order. Fix likely skips first (the dry run lists them), or drop `limit` -- one call without it pages through everything internally and never revisits an instance, at the cost of holding the whole result (every migrated/skipped/failed entry) in memory for that call's whole run. Also: a worker still running code whose in-code registered `version` is `fromVersion` keeps handing the migration fresh candidates via `createInstance()`, so upgrade every worker to `toVersion` before expecting the count to reach zero.
+With a `cursor`, `nextCursor` becomes the next call's `cursor`, so every candidate is examined exactly once and a skip/failure never makes the loop stop early -- but a skipped or failed instance is never re-examined either, hence collecting both and retrying `failed` (a lock conflict, or a database outage that failed instances just before the listing itself threw) by UUID afterwards; `skipped` needs a fix first, typically a `stateMapping` entry. One pass also can't see an instance created on `fromVersion` behind the cursor, or one moving into the filter after the cursor passed it -- hence the `listDefinitionVersions` check; run the loop again if anything remains. Without a `cursor` -- the 7.1 caveat, now scoped to cursor-less calls -- a call migrating nothing doesn't mean `fromVersion` has drained: check that call's `skipped`/`failed` and `runtime.listDefinitionVersions(name)`, since a skip/failure stays on `fromVersion` and is re-examined, from the lowest UUID, by every later call, so enough of them can starve migratable instances sitting further along in UUID order. Fix likely skips first (the dry run lists them), or drop `limit` -- one call without it pages through everything internally and never revisits an instance, at the cost of holding the whole result (every migrated/skipped/failed entry) in memory for that call's whole run. Also: a worker still running code whose in-code registered `version` is `fromVersion` keeps handing the migration fresh candidates via `createInstance()`, so upgrade every worker to `toVersion` before expecting the count to reach zero.
 
-Per instance: `states`/`excludeStates`, if given, are checked against the current state and a non-matching instance is skipped (`state <s> is excluded by the state filter`); `stateMapping` (or a same-named state in `toVersion`) picks the target state; `transformContext(context, instance)`, if given, must be pure and return a plain object -- a `Date`, `Map`, array or class instance fails the instance instead -- and its result is stored as its JSON round trip (a `Date` comes back a string); `expiresAt` is recomputed from `lastTransitionAt` (elapsed time preserved, not reset); `timeoutRetry` is cleared; `lastTransitionAt` itself is unchanged (migration is not a transition); a `$migrated` history row is written (`triggerMetadata: { source: "migration", fromVersion, toVersion }`) and observers fire with `triggerEvent: "$migrated"` after commit, even when the state name didn't change.
+Per instance: `states`/`excludeStates`, if given, are checked against the current state and a non-matching instance is skipped (`state <s> is excluded by the state filter`); `stateMapping` (or a same-named state in `toVersion`) picks the target state; `transformContext(context, instance)`, if given, must be pure and return a plain object (prototype `null` or any realm's `Object.prototype`) -- a `Date`, `Map`, array or class instance, or an object whose `toJSON` returns a non-object, fails the instance instead -- and its result is stored as its JSON round trip (a `Date` comes back a string); `expiresAt` is recomputed from `lastTransitionAt` (elapsed time preserved, not reset); `timeoutRetry` is cleared; `lastTransitionAt` itself is unchanged (migration is not a transition); a `$migrated` history row is written (`triggerMetadata: { source: "migration", fromVersion, toVersion }`) and observers fire with `triggerEvent: "$migrated"` after commit, even when the state name didn't change.
 
 **Observers see migrations too.** `$migrated` fires through the same post-commit path as any other transition, so an observer with side effects should ignore it:
 
@@ -122,7 +145,7 @@ Candidates are every instance stamped with `fromVersion`, finished ones included
 
 `limit` caps candidates _examined_ per call (skipped/failed count too, not just migrated). Passing `cursor` (the previous result's `nextCursor`) means a candidate already examined -- migrated, skipped, or failed -- is never examined again, since paging continues strictly after it. Without `cursor`, paging always restarts from the lowest UUID: a migrated instance has left `fromVersion` for good and won't reappear, but a skipped or failed one stays on it and is re-examined by every later call. Without `instanceUuids`, candidates come from the optional `WorkflowInstanceStore.findInstanceUuids`, called with `states`/`excludeStates` as hints (honoring them is optional -- `migrateInstances` re-checks the filter itself either way) and paged 100 at a time, truncated to the requested size even if the store returns more -- an adapter without `findInstanceUuids` requires `instanceUuids` to be passed explicitly. `result.nextCursor` is the last UUID examined (`null` once every candidate has been examined, or when `instanceUuids` was given); `result.warnings` lists non-fatal problems, such as `toVersion` referencing commands/guards this process hasn't registered.
 
-**`MigrationInterruptedError`** (v7.2.0) is thrown instead of returning when _listing_ candidates itself fails -- `findInstanceUuids` rejected, or returned a page that isn't strictly ascending past the cursor or that contains a non-UUID entry. It's never thrown for a per-instance problem (those land in `failed`). `error.result` is the partial result, with `nextCursor` set to the last UUID examined (or the input `cursor`, or `null`, if none was); `error.cause` is the original error, so test `error.cause instanceof <YourStoreError>`, not `error instanceof`. Resume with `{ ...input, cursor: error.result.nextCursor ?? undefined }`.
+**`MigrationInterruptedError`** (v7.2.0) is thrown instead of returning when _listing_ candidates itself fails -- `findInstanceUuids` rejected, or returned a page that isn't strictly ascending past the cursor or that contains an entry that is not a non-empty string. It's never thrown for a per-instance problem (those land in `failed`). `error.result` is the partial result, with `nextCursor` set to the last UUID examined (or the input `cursor`, or `null`, if none was); `error.cause` is the original error, so test `error.cause instanceof <YourStoreError>`, not `error instanceof`. Resume with `{ ...input, cursor: error.result.nextCursor ?? undefined }`, keeping `error.result`'s `skipped`/`failed` (never re-examined) and capping consecutive retries -- the loop above does both.
 
 **Rescue cases.** Migration reads only the instance's current state and the target version, never the old version's snapshot, so it rescues instances a pinned read can't reach: a missing/invalid stored snapshot for `fromVersion`, an `IncompatibleDefinitionError` under `versionPolicy: "latest"`, and parked instances (their `timeoutRetry` is cleared). It syncs definitions but **skips the startup executability check** -- a failing check is often exactly what a migration is fixing.
 
@@ -702,7 +725,7 @@ All extend `WorkflowError` which extends `Error`.
 - (v7.0.0) Assuming `versionPolicy: "latest"` is per-instance — it's the **latest registered definition's** policy that governs every instance of that workflow. Flipping it doesn't require a version bump (it's excluded from the content hash), but it changes behavior for every in-flight instance at once
 - (v7.0.0) Naming a workflow event starting with `"$"` — reserved for system events; validation rejects the definition
 - (v7.1.0) Expecting `migrateInstances` to run `onEnter`, commands or guards, or to re-check the startup executability check — it does neither; it is pure relabeling and awaits only the definition sync half of `initialize()`
-- (v7.1.0) Writing an impure `transformContext` — it must be pure. **(v7.2.0)** Returning something other than a plain object from it now fails that instance loudly (`transformContext must return a plain object`) instead of silently mangling it through `JSON.parse(JSON.stringify(...))`; a plain object's contents still round-trip through JSON, so a `Date` _inside_ it still comes back as its JSON form, not itself
+- (v7.1.0) Writing an impure `transformContext` — it must be pure. **(v7.2.0)** Returning an object whose prototype isn't a plain object prototype (a `Date`, `Map`, class instance) from it now fails that instance loudly (`transformContext must return a plain object`) instead of silently mangling it through `JSON.parse(JSON.stringify(...))` -- arrays and non-objects already failed in 7.1, and cross-realm plain objects (Jest) are fine; a plain object's contents still round-trip through JSON, so a `Date` _inside_ it still comes back as its JSON form, not itself
 - (v7.2.0) Passing `cursor` together with `instanceUuids` — they're mutually exclusive (`InvalidArgumentError("cursor cannot be combined with instanceUuids")`); paging by cursor only makes sense against `findInstanceUuids`
 - (v7.2.0) Catching `MigrationInterruptedError` and checking `error instanceof <YourStoreError>` — that's always `false`; the store's error is wrapped as `error.cause`, so check `error.cause instanceof <YourStoreError>` instead
 

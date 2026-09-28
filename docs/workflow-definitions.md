@@ -166,10 +166,12 @@ for adjusting context.
 **(v7.2.0) Three behavior changes reach every caller**, even a call that
 passes none of the new inputs below:
 
-1. `transformContext` returning something other than a plain object -- a
-   `Date`, a `Map`, an array, a class instance -- now fails that one instance
-   with `transformContext must return a plain object` instead of storing
-   whatever came back.
+1. `transformContext` returning an object whose prototype isn't a plain
+   object prototype -- a `Date`, a `Map`, a class instance -- or one whose
+   `toJSON` turns it into a non-object now fails that one instance with
+   `transformContext must return a plain object` instead of storing whatever
+   came back (non-objects and arrays were already rejected in 7.1). Plain
+   objects from another realm, such as Jest's vm contexts, are accepted.
 2. A `findInstanceUuids` page that isn't strictly ascending past the cursor,
    or that contains an entry that isn't a non-empty UUID string, now
    interrupts the whole call (`MigrationInterruptedError`, below) instead of
@@ -180,47 +182,80 @@ passes none of the new inputs below:
    `cause`, instead of escaping unwrapped -- an `instanceof <YourStoreError>`
    check must test `error.cause`, not `error` itself.
 
-Dry run first, then migrate in batches with a cursor:
+`MigrateInstancesResult` also gains two required fields, `nextCursor` and
+`warnings`: hand-built results, mocks and exact `toEqual` assertions on a
+result need both.
+
+Dry run first, then migrate in batches with a cursor, collecting what didn't
+migrate:
 
 ```ts
-// See what would happen first.
-const preview = await runtime.migrateInstances({
+import { MigrationInterruptedError, type MigrateInstancesResult } from "@duraflows/core";
+
+const input = {
   workflowName: "order",
   fromVersion: 3,
   toVersion: 4,
   stateMapping: { awaiting_review: "awaiting_approval" },
-  dryRun: true,
-});
-console.log(preview.migrated.length, preview.skipped, preview.failed);
+  excludeStates: ["completed", "cancelled"], // leave finished instances alone
+};
 
-// Migrate in batches; the cursor means no instance is ever examined twice.
+// See what would happen first -- with the same filter as the real run.
+const preview = await runtime.migrateInstances({ ...input, dryRun: true });
+console.log(preview.migrated.length, preview.skipped, preview.failed, preview.warnings);
+
+const skipped: MigrateInstancesResult["skipped"] = [];
+const failed: MigrateInstancesResult["failed"] = [];
 let cursor: string | undefined;
-do {
-  const batch = await runtime.migrateInstances({
-    workflowName: "order",
-    fromVersion: 3,
-    toVersion: 4,
-    stateMapping: { awaiting_review: "awaiting_approval" },
-    excludeStates: ["completed", "cancelled"], // leave finished instances alone
-    limit: 500,
-    cursor,
-  });
+let interruptions = 0;
+for (;;) {
+  let batch: MigrateInstancesResult;
+  try {
+    batch = await runtime.migrateInstances({ ...input, limit: 500, cursor });
+    interruptions = 0;
+  } catch (error) {
+    // Listing candidates failed: keep the partial result, resume where it stopped.
+    if (!(error instanceof MigrationInterruptedError) || ++interruptions > 3) throw error;
+    batch = error.result;
+  }
+  skipped.push(...batch.skipped);
+  failed.push(...batch.failed);
+  if (interruptions === 0 && batch.nextCursor === null) break; // every candidate examined
   cursor = batch.nextCursor ?? undefined;
-} while (cursor);
+}
+
+// The cursor never re-examines a failure: retry those once by UUID.
+if (failed.length > 0) {
+  const retry = await runtime.migrateInstances({ ...input, instanceUuids: failed.map((f) => f.uuid) });
+  skipped.push(...retry.skipped);
+  failed.splice(0, failed.length, ...retry.failed);
+}
+console.warn("left on v3:", skipped, failed);
+
+// Confirm the version drained (see below for what one pass can't see).
+const v3 = (await runtime.listDefinitionVersions("order")).find((v) => v.version === 3);
+console.log(`v3 active instances: ${v3?.activeInstances ?? 0}`);
 ```
 
-With a `cursor`, the loop is complete: `nextCursor` from one call becomes the
-next call's `cursor`, so every candidate is examined exactly once across the
-whole loop, and a skip or failure never makes the loop stop early. Without a
-`cursor`, this is the 7.1 caveat, now scoped to cursor-less calls: each call
-starts over from the lowest UUID, so a call migrating nothing doesn't mean
-`fromVersion` has drained -- check that call's `skipped` and `failed`, since
-an instance that can't be placed stays on `fromVersion` and is examined
-again by every later call, letting enough of them starve migratable
-instances waiting further along. Confirm with
-`runtime.listDefinitionVersions(name)`. If you expect many skips, fix them
-first -- the dry run lists them -- or drop `limit` entirely: one call
-without it pages through every candidate internally and never revisits one.
+With a `cursor`, `nextCursor` from one call becomes the next call's
+`cursor`, so every candidate is examined exactly once across the whole loop
+and a skip or failure never makes it stop early. The flip side: a skipped or
+failed instance is never re-examined either -- hence collecting both, and
+retrying `failed` (an optimistic-lock conflict, or a database outage that
+failed instances just before the listing itself threw) once by UUID after
+the loop. `skipped` needs a fix first --
+typically a `stateMapping` entry. One pass also can't see an instance
+created on `fromVersion` behind the cursor, or one that moves into the
+filter after the cursor passed it; confirm with
+`runtime.listDefinitionVersions(name)` and run the loop again if anything
+remains. Without a `cursor`, this is the 7.1 caveat, now scoped to
+cursor-less calls: each call starts over from the lowest UUID, so a call
+migrating nothing doesn't mean `fromVersion` has drained -- an instance that
+can't be placed stays on `fromVersion` and is examined again by every later
+call, letting enough of them starve migratable instances waiting further
+along. If you expect many skips, fix them first -- the dry run lists them --
+or drop `limit` entirely: one call without it pages through every candidate
+internally and never revisits one.
 
 For each candidate instance:
 
@@ -232,7 +267,9 @@ For each candidate instance:
   and stays on `fromVersion`, untouched;
 - `transformContext`, when given, is called with a deep clone of the context
   and a frozen clone of the instance; it must be pure and return a plain
-  object -- a `Date`, `Map`, array or class instance fails the instance with
+  object (its prototype `null` or any realm's `Object.prototype`) -- a
+  `Date`, `Map`, array or class instance, or an object whose `toJSON` turns it
+  into a non-object, fails the instance with
   `transformContext must return a plain object` _(v7.2.0)_ -- and the result
   is stored as its JSON round trip (a `Date` inside the object, for example,
   comes back as a string, not a `Date`);
@@ -345,20 +382,10 @@ last UUID examined, or the input `cursor` (`null` without one) if none was
 examined yet. `error.cause` is the original error -- a store rejection, or
 the `WorkflowError` the migrator itself threw over a bad page -- so an
 `instanceof <YourStoreError>` check must test `error.cause`, not `error`.
-Resume from where it stopped:
-
-```ts
-try {
-  await runtime.migrateInstances(input);
-} catch (error) {
-  if (error instanceof MigrationInterruptedError) {
-    console.warn(error.message, error.result.migrated.length);
-    await runtime.migrateInstances({ ...input, cursor: error.result.nextCursor ?? undefined });
-  } else {
-    throw error;
-  }
-}
-```
+To resume, keep `error.result`'s `skipped` and `failed` -- a resumed call
+won't examine them again -- and call again with
+`cursor: error.result.nextCursor ?? undefined`, capping consecutive retries;
+the batch loop above does exactly that.
 
 A workflow's `fromVersion` won't drain, batched or not, while any worker's
 in-code registered `version` is still `fromVersion`: `createInstance()`
