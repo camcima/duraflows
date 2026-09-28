@@ -7,7 +7,7 @@ description: "Guides implementation of custom duraflows persistence adapters for
 
 How to implement custom persistence adapters for duraflows. The core runtime is fully decoupled from any database library -- you implement three required interfaces (plus an optional fourth for definition versioning) and plug them in.
 
-> **v1.0.0 — verify with the conformance suite.** `@duraflows/core/testing` ships `runInstanceStoreConformance(factory)`, the canonical test suite for `WorkflowInstanceStore` implementations. It exercises locking, optimistic concurrency, expiration ordering, the metadata-write-once contract, and nested transactions. Reference adapters: `@duraflows/pg` and `@duraflows/kysely` (v0.4.0+) — both pass it in CI. See [Testing Your Adapter](#testing-your-adapter).
+> **v1.0.0 — verify with the conformance suite.** `@duraflows/core/testing` ships `runInstanceStoreConformance(label, harness)`, the canonical test suite for `WorkflowInstanceStore` implementations. It exercises create/read round-trips, optimistic concurrency, expiration filtering and ordering, the metadata-write-once contract, timeout-retry and definition-version round-trips, `countInstances` and the optional `findInstanceUuids`; `runTransactionRunnerConformance` covers the runner's `afterCommit` delivery and savepoint isolation. Neither exercises row locking or `SKIP LOCKED` -- test those yourself. Reference adapters: `@duraflows/pg` and `@duraflows/kysely` (v0.4.0+) — both pass it in CI. See [Testing Your Adapter](#testing-your-adapter).
 >
 > **Definition versioning — `WorkflowDefinitionStore` is part of the contract.** Every `WorkflowDefinition` carries an explicit `version` (defaulting to `1`), and `WorkflowRuntime.initialize()` snapshots each registered definition into a `WorkflowDefinitionStore` so it can fail fast when a version's content drifts from what was previously registered. Implement `WorkflowDefinitionStore` and add `definition_version` columns to `workflow_instances` and `workflow_history` so instances and history rows record the definition version that governed them. It's optional on `WorkflowPersistenceProvider` — an adapter that omits it still compiles and runs, it just leaves definition versioning inert. `@duraflows/core/testing` ships `runDefinitionStoreConformance(label, harness)` to verify your implementation; both reference adapters pass it in CI. **(v7.0.0) Resolution is no longer unconditional: instances are pinned to the version they were stamped with by default (see below).** See [WorkflowDefinitionStore](#4-workflowdefinitionstore-optional) and [Testing Your Adapter](#testing-your-adapter).
 >
@@ -84,7 +84,7 @@ interface WorkflowDefinitionStore {
 }
 ```
 
-Optional on `WorkflowPersistenceProvider` -- an adapter that omits it still compiles and the runtime still runs, it just leaves definition versioning (the version-bump guard, the `workflow_definitions` snapshot table) inert. Implement it so your adapter supports the feature: `ensure()` backs `WorkflowRuntime.initialize()`'s per-definition sync, and it must never overwrite an existing `(workflow_name, version)` row.
+Optional on `WorkflowPersistenceProvider` -- an adapter that omits it still compiles and the runtime still runs, it just leaves definition versioning (the version-bump guard, the `workflow_definitions` snapshot table) inert. Implement it so your adapter supports the feature: `ensure()` backs `WorkflowRuntime.initialize()`'s per-definition sync and (v7.2.0) runs inside every instance-stamping transaction, so it must be cheap, use the active transaction's connection, and never overwrite an existing `(workflow_name, version)` row.
 
 ---
 
@@ -319,38 +319,64 @@ Back it with the same `workflow_instances_definition_version_idx` recommended fo
 
 **Requirements:**
 
-- If already inside a transaction, **reuse** it (don't start a new one)
+- If already inside a transaction, run the callback in a **savepoint** on that same connection (don't start a new transaction): release it on success; on error, roll back to it and re-throw. A failed nested call then leaves no partial writes and the outer transaction stays usable. (Reusing the connection without a savepoint still conforms, but gives nested calls no failure isolation -- a caught failure's writes would commit with the outer transaction.)
 - On success: commit
 - On error: rollback and re-throw
+- **Reject a COMMIT that PostgreSQL rolled back.** After a statement fails and its error is caught, PostgreSQL answers `COMMIT` with `ROLLBACK` and no error. Check the command tag, or (if your driver discards it, as Kysely does) probe `SELECT 1` just before `COMMIT` -- it fails in an aborted transaction -- and throw `WorkflowError`, so the caller never sees a success and no observers fire.
 - The callback may call store methods that need the transaction context
 
-**Pattern (using AsyncLocalStorage):**
+**Pattern (using AsyncLocalStorage; shown with the `pg` driver -- adapt the client calls to yours):**
 
 ```ts
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { Pool, PoolClient } from "pg";
+import { WorkflowError, type WorkflowTransactionRunner } from "@duraflows/core";
 
-const storage = new AsyncLocalStorage<TransactionClient>();
+const storage = new AsyncLocalStorage<{ client: PoolClient; savepoints: number }>();
 
 class MyTransactionRunner implements WorkflowTransactionRunner {
+  constructor(private readonly pool: Pool) {}
+
   async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
-    // Reuse existing transaction if nested
-    const existing = storage.getStore();
-    if (existing) {
-      return callback();
+    // Nested: isolate the callback in a savepoint on the active connection
+    const active = storage.getStore();
+    if (active) {
+      const savepoint = `my_sp_${++active.savepoints}`;
+      await active.client.query(`SAVEPOINT ${savepoint}`);
+      try {
+        const result = await callback();
+        await active.client.query(`RELEASE SAVEPOINT ${savepoint}`);
+        return result;
+      } catch (error) {
+        await active.client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        throw error;
+      }
     }
 
-    // Start new transaction
-    const client = await this.getClient();
+    // Start new transaction on a dedicated connection
+    const client = await this.pool.connect();
+    let brokenConnection: Error | undefined;
     try {
-      await client.beginTransaction();
-      const result = await storage.run(client, callback);
-      await client.commit();
+      await client.query("BEGIN");
+      const result = await storage.run({ client, savepoints: 0 }, callback);
+      const commit = await client.query("COMMIT");
+      // A swallowed statement error turns COMMIT into a silent ROLLBACK
+      if (commit.command === "ROLLBACK") {
+        throw new WorkflowError(
+          "COMMIT was rolled back by PostgreSQL because an earlier statement in the transaction failed",
+        );
+      }
       return result;
     } catch (error) {
-      await client.rollback();
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        // Never mask the original error; destroy the connection instead of pooling it
+        brokenConnection = rollbackError instanceof Error ? rollbackError : new Error(String(rollbackError));
+      }
       throw error;
     } finally {
-      client.release();
+      client.release(brokenConnection);
     }
   }
 }
@@ -360,15 +386,17 @@ class MyTransactionRunner implements WorkflowTransactionRunner {
 
 ```ts
 class MyInstanceStore implements WorkflowInstanceStore {
-  private getClient(): TransactionClient | PoolClient {
-    return storage.getStore() ?? this.pool; // use transaction client if available
+  private getClient(): PoolClient | Pool {
+    return storage.getStore()?.client ?? this.pool; // use transaction client if available
   }
 }
 ```
 
+The reference implementations live in the adapters' source (internal helpers, not exported): `packages/duraflows-pg/src/pg-transaction-context.ts` (command-tag check) and `packages/duraflows-kysely/src/kysely-transaction-context.ts` (`SELECT 1` probe). Verify yours with `runTransactionRunnerConformance` (see [Testing Your Adapter](#testing-your-adapter)).
+
 ### ensure -- Insert-If-Absent, Never Overwrite
 
-Backs `WorkflowRuntime.initialize()`'s definition sync. The runtime relies on `ensure()` being a true insert-if-absent: it calls `ensure()` for every registered definition on every startup, then compares the returned row's `contentHash` against the freshly-computed one to detect drift. If `ensure()` ever overwrote an existing row with the caller's new content instead of returning what was already stored, the drift check would always pass and the version-bump guard would be silently defeated.
+Backs `WorkflowRuntime.initialize()`'s definition sync, and **(v7.2.0)** also runs inside every transaction that stamps an instance with a definition version -- `createInstance()`, a legacy or `"latest"`-policy instance adopting the latest version, and each instance `migrateInstances()` moves -- so the snapshot commits or rolls back with the instance row. It must therefore be cheap (a no-op insert plus a primary-key read once the row exists) and, like the instance and history stores, use the active transaction's connection when there is one. The runtime relies on `ensure()` being a true insert-if-absent: it calls `ensure()` for every registered definition on every startup, then compares the returned row's `contentHash` against the freshly-computed one to detect drift. If `ensure()` ever overwrote an existing row with the caller's new content instead of returning what was already stored, the drift check would always pass and the version-bump guard would be silently defeated.
 
 **Requirements:**
 
@@ -755,8 +783,10 @@ WorkflowModule.forRootAsync({
 - [ ] **(v6.0.0)** `findExpired()` excludes parked rows and rows whose `timeout_retry_at` is still in the future, adds the redundant `coalesce(timeout_retry_at, expires_at) < now` condition, and orders by `coalesce(timeout_retry_at, expires_at)`
 - [ ] **(v6.0.0)** `findParkedTimeouts({ limit, workflowName? })` returns only parked rows (optionally filtered by `workflow_name`), ordered by `timeout_parked_at, uuid`, at most `limit`, without requiring a transaction
 - [ ] **(v6.0.0)** The four `timeout_*` columns exist; `create()`/`update()` persist `timeoutRetry` (`null` ⇔ `timeout_attempts = 0` and the other three `NULL`); a `NULL` `timeout_last_error` with attempts > 0 reads as `lastError: ""`
-- [ ] `runInTransaction()` supports nesting (reuses existing transaction)
+- [ ] `runInTransaction()` supports nesting: a nested call runs in a savepoint on the active connection (released on success, rolled back to on error)
 - [ ] `runInTransaction()` rolls back on error
+- [ ] `runInTransaction()` rejects with `WorkflowError` when PostgreSQL answers `COMMIT` with `ROLLBACK` (check the command tag, or probe `SELECT 1` before `COMMIT`)
+- [ ] If your runner implements the optional `afterCommit`: `runTransactionRunnerConformance` from `@duraflows/core/testing` passes against it (the suite requires `afterCommit`)
 - [ ] `append()` returns a generated UUID string
 - [ ] `findByInstanceUuid()` supports `limit`/`offset` pagination, returns newest-first (`created_at DESC, uuid DESC` -- see the ordering contract above)
 - [ ] All Date fields are stored and retrieved as `Date` objects
@@ -787,7 +817,7 @@ WorkflowModule.forRootAsync({
 
 ### v1.0.0 — Use the Conformance Suite
 
-The shipped `runInstanceStoreConformance(factory)` from `@duraflows/core/testing` is the canonical contract test. Run it against your adapter and you can rely on the runtime working with it. `@duraflows/pg` and `@duraflows/kysely` both run this in CI.
+The shipped `runInstanceStoreConformance(label, harness)` from `@duraflows/core/testing` is the canonical contract test. Run it against your adapter and you can rely on the runtime working with it. `@duraflows/pg` and `@duraflows/kysely` both run this in CI.
 
 ```ts
 import { describe } from "vitest";
@@ -796,7 +826,7 @@ import { MyInstanceStore } from "../src/my-instance-store.js";
 import { MyTransactionRunner } from "../src/my-transaction-runner.js";
 
 describe("MyInstanceStore (conformance)", () => {
-  runInstanceStoreConformance({
+  runInstanceStoreConformance("my-adapter", {
     setup: async () => {
       // Construct your store + transaction runner against a real database
       // (or an in-memory mock that supports transactions, e.g., pglite for postgres-shaped APIs).
@@ -814,7 +844,11 @@ describe("MyInstanceStore (conformance)", () => {
 });
 ```
 
-The suite verifies the persistence contract end-to-end: row-level locking, transaction-required behavior, optimistic concurrency on `version`, the `metadata` write-once contract, expiration ordering + limit + `SKIP LOCKED`, the `timeoutRetry` round-trip, retry/parked filtering and due-time ordering in `findExpired`, `findParkedTimeouts` filtering and ordering, **(v7.0.0)** `countInstances` filtering by workflow, definition version and excluded states (including that an empty `excludeStates` counts everything), **(v7.1.0)** `findInstanceUuids` paging by workflow and definition version honoring `afterUuid`/`limit` -- skipped (`ctx.skip()`) when your adapter doesn't implement the optional method -- and nested-transaction reuse.
+The suite verifies the persistence contract: `create`/`findByUuid` round-trips (and `null` for an unknown UUID), `update` persisting the mutable fields, optimistic concurrency on `version`, the `metadata` write-once contract, `findExpired` returning past-due instances within `limit`, the `timeoutRetry` round-trip, retry/parked filtering and due-time ordering in `findExpired`, `findParkedTimeouts` filtering and ordering, the `definitionVersion` round-trip, **(v7.0.0)** `countInstances` filtering by workflow, definition version and excluded states (including that an empty `excludeStates` counts everything), **(v7.1.0)** `findInstanceUuids` paging by workflow and definition version honoring `afterUuid`/`limit`, and **(v7.2.0)** its `states`/`excludeStates` hints (tolerant: exact filtering and ignoring the hints both pass) -- both `findInstanceUuids` cases are skipped (`ctx.skip()`) when your adapter doesn't implement the optional method. It does **not** exercise row locking, `SKIP LOCKED` or nested transactions: cover locking in your own integration tests, and the runner with the suite below.
+
+### Transaction Runner — Use the Runner Conformance Suite
+
+`runTransactionRunnerConformance(label, harness)` (also from `@duraflows/core/testing`) verifies a runner that implements `afterCommit`: callbacks run after the outermost commit, in order, are dropped on rollback, and a throwing one doesn't stop the rest; a failed nested call rolls back only its own writes and callbacks (savepoints); the outer transaction stays usable after a caught nested database error (supply `failWithDatabaseError`, e.g. running `SELECT 1/0`, or that case is skipped); `afterCommit` outside a transaction throws `WorkflowError`; and a transaction started from a callback is a fresh outermost one. Its harness is `{ setup() }`, where `setup()` resolves to `{ runner, store, failWithDatabaseError?, teardown }` for each test.
 
 ### Definition Versioning — Use the Definition-Store Conformance Suite
 

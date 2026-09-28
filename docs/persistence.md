@@ -161,13 +161,13 @@ interface WorkflowDefinitionStore {
 }
 ```
 
-| Method                                        | Tx required? | Description                                                                                                                                                                                                                                                |
-| --------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ensure(record)`                              | Not required | Insert-if-absent and return the stored row -- **never overwrites** an existing row. Must be atomic under concurrent callers. Both bundled adapters implement this as `INSERT ... ON CONFLICT (workflow_name, version) DO NOTHING` followed by a re-select. |
-| `findByNameAndVersion(workflowName, version)` | Not required | Fetch a snapshot. Returns `null` if that `(workflowName, version)` pair has never been synced.                                                                                                                                                             |
-| `listVersions(workflowName)`                  | Not required | All stored snapshots of `workflowName`, ordered by `version` ascending; an empty array when there are none. Backs the [startup executability check](./core-runtime.md#startup-executability-check) and `runtime.listDefinitionVersions()`.                 |
+| Method                                        | Tx required? | Description                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ensure(record)`                              | Not required | Insert-if-absent and return the stored row -- **never overwrites** an existing row. Must be atomic under concurrent callers. Both bundled adapters implement this as `INSERT ... ON CONFLICT (workflow_name, version) DO NOTHING` followed by a re-select. Called inside instance-stamping transactions too (see below), so it must use the active transaction's connection when there is one. |
+| `findByNameAndVersion(workflowName, version)` | Not required | Fetch a snapshot. Returns `null` if that `(workflowName, version)` pair has never been synced.                                                                                                                                                                                                                                                                                                 |
+| `listVersions(workflowName)`                  | Not required | All stored snapshots of `workflowName`, ordered by `version` ascending; an empty array when there are none. Backs the [startup executability check](./core-runtime.md#startup-executability-check) and `runtime.listDefinitionVersions()`.                                                                                                                                                     |
 
-`ensure()` is what `WorkflowRuntime.initialize()` calls for every registered definition, and its "insert-if-absent, never overwrite" contract is what makes the version-bump guard meaningful: once a `(workflowName, version)` pair is stored, its snapshot is fixed forever, so a later registration with the same version but different content is detected as drift rather than silently accepted.
+`ensure()` is what `WorkflowRuntime.initialize()` calls for every registered definition. _(v7.2.0)_ It also runs inside every transaction that stamps an instance with a definition version -- `createInstance()`, a legacy or `"latest"`-policy instance adopting the latest version in `triggerEvent()` or the timeout sweep, and each instance `migrateInstances()` moves -- so the snapshot commits or rolls back with the instance row. Keep it cheap (a no-op insert plus a primary-key read once the row exists) and, like the instance and history stores, run it on the active transaction's connection. Its "insert-if-absent, never overwrite" contract is what makes the version-bump guard meaningful: once a `(workflowName, version)` pair is stored, its snapshot is fixed forever, so a later registration with the same version but different content is detected as drift rather than silently accepted.
 
 ### WorkflowPersistenceProvider
 
@@ -368,6 +368,7 @@ To use a different database library, implement the three required interfaces and
 ```ts
 import { PrismaClient } from "@prisma/client";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { WorkflowError } from "@duraflows/core";
 import type {
   WorkflowInstanceStore,
   WorkflowHistoryStore,
@@ -384,13 +385,53 @@ import type {
 type PrismaTx = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
 const txStorage = new AsyncLocalStorage<PrismaTx>();
 
-// Transaction runner
+// Transaction runner (a sketch -- no afterCommit, so observers fire when the
+// runtime's own runInTransaction call returns; see WorkflowTransactionRunner above).
+// Savepoint counter per active interactive transaction.
+const savepointCounters = new WeakMap<PrismaTx, number>();
+
 class PrismaTransactionRunner implements WorkflowTransactionRunner {
   constructor(private readonly prisma: PrismaClient) {}
 
   async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
+    // Nested: Prisma's interactive transactions can't nest (the tx client has no
+    // $transaction, and this.prisma.$transaction would open an unrelated second
+    // transaction on another connection), so run the callback in a savepoint on
+    // the active transaction instead.
+    const active = txStorage.getStore();
+    if (active) {
+      const n = (savepointCounters.get(active) ?? 0) + 1;
+      savepointCounters.set(active, n);
+      const savepoint = `duraflows_sp_${n}`; // internally generated, never user input
+      await active.$executeRawUnsafe(`SAVEPOINT ${savepoint}`);
+      try {
+        const result = await callback();
+        await active.$executeRawUnsafe(`RELEASE SAVEPOINT ${savepoint}`);
+        return result;
+      } catch (error) {
+        // Undoes the failed call's writes and leaves the outer transaction usable.
+        await active.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        throw error;
+      }
+    }
+
+    // Outermost: Prisma commits when this callback resolves and rolls back when it
+    // throws. Tune $transaction's `timeout` (default 5 s) for long onEnter chains.
     return this.prisma.$transaction(async (tx) => {
-      return txStorage.run(tx, callback);
+      const result = await txStorage.run(tx, callback);
+      // A statement that failed and whose error was caught aborts the PostgreSQL
+      // transaction, and its COMMIT then silently rolls back. Prisma doesn't expose
+      // COMMIT's command tag, so probe first: in an aborted transaction this fails,
+      // and throwing here makes Prisma roll back and the call reject.
+      try {
+        await tx.$queryRawUnsafe("SELECT 1");
+      } catch (error) {
+        throw new WorkflowError(
+          "COMMIT was rolled back by PostgreSQL because an earlier statement in the transaction failed",
+          error,
+        );
+      }
+      return result;
     });
   }
 }
@@ -586,13 +627,22 @@ class PrismaWorkflowHistoryStore implements WorkflowHistoryStore {
 // omit it from the returned provider below and the adapter still compiles and runs).
 class PrismaWorkflowDefinitionStore implements WorkflowDefinitionStore {
   constructor(private readonly prisma: PrismaClient) {}
-  // ... implement ensure() as insert-if-absent (e.g. Prisma's `createMany` with
-  // `skipDuplicates`, or `$queryRaw` with `ON CONFLICT DO NOTHING`) followed by a
-  // re-select -- it must never overwrite an existing (workflowName, version) row --
-  // and findByNameAndVersion() as a plain lookup returning null when absent.
+
+  // ensure() also runs inside instance-stamping transactions (createInstance,
+  // adopting the latest version, each migrated instance), so every method uses
+  // the active transaction's client, like the instance store.
+  private get client(): PrismaClient | PrismaTx {
+    return txStorage.getStore() ?? this.prisma;
+  }
+
+  // ... implement ensure() as a cheap insert-if-absent on this.client (e.g.
+  // Prisma's `createMany` with `skipDuplicates`, or `$queryRaw` with `ON CONFLICT
+  // DO NOTHING`) followed by a re-select -- it must never overwrite an existing
+  // (workflowName, version) row -- and findByNameAndVersion() as a plain lookup
+  // returning null when absent.
 
   async listVersions(workflowName: string): Promise<StoredWorkflowDefinition[]> {
-    const rows = await this.prisma.workflowDefinition.findMany({
+    const rows = await this.client.workflowDefinition.findMany({
       where: { workflowName },
       orderBy: { version: "asc" },
     });

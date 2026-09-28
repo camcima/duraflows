@@ -19,6 +19,7 @@ Use this checklist when reviewing code that touches duraflows workflows, command
 
 ### Events
 
+- [ ] **`events` is a Record keyed by event name, and command/guard refs are objects.** `events: { SubmitOrder: { targetState: "processing" } }`, not an array of `{ name, ... }`; `commands: [{ name: "chargePayment" }]` and `guard: { name: "isVip" }`, not bare strings. The array/string forms don't type-check against `WorkflowDefinition`, and forced through as plain JS the array's events end up named `"0"`, `"1"`, ... (so the intended event names throw `InvalidEventError`) and string command refs have no `name` to resolve. Flag these first -- nothing else about the definition works until they're fixed.
 - [ ] **Every event with mandatory commands that can fail has `errorState`** — OR the command is marked `bestEffort: true`. Without either, a `{ ok: false }` from a mandatory command throws `CommandFailureError` and the transaction rolls back. Verify the choice is intentional.
 - [ ] **`targetState` is defined for state-changing events.** v1.0.0 made `targetState` optional to support command-only events (side effects without state change) and failure-only events. If an event has only `commands` (no `targetState`/`errorState`), confirm the side-effect-only intent.
 - [ ] **`targetState === errorState` is allowed (v2.0.0).** When both branches point at the same state — typically the current state for poll/tick/retry shapes — `WorkflowCompiler` collapses them into a single transition at compile time. Don't flag this as a duplicate-route mistake. Verify the intent ("stay here regardless of outcome, just record what happened") matches the event's `commands`.
@@ -44,6 +45,14 @@ Use this checklist when reviewing code that touches duraflows workflows, command
 - [ ] **(v7.0.0) `versionPolicy` is a deliberate choice, not an accident.** Default `"pinned"` means in-flight instances keep executing the version they were created under; `"latest"` means every instance jumps to whatever is currently registered, and an instance whose state that definition lacks fails with `IncompatibleDefinitionError`. Flag `versionPolicy: "latest"` on a workflow whose states get renamed or removed across versions — that's exactly the case it fails loudly for.
 - [ ] **(v7.0.0) A command or guard removed in the same PR that bumps `version`.** If any instance could still be pinned to the old version, the old command/guard must stay registered until `runtime.listDefinitionVersions(name)` shows `activeInstances === 0` for it — otherwise the startup executability check fails boot (or silently warns, if `onUnresolvable: "warn"`). Flag a diff that deletes a command/guard in the same change that bumps `version`.
 - [ ] **(v7.0.0) No new event name starts with `"$"`.** Reserved for system events; the validator rejects the definition.
+
+### Instance Migration (v7.1.0 / v7.2.0)
+
+- [ ] **Observers with side effects ignore `$migrated`.** `migrateInstances()` fires observers after commit with `triggerEvent: "$migrated"`, even when the state name didn't change. An observer that emails customers or publishes integration events must `return` early on it.
+- [ ] **A dry run comes first.** `migrateInstances({ ...input, dryRun: true })` with the same input reports `migrated`/`skipped`/`failed`/`warnings` without writing anything. Flag a migration script that goes straight to the real run.
+- [ ] **Finished instances are excluded.** Candidates are every instance on `fromVersion`, terminal ones included. Without `excludeStates` (e.g. `["completed", "cancelled"]`) or `instanceUuids`, completed instances get relabeled, a `$migrated` history row and observer events too.
+- [ ] **Batches use the cursor and keep failures.** A `limit`ed loop must pass `result.nextCursor` back as `cursor` until it is `null`, collect `skipped` and `failed` from every batch, and retry `failed` by `instanceUuids` after the loop -- a cursor never re-examines them. A loop without `cursor` restarts from the lowest UUID each call and can starve behind unmigratable instances. Confirm the drain with `listDefinitionVersions()`.
+- [ ] **`MigrationInterruptedError` is resumed, and its `cause` is checked.** When listing candidates fails, the error carries the partial `result` (resume from `error.result.nextCursor`, keeping its `skipped`/`failed`) and the original error as `cause`. Flag `error instanceof MyStoreError` checks on it -- they must test `error.cause` -- and unbounded retry loops.
 
 ### onEnter Chains
 
@@ -114,7 +123,7 @@ Use this checklist when reviewing code that touches duraflows workflows, command
 
 ### Database
 
-- [ ] **Migration is applied.** `workflow_instances`, `workflow_history`, and (v5.0.0) `workflow_definitions` tables must exist; `workflow_instances`/`workflow_history` need a `definition_version` column (v5.0.0). Migration `006_definition_version_index.sql` (v7.0.0) is recommended, not required.
+- [ ] **Migration is applied.** `workflow_instances`, `workflow_history`, and (v5.0.0) `workflow_definitions` tables must exist; `workflow_instances`/`workflow_history` need a `definition_version` column (v5.0.0), and `workflow_instances` needs the four `timeout_*` columns (`timeout_attempts`, `timeout_retry_at`, `timeout_last_error`, `timeout_parked_at`) from migration `005_timeout_retries.sql` (v6.0.0, required). Migration `006_definition_version_index.sql` (v7.0.0) is recommended, not required.
 - [ ] **Indexes exist.** `expires_at` partial index is critical for timeout performance. `workflow_name` index for lookups. `workflow_instance_uuid, created_at DESC` for history queries.
 - [ ] **(v7.0.0) A custom persistence adapter implements `countInstances()` (required on every `WorkflowInstanceStore`) and, if it has a `WorkflowDefinitionStore`, `listVersions()`.** Missing either fails to typecheck against current `@duraflows/core` types.
 

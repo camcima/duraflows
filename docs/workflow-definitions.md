@@ -60,6 +60,13 @@ The content hash deliberately excludes `version` (and `versionPolicy` --
 see below) itself, so relabeling a version, or flipping its policy, without
 changing anything else never trips the guard.
 
+_(v7.2.0)_ A definition that has an own `"__proto__"` key anywhere -- a state,
+event or context key, typically from `JSON.parse` -- hashes differently from
+7.1, which silently dropped that content from the hash. On upgrade,
+`initialize()` reports that such a definition's content changed without a
+version bump, so bump its `version` when upgrading. Ordinary definitions hash
+exactly as before.
+
 Instances record the definition version that governs them
 (`WorkflowInstance.definitionVersion`), and every history row records the
 version that governed that transition.
@@ -72,6 +79,11 @@ renaming a state, changing an event's target, removing a command -- an
 instance already in flight keeps running the version it started on, loaded
 from the stored snapshot in `workflow_definitions`. New instances always
 start on the latest registered version.
+
+Each operation on an instance pinned to an older version does one
+`definitionStore.findByNameAndVersion()` read: the stored row is re-read on
+every resolution, and the validated, compiled copy is reused only while its
+content hash still matches.
 
 Instances created before versioning existed (`definitionVersion: null`) are
 the one exception: they resolve the latest registered definition and are
@@ -173,7 +185,7 @@ passes none of the new inputs below:
    came back (non-objects and arrays were already rejected in 7.1). Plain
    objects from another realm, such as Jest's vm contexts, are accepted.
 2. A `findInstanceUuids` page that isn't strictly ascending past the cursor,
-   or that contains an entry that isn't a non-empty UUID string, now
+   or that contains an entry that isn't a non-empty string, now
    interrupts the whole call (`MigrationInterruptedError`, below) instead of
    continuing on bad data; a page longer than the requested size is silently
    truncated to it.
@@ -256,6 +268,16 @@ call, letting enough of them starve migratable instances waiting further
 along. If you expect many skips, fix them first -- the dry run lists them --
 or drop `limit` entirely: one call without it pages through every candidate
 internally and never revisits one.
+
+**A stale target copy (v7.2.0).** Each migrated instance also writes
+`toVersion`'s snapshot in its own transaction. If the stored row differs from
+the copy the call loaded -- a cached copy of a row whose transaction rolled
+back before different content was committed under that version -- the
+instance fails with `stored version <v> differs from the copy loaded earlier
+(...); retry to use the stored version`, and the cached copy is dropped. The
+target is loaded once per call, so every later candidate in that same call
+fails with the same message; the next call -- or the loop's post-loop retry
+of `failed` by UUID -- re-reads and uses the stored version.
 
 For each candidate instance:
 
@@ -371,7 +393,7 @@ process hasn't registered; migration still runs, since it never calls them.
 **`MigrationInterruptedError` (v7.2.0).** Thrown instead of returning when
 _listing_ candidates itself fails -- the store's `findInstanceUuids`
 rejected, or returned a page that isn't strictly ascending past the cursor
-or that isn't made only of non-empty UUID strings (see
+or that isn't made only of non-empty strings (see
 [`migrateInstances()`](./core-runtime.md#migrateinstances) for exact page
 requirements). It is never thrown for a per-instance problem -- a throwing
 `transformContext`, an optimistic-lock conflict, a database error migrating
@@ -501,7 +523,7 @@ interface WorkflowStateDefinition {
 | `onEnter`  | `WorkflowOnEnterDefinition`               | No       | Auto-fire behavior when this state is entered                |
 | `metadata` | `Record<string, unknown>`                 | No       | Arbitrary state metadata                                     |
 
-A state with no `events` is a **terminal state** -- the workflow cannot progress further from it.
+A state with no `events` (or an empty `events` map) is a **terminal state**, whether or not it has an `onEnter`: no event can move an instance resting there. An `onEnter` runs only on entry, inside the transition that entered the state -- so a no-events state whose `onEnter` has a `targetState` is passed through, not rested in -- and an instance resting in a terminal state never executes its definition again. This is the rule `listDefinitionVersions` and the [startup executability check](./core-runtime.md#startup-executability-check) use to count active instances. `toMermaidDiagram` draws end-node edges by a different rule: it also excludes states whose `onEnter` has a `targetState`, since the diagram shows where a flow ends rather than where an instance can rest.
 
 When a workflow enters a state, the `context` values defined on that state are **merged** into the instance's context (existing keys are preserved, matching keys are overwritten). This is useful for setting state-derived values like status flags.
 

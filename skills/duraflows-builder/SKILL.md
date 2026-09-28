@@ -166,7 +166,7 @@ duraflows doesn't have a native "if/else" transition from a single command resul
 ```ts
 scanning: {
   onEnter: {
-    commands: ["aiScan"],
+    commands: [{ name: "aiScan" }],
     targetState: "approved",     // scan clean -> auto-approve
     errorState: "pending_review", // scan flagged -> human review
   },
@@ -198,10 +198,10 @@ try {
 
 ```ts
 pending_review: {
-  events: [
-    { name: "approve", targetState: "approved" },
-    { name: "reject", targetState: "rejected", commands: ["notifyAuthor"] },
-  ],
+  events: {
+    Approve: { targetState: "approved" },
+    Reject: { targetState: "rejected", commands: [{ name: "notifyAuthor" }] },
+  },
 },
 ```
 

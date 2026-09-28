@@ -65,7 +65,7 @@ await KyselyTransactionContext.transaction(db, async (trx) => {
 
 Each duraflows call inside runs in its own savepoint. If one fails, its writes are rolled back, and your transaction can carry on if you catch the error. Calling `transaction()` inside one that is already active joins it as a savepoint instead of opening a second transaction, so composed service methods stay atomic.
 
-"Never after a rollback" has one caveat: if a statement failed and you swallowed its error, PostgreSQL silently turns kysely's `COMMIT` into a rollback, and kysely can't see that. Observers then fire for writes that were never persisted. Don't swallow SQL errors inside a transaction: let them propagate, or run the statement in a nested `KyselyTransactionContext.transaction()` and catch its rejection, which rolls back only that savepoint.
+If a statement failed and you swallowed its error, PostgreSQL would silently turn `COMMIT` into a rollback, and kysely discards `COMMIT`'s command tag. So before committing, `transaction()` (and the transaction runner) probes the transaction with `SELECT 1`; in an aborted transaction the probe fails, the transaction rolls back, and the call rejects with a `WorkflowError` ("COMMIT was rolled back by PostgreSQL because an earlier statement in the transaction failed", the probe's error as `cause`) and fires no observers. To recover from a failing statement instead, run it in a nested `KyselyTransactionContext.transaction()` and catch its rejection, which rolls back only that savepoint.
 
 The runner's `lockTimeoutMs` / `statementTimeoutMs` don't apply inside `transaction()` or a seeded `run()`: you own those transaction settings, and nested duraflows calls run under them.
 

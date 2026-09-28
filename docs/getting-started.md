@@ -58,22 +58,27 @@ This choice also determines whether `workflow_history` rows written in the same 
 
 ---
 
-Both options create two tables:
+Both options create three tables:
 
 **`workflow_instances`** -- stores the current state of each workflow instance:
 
-| Column               | Type          | Description                                                     |
-| -------------------- | ------------- | --------------------------------------------------------------- |
-| `uuid`               | `uuid` (PK)   | Supplied by the application (no DB-side default)                |
-| `workflow_name`      | `text`        | References the registered workflow definition                   |
-| `current_state`      | `text`        | Current state name                                              |
-| `version`            | `integer`     | Incremented on each transition                                  |
-| `expires_at`         | `timestamptz` | Active timeout deadline (null if none)                          |
-| `last_transition_at` | `timestamptz` | When the last transition occurred                               |
-| `context_json`       | `jsonb`       | Mutable workflow context (working memory, writable by commands) |
-| `metadata_json`      | `jsonb`       | Immutable identity labels set at creation                       |
-| `created_at`         | `timestamptz` | Instance creation time                                          |
-| `updated_at`         | `timestamptz` | Last modification time                                          |
+| Column               | Type          | Description                                                                                           |
+| -------------------- | ------------- | ----------------------------------------------------------------------------------------------------- |
+| `uuid`               | `uuid` (PK)   | Supplied by the application (no DB-side default)                                                      |
+| `workflow_name`      | `text`        | References the registered workflow definition                                                         |
+| `current_state`      | `text`        | Current state name                                                                                    |
+| `version`            | `integer`     | Incremented on each transition                                                                        |
+| `definition_version` | `integer`     | The definition version that governs this instance (null on rows created before definition versioning) |
+| `expires_at`         | `timestamptz` | Active timeout deadline (null if none)                                                                |
+| `last_transition_at` | `timestamptz` | When the last transition occurred                                                                     |
+| `context_json`       | `jsonb`       | Mutable workflow context (working memory, writable by commands)                                       |
+| `metadata_json`      | `jsonb`       | Immutable identity labels set at creation                                                             |
+| `created_at`         | `timestamptz` | Instance creation time                                                                                |
+| `updated_at`         | `timestamptz` | Last modification time                                                                                |
+| `timeout_attempts`   | `integer`     | Consecutive failed timeout attempts (`0` when the timeout has not failed)                             |
+| `timeout_retry_at`   | `timestamptz` | When the timeout sweep may retry a failed timeout (null if none scheduled)                            |
+| `timeout_last_error` | `text`        | Message of the most recent timeout failure                                                            |
+| `timeout_parked_at`  | `timestamptz` | When the instance was parked after too many timeout failures (null if not parked)                     |
 
 **`workflow_history`** -- immutable audit log of every transition:
 
@@ -84,18 +89,33 @@ Both options create two tables:
 | `from_state`             | `text`        | State before the transition                                                                    |
 | `event_name`             | `text`        | Event that was triggered                                                                       |
 | `to_state`               | `text`        | State after the transition                                                                     |
-| `outcome`                | `text`        | `"success"` or `"failure"`                                                                     |
+| `outcome`                | `text`        | `"success"`, `"failure"` or `"guard-rejected"`                                                 |
 | `error_message`          | `text`        | Error description (if failure)                                                                 |
+| `rejected_by`            | `text`        | Name of the guard that rejected the event (guard-rejected rows only)                           |
 | `command_results_json`   | `jsonb`       | Ordered results from commands                                                                  |
 | `trigger_metadata_json`  | `jsonb`       | Optional metadata about who/what triggered the transition                                      |
+| `definition_version`     | `integer`     | The definition version that governed this transition                                           |
 | `created_at`             | `timestamptz` | When this history entry was created                                                            |
+
+**`workflow_definitions`** -- one immutable snapshot per `(workflow_name, version)`, written by `WorkflowRuntime.initialize()` and (since 7.2.0) inside every transaction that stamps an instance with a definition version; see [Definition versions](./workflow-definitions.md#definition-versions):
+
+| Column            | Type           | Description                                 |
+| ----------------- | -------------- | ------------------------------------------- |
+| `workflow_name`   | `text` (PK)    | Workflow name (primary key with `version`)  |
+| `version`         | `integer` (PK) | Definition version                          |
+| `content_hash`    | `text`         | Content hash used by the version-bump check |
+| `definition_json` | `jsonb`        | The definition snapshot                     |
+| `registered_at`   | `timestamptz`  | When this version was first stored          |
 
 ### 2. Indexes
 
-The migration creates three indexes:
+The migration creates six indexes:
 
 - `workflow_instances_workflow_name_idx` -- lookup by workflow name
 - `workflow_instances_expires_at_idx` -- partial index for timeout processing (only non-null `expires_at`)
+- `workflow_instances_timeout_due_idx` -- partial index on `coalesce(timeout_retry_at, expires_at)` for the timeout sweep (skips parked instances)
+- `workflow_instances_timeout_parked_idx` -- partial index for listing parked instances
+- `workflow_instances_definition_version_idx` -- `(workflow_name, definition_version)`, for counting and migrating instances by definition version
 - `workflow_history_instance_created_idx` -- history lookup ordered by `created_at DESC`
 
 ## Your First Workflow
