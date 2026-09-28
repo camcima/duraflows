@@ -45,6 +45,9 @@ const stubInstanceStore: WorkflowInstanceStore = {
   async findParkedTimeouts(): Promise<WorkflowInstance[]> {
     return [];
   },
+  async countInstances(): Promise<number> {
+    return 0;
+  },
 };
 
 const stubHistoryStore: WorkflowHistoryStore = {

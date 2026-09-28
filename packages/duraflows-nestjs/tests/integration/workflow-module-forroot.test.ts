@@ -54,6 +54,9 @@ const stubInstanceStore: WorkflowInstanceStore = {
   async findParkedTimeouts(): Promise<WorkflowInstance[]> {
     return [];
   },
+  async countInstances(): Promise<number> {
+    return 0;
+  },
 };
 
 const stubHistoryStore: WorkflowHistoryStore = {
@@ -467,6 +470,7 @@ describe("WorkflowModule.forRoot()", () => {
         };
       },
       findByNameAndVersion: async () => null,
+      listVersions: async () => [],
     };
     const mod = await Test.createTestingModule({
       imports: [
@@ -497,6 +501,7 @@ describe("WorkflowModule.forRoot()", () => {
         registeredAt: new Date(),
       }),
       findByNameAndVersion: async () => null,
+      listVersions: async () => [],
     };
     const mod = await Test.createTestingModule({
       imports: [

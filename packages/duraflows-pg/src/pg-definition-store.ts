@@ -41,7 +41,18 @@ export class PgWorkflowDefinitionStore implements WorkflowDefinitionStore {
       version,
     ]);
     const row = result.rows[0] as Record<string, unknown> | undefined;
-    if (!row) return null;
+    return row ? this.mapRow(row) : null;
+  }
+
+  async listVersions(workflowName: string): Promise<StoredWorkflowDefinition[]> {
+    const client = this.getClient();
+    const result = await client.query("SELECT * FROM workflow_definitions WHERE workflow_name = $1 ORDER BY version", [
+      workflowName,
+    ]);
+    return result.rows.map((row: Record<string, unknown>) => this.mapRow(row));
+  }
+
+  private mapRow(row: Record<string, unknown>): StoredWorkflowDefinition {
     return {
       workflowName: row.workflow_name as string,
       version: row.version as number,

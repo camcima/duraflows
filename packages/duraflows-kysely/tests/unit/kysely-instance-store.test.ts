@@ -39,7 +39,10 @@ const sampleRow = {
 
 const fakeEb = Object.assign((ref: string, op: string, value: unknown) => ({ ref, op, value }), {
   or: (expressions: unknown[]) => ({ or: expressions }),
-  fn: { coalesce: (...refs: string[]) => ({ coalesce: refs }) },
+  fn: {
+    coalesce: (...refs: string[]) => ({ coalesce: refs }),
+    countAll: () => ({ as: (alias: string) => ({ countAll: alias }) }),
+  },
 });
 
 // Creates a mock Kysely db that tracks method calls on the builder chain
@@ -57,6 +60,7 @@ function createMockDb(queryResult: Record<string, unknown>[] = []) {
       "returning",
       "selectFrom",
       "selectAll",
+      "select",
       "where",
       "forUpdate",
       "skipLocked",
@@ -421,6 +425,35 @@ describe("KyselyWorkflowInstanceStore", () => {
         retryAt: now,
         parkedAt: null,
       });
+    });
+  });
+
+  describe("countInstances()", () => {
+    it("filters by workflow, version and excluded states", async () => {
+      const { db, calls } = createMockDb([{ count: "4" }]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      const count = await store.countInstances({
+        workflowName: "order",
+        definitionVersion: 2,
+        excludeStates: ["done"],
+      });
+
+      expect(calls).toContainEqual({ method: "select", args: [{ countAll: "count" }] });
+      expect(calls).toContainEqual({ method: "where", args: ["workflow_name", "=", "order"] });
+      expect(calls).toContainEqual({ method: "where", args: ["definition_version", "=", 2] });
+      expect(calls).toContainEqual({ method: "where", args: ["current_state", "not in", ["done"]] });
+      expect(count).toBe(4);
+    });
+
+    it("omits the state filter when nothing is excluded, and reads a missing row as 0", async () => {
+      const { db, calls } = createMockDb([]);
+      const store = new KyselyWorkflowInstanceStore(db);
+
+      const count = await store.countInstances({ workflowName: "order", definitionVersion: 2, excludeStates: [] });
+
+      expect(calls.some((c) => c.method === "where" && c.args[0] === "current_state")).toBe(false);
+      expect(count).toBe(0);
     });
   });
 });

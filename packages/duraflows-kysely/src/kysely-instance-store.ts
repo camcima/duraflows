@@ -130,6 +130,24 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
     return rows.map((row) => this.mapRow(row));
   }
 
+  async countInstances(options: {
+    workflowName: string;
+    definitionVersion: number;
+    excludeStates: readonly string[];
+  }): Promise<number> {
+    let query = this.getExecutor()
+      .selectFrom("workflow_instances")
+      .select((eb) => eb.fn.countAll<number | string | bigint>().as("count"))
+      .where("workflow_name", "=", options.workflowName)
+      .where("definition_version", "=", options.definitionVersion);
+    // Kysely rejects `not in ()`; an empty list excludes nothing anyway.
+    if (options.excludeStates.length > 0) {
+      query = query.where("current_state", "not in", [...options.excludeStates]);
+    }
+    const row = await query.executeTakeFirst();
+    return Number(row?.count ?? 0);
+  }
+
   private mapRow(row: Selectable<WorkflowInstancesTable>): WorkflowInstance {
     return {
       uuid: row.uuid,

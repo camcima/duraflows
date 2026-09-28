@@ -52,6 +52,16 @@ export class KyselyWorkflowDefinitionStore implements WorkflowDefinitionStore {
     return this.mapRow(row);
   }
 
+  async listVersions(workflowName: string): Promise<StoredWorkflowDefinition[]> {
+    const rows = await this.getExecutor()
+      .selectFrom("workflow_definitions")
+      .selectAll()
+      .where("workflow_name", "=", workflowName)
+      .orderBy("version")
+      .execute();
+    return rows.map((row) => this.mapRow(row));
+  }
+
   private mapRow(row: Selectable<WorkflowDefinitionsTable>): StoredWorkflowDefinition {
     return {
       workflowName: row.workflow_name,

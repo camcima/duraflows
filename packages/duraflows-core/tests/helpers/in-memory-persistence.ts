@@ -100,6 +100,24 @@ export class InMemoryInstanceStore implements WorkflowInstanceStore, Snapshotabl
       .map((instance) => structuredClone(instance));
   }
 
+  async countInstances(options: {
+    workflowName: string;
+    definitionVersion: number;
+    excludeStates: readonly string[];
+  }): Promise<number> {
+    let count = 0;
+    for (const instance of this.instances.values()) {
+      if (
+        instance.workflowName === options.workflowName &&
+        instance.definitionVersion === options.definitionVersion &&
+        !options.excludeStates.includes(instance.currentState)
+      ) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   snapshot(): unknown {
     return new Map([...this.instances.entries()].map(([uuid, instance]) => [uuid, structuredClone(instance)]));
   }
@@ -232,5 +250,12 @@ export class InMemoryDefinitionStore implements WorkflowDefinitionStore {
   async findByNameAndVersion(workflowName: string, version: number): Promise<StoredWorkflowDefinition | null> {
     const row = this.rows.get(`${workflowName}@${version}`);
     return row ? structuredClone(row) : null;
+  }
+
+  async listVersions(workflowName: string): Promise<StoredWorkflowDefinition[]> {
+    return [...this.rows.values()]
+      .filter((row) => row.workflowName === workflowName)
+      .sort((a, b) => a.version - b.version)
+      .map((row) => structuredClone(row));
   }
 }
