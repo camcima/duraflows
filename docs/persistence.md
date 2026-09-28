@@ -368,6 +368,7 @@ To use a different database library, implement the three required interfaces and
 ```ts
 import { PrismaClient } from "@prisma/client";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { WorkflowError } from "@duraflows/core";
 import type {
   WorkflowInstanceStore,
   WorkflowHistoryStore,
@@ -384,13 +385,53 @@ import type {
 type PrismaTx = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
 const txStorage = new AsyncLocalStorage<PrismaTx>();
 
-// Transaction runner
+// Transaction runner (a sketch -- no afterCommit, so observers fire when the
+// runtime's own runInTransaction call returns; see WorkflowTransactionRunner above).
+// Savepoint counter per active interactive transaction.
+const savepointCounters = new WeakMap<PrismaTx, number>();
+
 class PrismaTransactionRunner implements WorkflowTransactionRunner {
   constructor(private readonly prisma: PrismaClient) {}
 
   async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
+    // Nested: Prisma's interactive transactions can't nest (the tx client has no
+    // $transaction, and this.prisma.$transaction would open an unrelated second
+    // transaction on another connection), so run the callback in a savepoint on
+    // the active transaction instead.
+    const active = txStorage.getStore();
+    if (active) {
+      const n = (savepointCounters.get(active) ?? 0) + 1;
+      savepointCounters.set(active, n);
+      const savepoint = `duraflows_sp_${n}`; // internally generated, never user input
+      await active.$executeRawUnsafe(`SAVEPOINT ${savepoint}`);
+      try {
+        const result = await callback();
+        await active.$executeRawUnsafe(`RELEASE SAVEPOINT ${savepoint}`);
+        return result;
+      } catch (error) {
+        // Undoes the failed call's writes and leaves the outer transaction usable.
+        await active.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        throw error;
+      }
+    }
+
+    // Outermost: Prisma commits when this callback resolves and rolls back when it
+    // throws. Tune $transaction's `timeout` (default 5 s) for long onEnter chains.
     return this.prisma.$transaction(async (tx) => {
-      return txStorage.run(tx, callback);
+      const result = await txStorage.run(tx, callback);
+      // A statement that failed and whose error was caught aborts the PostgreSQL
+      // transaction, and its COMMIT then silently rolls back. Prisma doesn't expose
+      // COMMIT's command tag, so probe first: in an aborted transaction this fails,
+      // and throwing here makes Prisma roll back and the call reject.
+      try {
+        await tx.$queryRawUnsafe("SELECT 1");
+      } catch (error) {
+        throw new WorkflowError(
+          "COMMIT was rolled back by PostgreSQL because an earlier statement in the transaction failed",
+          error,
+        );
+      }
+      return result;
     });
   }
 }
