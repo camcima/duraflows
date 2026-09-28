@@ -81,6 +81,20 @@ export interface WorkflowInstanceStore {
     definitionVersion: number;
     excludeStates: readonly string[];
   }): Promise<number>;
+
+  /**
+   * Optional. UUIDs of instances of `workflowName` stamped with
+   * `definitionVersion`, ascending, strictly after `afterUuid` when given, at
+   * most `limit`. Instances with a null `definitionVersion` never match.
+   * Without it, `migrateInstances` requires explicit `instanceUuids`. A plain
+   * read: no transaction required.
+   */
+  findInstanceUuids?(options: {
+    workflowName: string;
+    definitionVersion: number;
+    limit: number;
+    afterUuid?: string;
+  }): Promise<string[]>;
 }
 
 export interface WorkflowHistoryStore {

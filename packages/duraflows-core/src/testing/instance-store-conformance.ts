@@ -347,5 +347,43 @@ export function runInstanceStoreConformance(label: string, harness: InstanceStor
         await teardown();
       }
     });
+
+    it("findInstanceUuids pages one workflow version's instances by uuid (optional)", async (ctx) => {
+      const { store, transactionRunner, teardown } = await harness.setup();
+      try {
+        if (!store.findInstanceUuids) {
+          ctx.skip();
+          return;
+        }
+        const u = (n: number) => `00000000-0000-0000-0000-0000000000${n}`;
+        const rows = [
+          makeInstance({ uuid: u(72), definitionVersion: 1 }),
+          makeInstance({ uuid: u(70), definitionVersion: 1 }),
+          makeInstance({ uuid: u(74), definitionVersion: 2 }),
+          makeInstance({ uuid: u(73), definitionVersion: 1, currentState: "closed" }),
+          makeInstance({ uuid: u(75), workflowName: "other-workflow", definitionVersion: 1 }),
+          makeInstance({ uuid: u(71), definitionVersion: 1 }),
+          makeInstance({ uuid: u(76), definitionVersion: null }),
+        ];
+        for (const row of rows) {
+          await transactionRunner.runInTransaction(() => store.create(row));
+        }
+
+        const find = (options: { definitionVersion?: number; limit?: number; afterUuid?: string }) =>
+          store.findInstanceUuids!({
+            workflowName: "test-workflow",
+            definitionVersion: options.definitionVersion ?? 1,
+            limit: options.limit ?? 10,
+            afterUuid: options.afterUuid,
+          });
+        expect(await find({})).toEqual([u(70), u(71), u(72), u(73)]);
+        expect(await find({ limit: 2 })).toEqual([u(70), u(71)]);
+        expect(await find({ afterUuid: u(71) })).toEqual([u(72), u(73)]);
+        expect(await find({ afterUuid: u(73) })).toEqual([]);
+        expect(await find({ definitionVersion: 2 })).toEqual([u(74)]);
+      } finally {
+        await teardown();
+      }
+    });
   });
 }
