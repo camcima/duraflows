@@ -1,5 +1,35 @@
 # Changelog
 
+## [7.0.0](https://github.com/camcima/duraflows/compare/v6.1.0...v7.0.0) (2026-09-28)
+
+Instances now run on the definition version they were stamped with, not on whatever is registered today. Deploying a definition that renames a state or changes an event no longer changes the rules for instances already in flight. Read [Upgrading to 7.0.0](./docs/workflow-definitions.md#upgrading-to-700) before deploying.
+
+### ⚠ BREAKING CHANGES
+
+* **core:** instances are pinned to their definition version by default. With a definition store configured, an existing instance runs the version it was stamped with, loaded from the stored snapshot; new instances start on the latest version. Because 6.x re-stamped instances on every transition, an instance that has been idle since an earlier version bump reverts to that version's rules. Set `versionPolicy: "latest"` on a definition to keep the 6.x behaviour for that workflow. Instances created before 5.0 (unstamped) still run the latest version and adopt it on their next transition.
+* **core:** custom persistence adapters must implement `WorkflowDefinitionStore.listVersions(workflowName)` and `WorkflowInstanceStore.countInstances({ workflowName, definitionVersion, excludeStates })`. The shared conformance suites cover both.
+* **core:** event names starting with `$` are rejected by definition validation. The prefix is reserved for system events.
+* **core:** with a definition store configured, `initialize()` fails when a stored version that still has active instances references an unregistered command or guard, or is structurally invalid. Set `onUnresolvable: "warn"` to log instead. NestJS runs `initialize()` during module init, so this fails application startup; other apps should call `await runtime.initialize()` at boot, or the first operation fails instead.
+
+### Features
+
+* **core:** add listVersions and countInstances to the store contract ([e7fe7c8](https://github.com/camcima/duraflows/commit/e7fe7c8108374265b72f1ec11505f73dfacd3ba6))
+* **core:** add versionPolicy, IncompatibleDefinitionError and DefinitionResolver ([cf05c04](https://github.com/camcima/duraflows/commit/cf05c049f1ed74c6128865445f342d593d3276b1))
+* **core:** check stored versions are executable at startup; add listDefinitionVersions ([196d1f3](https://github.com/camcima/duraflows/commit/196d1f33eee89005f936a9ede604962a5a36445c))
+* **core:** execute each instance on its pinned definition version ([c642ed6](https://github.com/camcima/duraflows/commit/c642ed633d74d477d44904379b6d653b0197ff75))
+* **core:** reserve the "$" prefix for event names ([ef13b0e](https://github.com/camcima/duraflows/commit/ef13b0e83ee552a32170e8e6e9a35fd88f5db01b))
+* **nestjs:** expose onUnresolvable, listDefinitionVersions and map IncompatibleDefinitionError ([9ef869f](https://github.com/camcima/duraflows/commit/9ef869f6da595c25b9e4644e8858bfdcacd51d70))
+* **pg:** add migration 006 indexing instances by definition version ([c677c37](https://github.com/camcima/duraflows/commit/c677c3759217c86e64446fb1185d1f9a83513120))
+
+### Notes
+
+* **Rollout:** deploy 7.0.0 to every worker with unchanged definitions first, and bump a definition version only once no 6.x worker is left. A 6.x worker runs every instance on the latest definition and re-stamps it. Before upgrading, check which versions your instances are stamped with (the query is in the upgrade guide).
+* **`versionPolicy: "latest"`:** an instance whose current state the latest definition lacks throws `IncompatibleDefinitionError` instead of running on a definition that cannot describe it. The NestJS exception filter maps it to 409 Conflict.
+* **Retiring old commands:** keep the commands and guards an old version uses registered until `runtime.listDefinitionVersions(name)` reports `activeInstances: 0` for it. `WorkflowService.listDefinitionVersions()` exposes the same data in NestJS.
+* **Migration 006** (`006_definition_version_index.sql`) is recommended, not required. It indexes `workflow_instances (workflow_name, definition_version)` so the startup check stays cheap on large tables. It is idempotent and can be pre-built `CONCURRENTLY`.
+* **Without a definition store**, pinning is inactive: every instance runs the latest definition, and a one-time warning is logged. The bundled pg and Kysely providers always supply a store.
+* **Deadlines:** a persisted `expiresAt` is recomputed only when a state is next entered, so changing a state's timeout in a new version doesn't move deadlines already waiting in it.
+
 ## [6.1.0](https://github.com/camcima/duraflows/compare/v6.0.0...v6.1.0) (2026-09-27)
 
 ### Features
