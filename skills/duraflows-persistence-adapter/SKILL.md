@@ -14,6 +14,8 @@ How to implement custom persistence adapters for duraflows. The core runtime is 
 > **v6.0.0 — timeout retry state is part of the instance contract (breaking).** `WorkflowInstance.timeoutRetry: WorkflowTimeoutRetry | null` is required and must round-trip through four columns (`timeout_attempts`, `timeout_retry_at`, `timeout_last_error`, `timeout_parked_at`); `findExpired` must skip parked and not-yet-due rows and order by `coalesce(timeout_retry_at, expires_at)`; and `WorkflowInstanceStore.findParkedTimeouts({ limit, workflowName? })` is a new required method. `@duraflows/pg` ships the schema change as `005_timeout_retries.sql`. See [findExpired](#findexpired----concurrent-batch-processing), [findParkedTimeouts](#findparkedtimeouts----operator-listing), [WorkflowInstance Fields](#workflowinstance-fields) and [Adding timeout retries to an existing schema](#v600--adding-timeout-retries-to-an-existing-schema).
 >
 > **v7.0.0 — definition-version pinning; two new required store methods (breaking).** Instances now execute the definition version they were stamped with by default, loaded from the store when it differs from the latest registered one (`versionPolicy: "latest"` opts a workflow back into always-latest execution). This needs `WorkflowInstanceStore.countInstances({ workflowName, definitionVersion, excludeStates })` -- a **new required method on every adapter**, not just ones with a `WorkflowDefinitionStore` -- plus `WorkflowDefinitionStore.listVersions(workflowName)` for adapters that implement the optional definition store. Both back `WorkflowRuntime.initialize()`'s startup executability check and `runtime.listDefinitionVersions()`. `@duraflows/pg` ships a recommended (not required) index as `006_definition_version_index.sql`. See [countInstances](#countinstances----active-instance-counting), [listVersions](#listversions----all-stored-snapshots), and [Adding definition-version pinning to an existing adapter](#v700--adding-definition-version-pinning-to-an-existing-adapter).
+>
+> **v7.1.0 — `findInstanceUuids`, one new _optional_ store method (non-breaking).** `runtime.migrateInstances()` relabels instances from one stored definition version to another. Without an explicit `instanceUuids` list, it needs `WorkflowInstanceStore.findInstanceUuids({ workflowName, definitionVersion, limit, afterUuid? })` to find candidates -- unlike `countInstances()`, this one is optional: an adapter that omits it still compiles and runs, migration just requires callers to pass `instanceUuids` themselves. See [findInstanceUuids](#findinstanceuuids----optional-migration-support-v710).
 
 ---
 
@@ -34,6 +36,12 @@ interface WorkflowInstanceStore {
     definitionVersion: number;
     excludeStates: readonly string[];
   }): Promise<number>; // v7.0.0
+  findInstanceUuids?(options: {
+    workflowName: string;
+    definitionVersion: number;
+    limit: number;
+    afterUuid?: string;
+  }): Promise<string[]>; // v7.1.0, optional
 }
 ```
 
@@ -248,6 +256,46 @@ await db
 ```
 
 Back it with the recommended index `workflow_instances_definition_version_idx ON workflow_instances (workflow_name, definition_version)` (`@duraflows/pg`'s migration `006`) so this stays cheap as the table grows.
+
+### findInstanceUuids -- Optional Migration Support (v7.1.0)
+
+**(v7.1.0)** Backs `runtime.migrateInstances()`'s candidate paging when a caller doesn't pass `instanceUuids` explicitly. **Optional** -- omit it and your adapter still compiles and runs; migration then requires `instanceUuids`.
+
+**Requirements:**
+
+- Filter: `workflow_name = workflowName AND definition_version = definitionVersion`, and `uuid > afterUuid` when `afterUuid` is given
+- Order **ascending** by `uuid`, capped at `limit`
+- Instances with a `null` `definition_version` never match
+- A plain read: **no transaction required**
+
+**SQL pattern (what `@duraflows/pg` uses):**
+
+```sql
+SELECT uuid FROM workflow_instances
+WHERE workflow_name = $1 AND definition_version = $2
+  AND ($3::uuid IS NULL OR uuid > $3::uuid)
+ORDER BY uuid
+LIMIT $4
+```
+
+PostgreSQL orders `uuid` the same way as comparing lowercase hex strings, so an in-memory string-comparison implementation pages identically.
+
+**Kysely equivalent** (the `afterUuid` filter is added only when given, same shape as `countInstances`'s empty-array branch):
+
+```ts
+let query = db
+  .selectFrom("workflow_instances")
+  .select("uuid")
+  .where("workflow_name", "=", workflowName)
+  .where("definition_version", "=", definitionVersion);
+if (afterUuid !== undefined) {
+  query = query.where("uuid", ">", afterUuid);
+}
+const rows = await query.orderBy("uuid").limit(limit).execute();
+return rows.map((row) => row.uuid);
+```
+
+Back it with the same `workflow_instances_definition_version_idx` recommended for `countInstances()` -- it covers this filter too.
 
 ### runInTransaction -- Nested Transaction Support
 
@@ -616,6 +664,10 @@ CREATE INDEX IF NOT EXISTS workflow_instances_definition_version_idx
   ON workflow_instances (workflow_name, definition_version);
 ```
 
+### v7.1.0 — Adding findInstanceUuids to an existing adapter
+
+No schema or type change is required -- `findInstanceUuids` is a new **optional** method on `WorkflowInstanceStore`, so an adapter that skips it still typechecks and runs against 7.1.0; `runtime.migrateInstances()` simply requires its callers to pass `instanceUuids` explicitly. Add it only to support migrating without an explicit UUID list -- see [findInstanceUuids](#findinstanceuuids----optional-migration-support-v710). It reuses the same `(workflow_name, definition_version)` index migration `006` already recommends.
+
 ---
 
 ## Wiring the Adapter
@@ -702,6 +754,8 @@ WorkflowModule.forRootAsync({
 - [ ] **(v7.0.0)** If you implement `WorkflowDefinitionStore`: `listVersions(workflowName)` returns snapshots ordered by `version` ascending, `[]` when none exist
 - [ ] **(v7.0.0)** `runInstanceStoreConformance` and (if applicable) `runDefinitionStoreConformance` still pass -- both suites now cover `countInstances`/`listVersions`
 - [ ] **(v7.0.0)** Recommended: index `(workflow_name, definition_version)` on `workflow_instances` so `countInstances()` stays cheap on large tables
+- [ ] **(v7.1.0, optional)** If implemented, `findInstanceUuids({ workflowName, definitionVersion, limit, afterUuid? })` orders ascending by `uuid`, filters `uuid > afterUuid` only when given, and never matches a `null` `definition_version`
+- [ ] **(v7.1.0)** `runInstanceStoreConformance` still passes -- its `findInstanceUuids` case exercises the method when present and calls `ctx.skip()` when it's absent
 
 ---
 
@@ -736,7 +790,7 @@ describe("MyInstanceStore (conformance)", () => {
 });
 ```
 
-The suite verifies the persistence contract end-to-end: row-level locking, transaction-required behavior, optimistic concurrency on `version`, the `metadata` write-once contract, expiration ordering + limit + `SKIP LOCKED`, the `timeoutRetry` round-trip, retry/parked filtering and due-time ordering in `findExpired`, `findParkedTimeouts` filtering and ordering, **(v7.0.0)** `countInstances` filtering by workflow, definition version and excluded states (including that an empty `excludeStates` counts everything), and nested-transaction reuse.
+The suite verifies the persistence contract end-to-end: row-level locking, transaction-required behavior, optimistic concurrency on `version`, the `metadata` write-once contract, expiration ordering + limit + `SKIP LOCKED`, the `timeoutRetry` round-trip, retry/parked filtering and due-time ordering in `findExpired`, `findParkedTimeouts` filtering and ordering, **(v7.0.0)** `countInstances` filtering by workflow, definition version and excluded states (including that an empty `excludeStates` counts everything), **(v7.1.0)** `findInstanceUuids` paging by workflow and definition version honoring `afterUuid`/`limit` -- skipped (`ctx.skip()`) when your adapter doesn't implement the optional method -- and nested-transaction reuse.
 
 ### Definition Versioning — Use the Definition-Store Conformance Suite
 

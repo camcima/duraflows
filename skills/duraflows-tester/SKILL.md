@@ -95,6 +95,26 @@ class InMemoryInstanceStore implements WorkflowInstanceStore {
         !options.excludeStates.includes(inst.currentState),
     ).length;
   }
+
+  // (v7.1.0) Optional: backs migrateInstances() when a caller omits instanceUuids.
+  // Ascending by uuid, strictly after afterUuid when given, at most limit.
+  async findInstanceUuids(options: {
+    workflowName: string;
+    definitionVersion: number;
+    limit: number;
+    afterUuid?: string;
+  }): Promise<string[]> {
+    return [...this.instances.values()]
+      .filter(
+        (inst) =>
+          inst.workflowName === options.workflowName &&
+          inst.definitionVersion === options.definitionVersion &&
+          (options.afterUuid === undefined || inst.uuid > options.afterUuid),
+      )
+      .map((inst) => inst.uuid)
+      .sort()
+      .slice(0, options.limit);
+  }
 }
 ```
 
@@ -1221,6 +1241,68 @@ Notes for this pattern:
 - Without a `definitionStore`, this doesn't apply -- every instance resolves the latest registered definition regardless of what it was created under, and a `console.warn` fires once per runtime the first time a pinned definition is resolved.
 - To test `versionPolicy: "latest"` instead, register `v2` with `versionPolicy: "latest"` and drop a state the instance is sitting in (rather than renaming a target); assert `runtimeV2.triggerEvent(...)` rejects with `IncompatibleDefinitionError` (imported from `@duraflows/core`). A compatible instance (whose current state the new definition still has) resolves and adopts v2 normally.
 - `runtime.listDefinitionVersions("order")` after the above returns `[{ version: 1, activeInstances: 0, ... }, { version: 2, activeInstances: 1, ... }]`. The v1 instance rests in `submitted`, which v1 defines as `submitted: {}` -- no events and no `onEnter` -- so `terminalStates()` excludes it from the count; the fresh v2 instance sits in `new`, which still has an event, so it counts as active.
+
+### 4. Testing migrateInstances (v7.1.0)
+
+Reuse the two-runtime-sharing-one-store setup from pattern 3: create instances under `runtimeV1`, migrate them through `runtimeV2`, then assert on `result` and on the `$migrated` history row -- find it by **`eventName`**, not by index, since history ordering differs by store (in-memory oldest-first; pg/Kysely newest-first).
+
+```ts
+it("moves a pinned instance onto the target version and records $migrated", async () => {
+  const runtimeV1 = makeRuntime(v1);
+  const instance = await runtimeV1.createInstance({ workflowName: "order" });
+  await runtimeV1.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Submit" }); // now in "submitted"
+
+  const runtimeV2 = makeRuntime(v2); // v2 renamed "submitted" away; map it to "approved"
+  await runtimeV2.initialize();
+
+  // Dry run first -- writes nothing, fires no observers.
+  const preview = await runtimeV2.migrateInstances({
+    workflowName: "order",
+    fromVersion: 1,
+    toVersion: 2,
+    stateMapping: { submitted: "approved" },
+    dryRun: true,
+  });
+  expect(preview).toEqual({
+    dryRun: true,
+    migrated: [{ uuid: instance.uuid, fromState: "submitted", toState: "approved" }],
+    skipped: [],
+    failed: [],
+  });
+  expect((await runtimeV2.getInstance(instance.uuid))!.definitionVersion).toBe(1); // untouched
+
+  const result = await runtimeV2.migrateInstances({
+    workflowName: "order",
+    fromVersion: 1,
+    toVersion: 2,
+    stateMapping: { submitted: "approved" },
+  });
+  expect(result.migrated).toEqual([{ uuid: instance.uuid, fromState: "submitted", toState: "approved" }]);
+
+  const migrated = (await runtimeV2.getInstance(instance.uuid))!;
+  expect(migrated.currentState).toBe("approved");
+  expect(migrated.definitionVersion).toBe(2);
+  expect(migrated.timeoutRetry).toBeNull();
+
+  // Found by eventName, not index -- history order isn't the same across stores.
+  const row = (await runtimeV2.getHistory(instance.uuid)).find((h) => h.eventName === "$migrated");
+  expect(row).toMatchObject({
+    fromState: "submitted",
+    toState: "approved",
+    outcome: "success",
+    commandResultsJson: [],
+    definitionVersion: 2,
+    triggerMetadata: { source: "migration", fromVersion: 1, toVersion: 2 },
+  });
+});
+```
+
+Notes for this pattern:
+
+- Migration runs no commands, guards or `onEnter`, so don't assert on a command spy here -- assert `commandResultsJson: []` on the history row instead.
+- To assert a skip reason, pass `instanceUuids` explicitly and check `result.skipped` -- e.g. an instance already on `toVersion` skips with `"on version 2, not 1"`, and one whose current state has no mapping and no same-named target skips with `"state <s> has no mapping and does not exist in version 2"`.
+- `migrateInstances` requires a `definitionStore` and, without explicit `instanceUuids`, an instance store implementing `findInstanceUuids` (the `InMemoryInstanceStore` above has it); omitting both throws before touching any instance.
+- Observers still fire (`triggerEvent: "$migrated"`) after commit, same as any other transition -- assert on them the same way you would for `triggerEvent()`.
 
 ---
 

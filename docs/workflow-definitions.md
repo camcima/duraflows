@@ -149,6 +149,109 @@ Event names starting with `$` are rejected by validation (`Event names
 starting with "$" are reserved`). This keeps `$migrated` and future
 system-generated events unambiguous -- don't name your own events `$foo`.
 
+### Migrating instances
+
+_(v7.1.0)_ `runtime.migrateInstances(input)` moves chosen instances from one
+stored definition version to another. Reach for it when a bug fix or a
+required change must reach in-flight instances, or when an old version can't
+be retired because its instances won't finish on their own -- draining, or
+switching the whole workflow to `versionPolicy: "latest"`
+(see [above](#versionpolicy-latest)), don't cover those cases. Migration is
+**pure relabeling**: no commands, guards or `onEnter` run, and
+`transformContext` is the one tool for adjusting context.
+
+Dry run first, then migrate in batches:
+
+```ts
+// See what would happen first.
+const preview = await runtime.migrateInstances({
+  workflowName: "order",
+  fromVersion: 3,
+  toVersion: 4,
+  stateMapping: { awaiting_review: "awaiting_approval" },
+  dryRun: true,
+});
+console.log(preview.migrated.length, preview.skipped, preview.failed);
+
+// Then migrate in batches.
+let batch;
+do {
+  batch = await runtime.migrateInstances({
+    workflowName: "order",
+    fromVersion: 3,
+    toVersion: 4,
+    stateMapping: { awaiting_review: "awaiting_approval" },
+    limit: 500,
+  });
+} while (batch.migrated.length > 0);
+```
+
+For each candidate instance:
+
+- its current state is looked up in `stateMapping`, or kept as-is when the
+  target version has a state of the same name;
+- an instance that can't be placed is skipped, with a reason -- see below --
+  and stays on `fromVersion`, untouched;
+- `transformContext`, when given, is called with a deep clone of the context
+  and a frozen clone of the instance; it must be pure, and its result is
+  stored as its JSON round trip (a `Date`, for example, comes back as a
+  string, not a `Date`);
+- `expiresAt` is recomputed from `lastTransitionAt` and the target state's
+  timeout, so time already spent waiting in the state is preserved rather
+  than reset;
+- `timeoutRetry` is cleared, so a parked instance becomes eligible again;
+- no commands, guards or `onEnter` run;
+- a `$migrated` history row is appended
+  (`triggerMetadata: { source: "migration", fromVersion, toVersion }`), and
+  observers fire with `triggerEvent: "$migrated"` after commit -- even when
+  the state name didn't change.
+
+**Mapping into a state with an `onEnter` never happens.** If `stateMapping`
+names a target state that has an `onEnter` in the target version,
+`migrateInstances` throws before touching any instance. If an instance would
+keep its current state name and that state has grown an `onEnter` in the
+target version, the instance is skipped instead (see the table below).
+Either way, migration never runs entry behaviour, so landing an instance
+there would strand it.
+
+**Skip reasons** (verbatim, `result.skipped[].reason`):
+
+| Reason                                                               | When                                                           |
+| -------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `not found`                                                          | The UUID doesn't exist                                         |
+| `belongs to workflow <name>`                                         | The UUID belongs to a different workflow                       |
+| `unstamped`                                                          | `definitionVersion` is `null` (a pre-5.0 instance)             |
+| `on version <v>, not <fromVersion>`                                  | Already migrated, or re-stamped, since being listed            |
+| `state <s> has no mapping and does not exist in version <toVersion>` | No `stateMapping` entry, and no same-named state in the target |
+| `state <s> has an onEnter in version <toVersion>`                    | Keeps its name, but that state now has an `onEnter`            |
+
+**Batching with `limit`.** `limit` caps how many candidates one call
+examines -- skipped and failed instances count against it too, not just
+migrated ones. A migrated instance no longer matches `fromVersion`, so
+calling `migrateInstances` again with the same input picks up where the last
+call left off; re-running it is always harmless.
+
+**Rescue cases.** Migration reads only the instance's current state name and
+the _target_ version, never the old version's snapshot, so it rescues
+instances a normal pinned read can't reach: a missing or structurally
+invalid stored snapshot for `fromVersion`, an instance that throws
+`IncompatibleDefinitionError` under `versionPolicy: "latest"` because its
+state no longer exists, and instances parked after too many failed timeouts.
+Migration runs even while `initialize()`'s
+[startup executability check](./core-runtime.md#startup-executability-check)
+is failing for the workflow -- fixing that is often exactly what a migration
+is for.
+
+**Adapters without `findInstanceUuids`.** The optional
+`WorkflowInstanceStore.findInstanceUuids` (see
+[Persistence](./persistence.md#workflowinstancestore)) is how
+`migrateInstances` finds candidates on its own. An adapter that doesn't
+implement it must pass `instanceUuids` explicitly; without either,
+`migrateInstances` throws before touching anything.
+
+See [`migrateInstances()`](./core-runtime.md#migrateinstances) for the full
+signature, the upfront validation table and the result shape.
+
 ### Upgrading to 7.0.0
 
 In 6.x every transition re-stamped an instance with the then-latest version,
@@ -199,6 +302,8 @@ resolve the latest version, so neither matters.
   [Reserved event names](#reserved-event-names).
 - **Apply migration `006`** (recommended, not required) -- see
   [Definition version index](./persistence.md#definition-version-index).
+- **Instances stuck on an old version** don't have to wait for it to drain --
+  see [Migrating instances](#migrating-instances).
 
 ## WorkflowStateDefinition
 
