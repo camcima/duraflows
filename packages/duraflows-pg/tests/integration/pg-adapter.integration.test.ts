@@ -502,6 +502,51 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     });
   });
 
+  describe("pg definition sync inside a caller's transaction", () => {
+    const definition: WorkflowDefinition = {
+      name: "sync-rollback",
+      initialState: "open",
+      states: { open: { events: { Close: { targetState: "closed" } } }, closed: {} },
+    };
+
+    afterEach(async () => {
+      await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
+      await pool.query("TRUNCATE workflow_definitions");
+    });
+
+    it("restores a snapshot whose first sync was rolled back with the caller's transaction", async () => {
+      const providers = pgWorkflowProviders(pool);
+      const definitionRegistry = new InMemoryDefinitionRegistry({
+        validator: new WorkflowValidator(),
+        compiler: new WorkflowCompiler(),
+      });
+      definitionRegistry.register(definition);
+      const runtime = new WorkflowRuntime({
+        definitionRegistry,
+        commandRegistry: new InMemoryCommandRegistry(),
+        ...providers,
+        clock: { now: () => new Date() },
+      });
+      const snapshots = async () =>
+        (
+          await pool.query("SELECT count(*)::int AS n FROM workflow_definitions WHERE workflow_name = $1", [
+            "sync-rollback",
+          ])
+        ).rows[0].n as number;
+
+      await providers.transactionRunner
+        .runInTransaction(async () => {
+          await runtime.createInstance({ workflowName: "sync-rollback" });
+          throw new Error("caller rolls back");
+        })
+        .catch(() => undefined);
+      expect(await snapshots()).toBe(0);
+
+      await runtime.createInstance({ workflowName: "sync-rollback" });
+      expect(await snapshots()).toBe(1);
+    });
+  });
+
   describe("pg definition version pinning", () => {
     // v1 omits `version` (defaults to 1). v2 renames the review state and
     // retargets Approve, so each version's rules are distinguishable.

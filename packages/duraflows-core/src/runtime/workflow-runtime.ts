@@ -140,6 +140,8 @@ export class WorkflowRuntime {
   private readonly clock: WorkflowClock;
   private readonly definitionStore?: WorkflowDefinitionStore;
   private syncPromise: Promise<void> | null = null;
+  /** True once a sync is known to be durable (committed, not just finished). */
+  private synced = false;
   private checkPromise: Promise<void> | null = null;
   private readonly instanceMigrator: InstanceMigrator;
   private readonly compiler: WorkflowCompiler;
@@ -208,7 +210,8 @@ export class WorkflowRuntime {
   /**
    * Syncs registered definitions into the definition store and enforces the
    * version-bump guard. Idempotent: concurrent and repeated calls share one
-   * sync. A failed sync is not cached — the next call retries. Called lazily
+   * sync. A failed sync is not cached — the next call retries — and a sync
+   * run inside a caller's transaction only counts once it commits. Called lazily
    * by mutating operations, but calling it explicitly at boot is recommended
    * so registration errors surface at startup. With a definition store, it
    * then checks that every stored version with active instances can still
@@ -226,15 +229,44 @@ export class WorkflowRuntime {
     return this.checkPromise;
   }
 
-  /** The definition sync alone, shared by every caller; a failure is not cached. */
+  /**
+   * The definition sync alone. Concurrent callers share one in-flight sync; a
+   * failure is not cached, and neither is a sync that has not committed yet.
+   */
   private ensureSynced(): Promise<void> {
+    if (this.synced) {
+      return Promise.resolve();
+    }
     if (!this.syncPromise) {
-      this.syncPromise = this.syncDefinitions().catch((error: unknown) => {
-        this.syncPromise = null;
-        throw error;
-      });
+      this.syncPromise = this.syncDefinitions()
+        .then(() => this.markSyncedWhenDurable())
+        .finally(() => {
+          this.syncPromise = null;
+        });
     }
     return this.syncPromise;
+  }
+
+  /**
+   * A sync that ran inside a caller's transaction wrote its snapshots through
+   * that transaction; if it rolls back, the snapshots are gone. So it only
+   * counts once that transaction commits, and until then every call syncs
+   * again (idempotent). Outside a transaction — or with a runner that cannot
+   * report commits — the writes are already durable.
+   */
+  private markSyncedWhenDurable(): void {
+    const runner = this.transactionRunner;
+    if (runner.afterCommit) {
+      try {
+        runner.afterCommit(async () => {
+          this.synced = true;
+        });
+        return;
+      } catch {
+        // No transaction is active, so the sync's writes have committed.
+      }
+    }
+    this.synced = true;
   }
 
   private async checkExecutability(): Promise<void> {

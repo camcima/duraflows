@@ -6,7 +6,7 @@ import {
   WorkflowDefinitionError,
   computeDefinitionHash,
 } from "../../src/index.js";
-import type { WorkflowDefinition } from "../../src/index.js";
+import type { WorkflowDefinition, WorkflowTransactionRunner } from "../../src/index.js";
 import { createInMemoryPersistence, InMemoryDefinitionStore } from "../helpers/in-memory-persistence.js";
 
 const clock = { now: () => new Date("2026-06-01T00:00:00Z") };
@@ -105,5 +105,57 @@ describe("WorkflowRuntime.initialize", () => {
     await expect(runtime.createInstance({ workflowName: "order" })).rejects.toThrow(WorkflowDefinitionError);
     // A failed sync is not cached: the next operation retries (and fails the same way).
     await expect(runtime.createInstance({ workflowName: "order" })).rejects.toThrow(WorkflowDefinitionError);
+  });
+});
+
+describe("WorkflowRuntime.initialize inside a caller's transaction", () => {
+  function setup(transactionRunner?: WorkflowTransactionRunner) {
+    const persistence = createInMemoryPersistence();
+    const store = new InMemoryDefinitionStore();
+    const definitionRegistry = new InMemoryDefinitionRegistry();
+    definitionRegistry.register(orderV2);
+    const runtime = new WorkflowRuntime({
+      definitionRegistry,
+      commandRegistry: new InMemoryCommandRegistry(),
+      ...persistence,
+      transactionRunner: transactionRunner ?? persistence.transactionRunner,
+      definitionStore: store,
+      clock,
+    });
+    const ensure = vi.spyOn(store, "ensure");
+    return { runtime, runner: persistence.transactionRunner, ensure };
+  }
+
+  it("syncs again after the enclosing transaction rolls back", async () => {
+    const { runtime, runner, ensure } = setup();
+
+    await runner
+      .runInTransaction(async () => {
+        await runtime.initialize();
+        throw new Error("caller rolls back");
+      })
+      .catch(() => undefined);
+    await runtime.initialize();
+
+    expect(ensure).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not sync again once the enclosing transaction commits", async () => {
+    const { runtime, runner, ensure } = setup();
+
+    await runner.runInTransaction(() => runtime.initialize());
+    await runtime.initialize();
+
+    expect(ensure).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches the sync at once with a runner that has no afterCommit", async () => {
+    const plainRunner: WorkflowTransactionRunner = { runInTransaction: (callback) => callback() };
+    const { runtime, ensure } = setup(plainRunner);
+
+    await plainRunner.runInTransaction(() => runtime.initialize());
+    await runtime.initialize();
+
+    expect(ensure).toHaveBeenCalledTimes(1);
   });
 });
