@@ -696,6 +696,46 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       expect((await runtimeV3.getInstance(instance.uuid))!.currentState).toBe("closed");
     });
 
+    it("runs a pinned instance on the committed version, not a copy cached from a rolled-back row", async () => {
+      const build = (def: WorkflowDefinition) => {
+        const registry = new InMemoryDefinitionRegistry();
+        registry.register(def);
+        return new WorkflowRuntime({
+          definitionRegistry: registry,
+          commandRegistry: new InMemoryCommandRegistry(),
+          ...pgWorkflowProviders(pool),
+          clock: { now: () => new Date() },
+        });
+      };
+      const v2WithoutHold: WorkflowDefinition = { ...definition, version: 2 };
+      const v2WithHold: WorkflowDefinition = {
+        name: "sync-rollback",
+        version: 2,
+        initialState: "open",
+        states: {
+          open: { events: { Close: { targetState: "closed" }, Hold: { targetState: "held" } } },
+          held: {},
+          closed: {},
+        },
+      };
+      const runtimeV3 = build({ ...definition, version: 3 });
+      await runtimeV3.initialize();
+
+      // runtimeV3 caches v2 (no Hold) from a row that then rolls back.
+      await pgWorkflowProviders(pool)
+        .transactionRunner.runInTransaction(async () => {
+          const doomed = await build(v2WithoutHold).createInstance({ workflowName: "sync-rollback" });
+          await runtimeV3.getAvailableEvents({ workflowInstanceUuid: doomed.uuid });
+          throw new Error("caller rolls back");
+        })
+        .catch(() => undefined);
+      const instance = await build(v2WithHold).createInstance({ workflowName: "sync-rollback" });
+
+      await runtimeV3.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Hold" });
+
+      expect((await runtimeV3.getInstance(instance.uuid))!.currentState).toBe("held");
+    });
+
     it("gives an instance created during another request's rolled-back sync its own snapshot", async () => {
       const { runtime, providers } = build();
       let markSynced!: () => void;
