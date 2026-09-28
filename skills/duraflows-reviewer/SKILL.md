@@ -39,8 +39,11 @@ Use this checklist when reviewing code that touches duraflows workflows, command
 
 ### Definition Versions (v5.0.0)
 
-- [ ] **Content changes bump `version`.** If a definition's `states`/`events`/`commands` changed since it last shipped, `version` must increment too — `WorkflowRuntime.initialize()` compares content hashes and throws `WorkflowDefinitionError` for a known version whose content drifted (a version-bump guard, not pinning). Flag a diff that changes definition content without touching `version`.
+- [ ] **Content changes bump `version`.** If a definition's `states`/`events`/`commands` changed since it last shipped, `version` must increment too — `WorkflowRuntime.initialize()` compares content hashes and throws `WorkflowDefinitionError` for a known version whose content drifted (a version-bump guard, distinct from pinning below). Flag a diff that changes definition content without touching `version`.
 - [ ] **`WorkflowInstance` fixtures/constructions include `definitionVersion`.** It's a required field (`number | null`) as of v5.0.0 — a literal `WorkflowInstance` object (test fixture, custom-adapter row mapping) missing it fails to typecheck. `null` is only correct for a deliberately-legacy fixture; otherwise expect a number.
+- [ ] **(v7.0.0) `versionPolicy` is a deliberate choice, not an accident.** Default `"pinned"` means in-flight instances keep executing the version they were created under; `"latest"` means every instance jumps to whatever is currently registered, and an instance whose state that definition lacks fails with `IncompatibleDefinitionError`. Flag `versionPolicy: "latest"` on a workflow whose states get renamed or removed across versions — that's exactly the case it fails loudly for.
+- [ ] **(v7.0.0) A command or guard removed in the same PR that bumps `version`.** If any instance could still be pinned to the old version, the old command/guard must stay registered until `runtime.listDefinitionVersions(name)` shows `activeInstances === 0` for it — otherwise the startup executability check fails boot (or silently warns, if `onUnresolvable: "warn"`). Flag a diff that deletes a command/guard in the same change that bumps `version`.
+- [ ] **(v7.0.0) No new event name starts with `"$"`.** Reserved for system events; the validator rejects the definition.
 
 ### onEnter Chains
 
@@ -111,8 +114,9 @@ Use this checklist when reviewing code that touches duraflows workflows, command
 
 ### Database
 
-- [ ] **Migration is applied.** `workflow_instances`, `workflow_history`, and (v5.0.0) `workflow_definitions` tables must exist; `workflow_instances`/`workflow_history` need a `definition_version` column (v5.0.0).
+- [ ] **Migration is applied.** `workflow_instances`, `workflow_history`, and (v5.0.0) `workflow_definitions` tables must exist; `workflow_instances`/`workflow_history` need a `definition_version` column (v5.0.0). Migration `006_definition_version_index.sql` (v7.0.0) is recommended, not required.
 - [ ] **Indexes exist.** `expires_at` partial index is critical for timeout performance. `workflow_name` index for lookups. `workflow_instance_uuid, created_at DESC` for history queries.
+- [ ] **(v7.0.0) A custom persistence adapter implements `countInstances()` (required on every `WorkflowInstanceStore`) and, if it has a `WorkflowDefinitionStore`, `listVersions()`.** Missing either fails to typecheck against current `@duraflows/core` types.
 
 ---
 

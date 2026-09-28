@@ -28,17 +28,23 @@ interface WorkflowInstanceStore {
   update(instance: WorkflowInstance): Promise<void>;
   findExpired(limit: number, now: Date): Promise<WorkflowInstance[]>;
   findParkedTimeouts(input: { limit: number; workflowName?: string }): Promise<WorkflowInstance[]>;
+  countInstances(options: {
+    workflowName: string;
+    definitionVersion: number;
+    excludeStates: readonly string[];
+  }): Promise<number>;
 }
 ```
 
-| Method                                         | Tx required? | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ---------------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `create(instance)`                             | Recommended  | Insert a new workflow instance record. Typically called inside the same transaction as the initial history record append and any onEnter chain writes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `findByUuid(uuid)`                             | Not required | Find an instance by UUID (no locking). Safe to call outside a transaction (read-only). Returns `null` if not found.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `lockByUuid(uuid)`                             | **Required** | Find and lock an instance for update (`SELECT ... FOR UPDATE`). **Adapters must throw if called outside an active transaction** — a lock without a transaction releases immediately and defeats its purpose. Returns `null` if not found.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `update(instance)`                             | Recommended  | Update mutable fields: `currentState`, `version`, `definitionVersion`, `expiresAt`, `timeoutRetry`, `lastTransitionAt`, `context`, `updatedAt`. Uses optimistic locking: the WHERE clause must include `AND version = $expectedVersion` (i.e., `instance.version - 1`). If no row is matched, throw `WorkflowError` to signal a concurrent modification. `metadata` is immutable and is NOT updated.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `findExpired(limit, now)`                      | **Required** | Find instances whose timeout is due, locked for update with skip-locked semantics (`FOR UPDATE SKIP LOCKED`). Due means `expiresAt < now` (the `now` parameter, not the database clock), not parked (`timeoutRetry?.parkedAt` is null), and no retry scheduled or `timeoutRetry.retryAt < now`. Order by `timeoutRetry?.retryAt ?? expiresAt`, oldest first; instances due at the same moment come back in no particular order. **Adapters must throw if called outside an active transaction.** `SKIP LOCKED` only keeps concurrent scans from blocking each other; exclusivity comes from the runtime, which re-locks each instance with `lockByUuid` and re-checks that it is still due before processing it. SQL adapters with an index on `coalesce(timeout_retry_at, expires_at)` should also add the redundant `coalesce(timeout_retry_at, expires_at) < now` condition so the index can be range-scanned. |
-| `findParkedTimeouts({ limit, workflowName? })` | **Required** | List parked instances (`timeoutRetry.parkedAt` set), optionally filtered by workflow name, ordered by `parkedAt` then `uuid`, at most `limit`. A plain read; no transaction required.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Method                                                               | Tx required? | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `create(instance)`                                                   | Recommended  | Insert a new workflow instance record. Typically called inside the same transaction as the initial history record append and any onEnter chain writes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `findByUuid(uuid)`                                                   | Not required | Find an instance by UUID (no locking). Safe to call outside a transaction (read-only). Returns `null` if not found.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `lockByUuid(uuid)`                                                   | **Required** | Find and lock an instance for update (`SELECT ... FOR UPDATE`). **Adapters must throw if called outside an active transaction** — a lock without a transaction releases immediately and defeats its purpose. Returns `null` if not found.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `update(instance)`                                                   | Recommended  | Update mutable fields: `currentState`, `version`, `definitionVersion`, `expiresAt`, `timeoutRetry`, `lastTransitionAt`, `context`, `updatedAt`. Uses optimistic locking: the WHERE clause must include `AND version = $expectedVersion` (i.e., `instance.version - 1`). If no row is matched, throw `WorkflowError` to signal a concurrent modification. `metadata` is immutable and is NOT updated.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `findExpired(limit, now)`                                            | **Required** | Find instances whose timeout is due, locked for update with skip-locked semantics (`FOR UPDATE SKIP LOCKED`). Due means `expiresAt < now` (the `now` parameter, not the database clock), not parked (`timeoutRetry?.parkedAt` is null), and no retry scheduled or `timeoutRetry.retryAt < now`. Order by `timeoutRetry?.retryAt ?? expiresAt`, oldest first; instances due at the same moment come back in no particular order. **Adapters must throw if called outside an active transaction.** `SKIP LOCKED` only keeps concurrent scans from blocking each other; exclusivity comes from the runtime, which re-locks each instance with `lockByUuid` and re-checks that it is still due before processing it. SQL adapters with an index on `coalesce(timeout_retry_at, expires_at)` should also add the redundant `coalesce(timeout_retry_at, expires_at) < now` condition so the index can be range-scanned. |
+| `findParkedTimeouts({ limit, workflowName? })`                       | **Required** | List parked instances (`timeoutRetry.parkedAt` set), optionally filtered by workflow name, ordered by `parkedAt` then `uuid`, at most `limit`. A plain read; no transaction required.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `countInstances({ workflowName, definitionVersion, excludeStates })` | Not required | Count instances of `workflowName` stamped with `definitionVersion` whose `currentState` is not in `excludeStates` (an empty array excludes nothing, so every matching row is counted). Instances with a `null` `definitionVersion` never match. A plain read; backs the [startup executability check](./core-runtime.md#startup-executability-check) and `listDefinitionVersions()`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 **`WorkflowInstance.timeoutRetry`** (`{ attempts, lastError, retryAt, parkedAt } | null`) must round-trip through `create`/`update`. `null` means no timeout attempt has failed since the last success. The bundled adapters store it in four columns (`timeout_attempts`, `timeout_retry_at`, `timeout_last_error`, `timeout_parked_at`), and `timeout_attempts = 0` maps to `null`.
 
@@ -140,6 +146,7 @@ interface WorkflowDefinitionStore {
     definitionJson: WorkflowDefinition;
   }): Promise<StoredWorkflowDefinition>;
   findByNameAndVersion(workflowName: string, version: number): Promise<StoredWorkflowDefinition | null>;
+  listVersions(workflowName: string): Promise<StoredWorkflowDefinition[]>;
 }
 ```
 
@@ -147,6 +154,7 @@ interface WorkflowDefinitionStore {
 | --------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ensure(record)`                              | Not required | Insert-if-absent and return the stored row -- **never overwrites** an existing row. Must be atomic under concurrent callers. Both bundled adapters implement this as `INSERT ... ON CONFLICT (workflow_name, version) DO NOTHING` followed by a re-select. |
 | `findByNameAndVersion(workflowName, version)` | Not required | Fetch a snapshot. Returns `null` if that `(workflowName, version)` pair has never been synced.                                                                                                                                                             |
+| `listVersions(workflowName)`                  | Not required | All stored snapshots of `workflowName`, ordered by `version` ascending; an empty array when there are none. Backs the [startup executability check](./core-runtime.md#startup-executability-check) and `runtime.listDefinitionVersions()`.                 |
 
 `ensure()` is what `WorkflowRuntime.initialize()` calls for every registered definition, and its "insert-if-absent, never overwrite" contract is what makes the version-bump guard meaningful: once a `(workflowName, version)` pair is stored, its snapshot is fixed forever, so a later registration with the same version but different content is detected as drift rather than silently accepted.
 
@@ -204,6 +212,10 @@ Migration `005_timeout_retries.sql` (dbmate) adds the columns that back `Workflo
 **Large tables.** The migration's `ALTER TABLE` takes an `ACCESS EXCLUSIVE` lock (brief, since the new columns are nullable or have a constant default, but it queues behind long-running transactions and blocks everything queued after it), and each `CREATE INDEX` blocks writes to `workflow_instances` for as long as the build takes. Set `lock_timeout` (for example `SET lock_timeout = '5s'`) for the migration so it fails fast instead of stalling traffic. To keep the index builds off the critical path, add the columns first (the migration's `ALTER TABLE` statement), then pre-build both indexes with `CREATE INDEX CONCURRENTLY`, using the same names and definitions as in the migration. Every statement in `005` uses `IF NOT EXISTS`, so running the migration afterwards skips what already exists.
 
 **Mixed-version rollout.** 5.x workers don't write the `timeout_*` columns. While 5.x and 6.x workers run side by side, a transition made by a 5.x worker can leave an instance's stale retry state behind: a new state still scheduled for a retry, or still parked. Finish the rollout promptly. Afterwards, review `findParkedTimeouts()` and `rearmTimeout()` any instance whose state is not actually failing.
+
+### Definition version index
+
+Migration `006_definition_version_index.sql` (dbmate) adds `workflow_instances_definition_version_idx` on `(workflow_name, definition_version)`. **Recommended, not required** -- correctness doesn't depend on it, but it keeps the [startup executability check](./core-runtime.md#startup-executability-check)'s and `listDefinitionVersions()`'s `countInstances` queries cheap on large tables. It's idempotent (`CREATE INDEX IF NOT EXISTS`), so on a large table you can pre-build it with `CREATE INDEX CONCURRENTLY` (same name and definition, as with migration `005`'s advice) and the migration then skips it. Fresh installs via `generateMigrationSql()` already include it.
 
 ### pgWorkflowProviders()
 
@@ -296,6 +308,7 @@ class PgWorkflowInstanceStore implements WorkflowInstanceStore {
 - `lockByUuid()` uses `SELECT ... FOR UPDATE` (requires active transaction)
 - `update()` uses optimistic locking: `WHERE uuid = $1 AND version = $expectedVersion`. Throws `WorkflowError` if `rowCount === 0` (concurrent modification)
 - `findExpired(limit, now)` selects due rows (`expires_at < $now`, `timeout_parked_at IS NULL`, `timeout_retry_at` null or `< $now`, plus the redundant `coalesce(timeout_retry_at, expires_at) < $now` so `workflow_instances_timeout_due_idx` is range-scanned), `ORDER BY coalesce(timeout_retry_at, expires_at) FOR UPDATE SKIP LOCKED LIMIT $1` (requires active transaction). The `now` parameter comes from the application clock, not the database's `now()`
+- `countInstances({ workflowName, definitionVersion, excludeStates })` uses `SELECT count(*)::int FROM workflow_instances WHERE workflow_name = $1 AND definition_version = $2 AND NOT (current_state = ANY($3::text[]))`. With an empty `excludeStates` array, `NOT (x = ANY('{}'))` evaluates to `true`, so nothing is excluded
 
 **PgWorkflowHistoryStore**
 
@@ -318,6 +331,7 @@ class PgWorkflowDefinitionStore implements WorkflowDefinitionStore {
 
 - `ensure()` uses `INSERT ... ON CONFLICT (workflow_name, version) DO NOTHING`, then re-selects the row -- so it always returns the pre-existing snapshot if one was already stored, and never overwrites it
 - `findByNameAndVersion()` uses `SELECT ... WHERE workflow_name = $1 AND version = $2`
+- `listVersions()` uses `SELECT * FROM workflow_definitions WHERE workflow_name = $1 ORDER BY version`
 
 **PgTransactionContext**
 
@@ -335,7 +349,7 @@ const PgTransactionContext = {
 
 ## Writing a Custom Adapter
 
-To use a different database library, implement the three required interfaces and pass them as the `persistence` option. Optionally implement the fourth, [`WorkflowDefinitionStore`](#workflowdefinitionstore), to support definition versioning -- it's an optional field on `WorkflowPersistenceProvider`, so an adapter that omits it still compiles and runs, it just leaves definition versioning inert.
+To use a different database library, implement the three required interfaces and pass them as the `persistence` option. **7.0.0:** `WorkflowInstanceStore.countInstances()` is a new required method -- every custom adapter must add it, even one that never uses a `WorkflowDefinitionStore`. Optionally implement the fourth, [`WorkflowDefinitionStore`](#workflowdefinitionstore), to support definition versioning -- it's an optional field on `WorkflowPersistenceProvider`, so an adapter that omits it still compiles and runs, it just leaves definition versioning inert. If you do implement it, `listVersions()` is required alongside `ensure()` and `findByNameAndVersion()`.
 
 ### Example: Prisma Adapter
 
@@ -476,6 +490,22 @@ class PrismaWorkflowInstanceStore implements WorkflowInstanceStore {
     return rows.map((row) => this.mapRow(row));
   }
 
+  // An empty `excludeStates` must exclude nothing -- passing `undefined` for
+  // `currentState` tells Prisma to skip that filter entirely.
+  async countInstances(options: {
+    workflowName: string;
+    definitionVersion: number;
+    excludeStates: readonly string[];
+  }): Promise<number> {
+    return this.client.workflowInstance.count({
+      where: {
+        workflowName: options.workflowName,
+        definitionVersion: options.definitionVersion,
+        currentState: options.excludeStates.length > 0 ? { notIn: [...options.excludeStates] } : undefined,
+      },
+    });
+  }
+
   private mapRow(row: any): WorkflowInstance {
     return {
       uuid: row.uuid,
@@ -521,6 +551,20 @@ class PrismaWorkflowDefinitionStore implements WorkflowDefinitionStore {
   // `skipDuplicates`, or `$queryRaw` with `ON CONFLICT DO NOTHING`) followed by a
   // re-select -- it must never overwrite an existing (workflowName, version) row --
   // and findByNameAndVersion() as a plain lookup returning null when absent.
+
+  async listVersions(workflowName: string): Promise<StoredWorkflowDefinition[]> {
+    const rows = await this.prisma.workflowDefinition.findMany({
+      where: { workflowName },
+      orderBy: { version: "asc" },
+    });
+    return rows.map((row) => ({
+      workflowName: row.workflowName,
+      version: row.version,
+      contentHash: row.contentHash,
+      definitionJson: row.definitionJson as unknown as WorkflowDefinition,
+      registeredAt: row.registeredAt,
+    }));
+  }
 }
 
 // Convenience function
@@ -628,6 +672,7 @@ The suite covers:
 | `findExpired` retry/parked filtering | Instances with a future `timeoutRetry.retryAt` or a `timeoutRetry.parkedAt` are excluded; remaining results are ordered by `timeoutRetry?.retryAt ?? expiresAt`, oldest due first |
 | `findParkedTimeouts`                 | Only parked instances (`timeoutRetry.parkedAt` set) are returned, ordered by `parkedAt` ascending; `workflowName` filters and `limit` caps the result                             |
 | `definitionVersion` roundtrip        | `create` → `findByUuid` → `update` → `findByUuid` all preserve it                                                                                                                 |
+| `countInstances`                     | Filters by `workflowName`, `definitionVersion`, and `excludeStates`; an empty `excludeStates` counts every matching instance                                                      |
 
 A second, sibling suite covers `WorkflowDefinitionStore` -- the store that backs [definition versions](#definition-versions). It's exported the same way, from the same subpath:
 
@@ -667,3 +712,4 @@ The suite covers:
 | `findByNameAndVersion` roundtrip    | Retrieves a stored snapshot with a structurally equal `definitionJson`                                                             |
 | `findByNameAndVersion` unknown pair | Returns `null` for an unknown version or an unknown workflow name                                                                  |
 | Independent versions                | Two versions of the same workflow are stored and retrieved as independent rows                                                     |
+| `listVersions` ordering             | Returns only the named workflow's snapshots, ordered by `version` ascending                                                        |

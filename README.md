@@ -350,7 +350,9 @@ Ready-made dbmate migrations are shipped at:
 node_modules/@duraflows/pg/sql/dbmate/
 ```
 
-Copy **all** files in that directory (`001_workflow_core.sql`, `002_replace_trigger_with_metadata.sql`, `003_event_guards.sql`, `004_definition_versions.sql`, `005_timeout_retries.sql`) into your migration directory and apply them in order, `001` through `005`, **before** deploying 6.0.0 — the runtime reads and writes the `definition_version` columns, the `workflow_definitions` table and the `timeout_*` columns on every operation. Applying only `001` produces a schema the current runtime cannot write to — `002`/`003` add the `metadata_json` handling and the `rejected_by` column / `guard-rejected` outcome that the history store requires, `004` adds the `workflow_definitions` table and `definition_version` columns that the definition store and every instance/history write require, and `005` adds the `timeout_attempts`, `timeout_retry_at`, `timeout_last_error` and `timeout_parked_at` columns that every instance read and write uses — it **must be applied before deploying 6.0.0**. The migrations use `gen_random_uuid()` (PostgreSQL 13+) for history record UUIDs.
+Copy **all** files in that directory (`001_workflow_core.sql`, `002_replace_trigger_with_metadata.sql`, `003_event_guards.sql`, `004_definition_versions.sql`, `005_timeout_retries.sql`, `006_definition_version_index.sql`) into your migration directory and apply them in order, `001` through `006`, **before** deploying 6.0.0 — the runtime reads and writes the `definition_version` columns, the `workflow_definitions` table and the `timeout_*` columns on every operation. Applying only `001` produces a schema the current runtime cannot write to — `002`/`003` add the `metadata_json` handling and the `rejected_by` column / `guard-rejected` outcome that the history store requires, `004` adds the `workflow_definitions` table and `definition_version` columns that the definition store and every instance/history write require, and `005` adds the `timeout_attempts`, `timeout_retry_at`, `timeout_last_error` and `timeout_parked_at` columns that every instance read and write uses — it **must be applied before deploying 6.0.0**. `006` (recommended, not required) adds an index that keeps the 7.0.0 startup executability check and `listDefinitionVersions()` cheap on large tables. The migrations use `gen_random_uuid()` (PostgreSQL 13+) for history record UUIDs.
+
+**Upgrading to 7.0.0:** instances now execute the definition version they were stamped with instead of the latest registered one, by default. Set `versionPolicy: "latest"` on a definition to keep 6.x behavior. See [Definition versions](docs/workflow-definitions.md#definition-versions).
 
 ### Option 2: Generate a migration with `generateMigrationSql()`
 
@@ -379,6 +381,8 @@ The NestJS module and the core runtime are fully decoupled from `pg`. To use Pri
 - `WorkflowTransactionRunner`
 
 Optionally implement the fourth, `WorkflowDefinitionStore`, to support definition versioning -- it's an optional field on `WorkflowPersistenceProvider`, so an adapter that omits it still compiles and runs, it just leaves definition versioning inert.
+
+`WorkflowInstanceStore.countInstances()` and (for `WorkflowDefinitionStore` implementers) `listVersions()` are required as of 7.0.0.
 
 See the [Persistence Guide](docs/persistence.md) for details and examples.
 

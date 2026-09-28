@@ -79,6 +79,22 @@ class InMemoryInstanceStore implements WorkflowInstanceStore {
       .slice(0, options.limit)
       .map((inst) => structuredClone(inst));
   }
+
+  // (v7.0.0) Required on every adapter, not just ones with a definitionStore.
+  // Backs the startup executability check and listDefinitionVersions().
+  // An empty excludeStates must exclude nothing.
+  async countInstances(options: {
+    workflowName: string;
+    definitionVersion: number;
+    excludeStates: readonly string[];
+  }): Promise<number> {
+    return [...this.instances.values()].filter(
+      (inst) =>
+        inst.workflowName === options.workflowName &&
+        inst.definitionVersion === options.definitionVersion &&
+        !options.excludeStates.includes(inst.currentState),
+    ).length;
+  }
 }
 ```
 
@@ -125,7 +141,7 @@ class InMemoryTransactionRunner implements WorkflowTransactionRunner {
 
 ### InMemoryDefinitionStore (v5.0.0)
 
-Only needed when a test exercises definition versioning itself (the version-bump guard, `initialize()`) — most workflow tests can omit `definitionStore` entirely and versioning stays inert. `ensure()` must be insert-if-absent: a second call for the same `(workflowName, version)` returns the original row untouched, which is what lets the bump guard detect a content-hash mismatch.
+Only needed when a test exercises definition versioning itself (the version-bump guard, `initialize()`, **(v7.0.0)** pinning to an older version, `listDefinitionVersions()`, or the startup executability check) — most workflow tests can omit `definitionStore` entirely and versioning stays inert (every instance executes the latest registered definition). `ensure()` must be insert-if-absent: a second call for the same `(workflowName, version)` returns the original row untouched, which is what lets the bump guard detect a content-hash mismatch.
 
 ```ts
 import type { WorkflowDefinitionStore, StoredWorkflowDefinition, WorkflowDefinition } from "@duraflows/core";
@@ -151,6 +167,14 @@ class InMemoryDefinitionStore implements WorkflowDefinitionStore {
   async findByNameAndVersion(workflowName: string, version: number): Promise<StoredWorkflowDefinition | null> {
     const row = this.rows.get(`${workflowName}@${version}`);
     return row ? structuredClone(row) : null;
+  }
+
+  // (v7.0.0) Required: every stored snapshot of workflowName, ordered by version ascending.
+  async listVersions(workflowName: string): Promise<StoredWorkflowDefinition[]> {
+    return [...this.rows.values()]
+      .filter((row) => row.workflowName === workflowName)
+      .sort((a, b) => a.version - b.version)
+      .map((row) => structuredClone(row));
   }
 }
 ```
@@ -1153,7 +1177,50 @@ describe("MyDefinitionStore (conformance)", () => {
 });
 ```
 
-It verifies: `ensure()` inserts a new snapshot and returns it; `ensure()` returns the pre-existing row unchanged (never the caller's new content) when `(workflowName, version)` already exists; `findByNameAndVersion()` round-trips a structurally equal definition and returns `null` for unknown pairs; and different versions of the same workflow are stored as independent rows. `@duraflows/pg` and `@duraflows/kysely` both run this in CI.
+It verifies: `ensure()` inserts a new snapshot and returns it; `ensure()` returns the pre-existing row unchanged (never the caller's new content) when `(workflowName, version)` already exists; `findByNameAndVersion()` round-trips a structurally equal definition and returns `null` for unknown pairs; different versions of the same workflow are stored as independent rows; and **(v7.0.0)** `listVersions()` returns only the named workflow's snapshots ordered by `version` ascending. `@duraflows/pg` and `@duraflows/kysely` both run this in CI.
+
+### 3. Pinned execution across a deploy (v7.0.0)
+
+A definition can't hold two versions at once in one `InMemoryDefinitionRegistry`, so simulate a deploy with two runtimes sharing the same `instanceStore` and `definitionStore` -- the same `makeRuntime` helper from pattern 1 above:
+
+```ts
+it("a pinned instance keeps executing the version it was created on", async () => {
+  const v1: WorkflowDefinition = {
+    name: "order",
+    version: 1,
+    initialState: "new",
+    states: { new: { events: { Submit: { targetState: "submitted" } } }, submitted: {} },
+  };
+  // v2 changes Submit's target and drops "submitted" entirely.
+  const v2: WorkflowDefinition = {
+    name: "order",
+    version: 2,
+    initialState: "new",
+    states: { new: { events: { Submit: { targetState: "approved" } } }, approved: {} },
+  };
+
+  const runtimeV1 = makeRuntime(v1); // registers v1, shares instanceStore/definitionStore
+  const instance = await runtimeV1.createInstance({ workflowName: "order" });
+  expect(instance.definitionVersion).toBe(1);
+
+  const runtimeV2 = makeRuntime(v2); // simulates the next deploy
+  await runtimeV2.initialize(); // snapshots v2 into the shared definitionStore
+
+  // The v1 instance still follows v1's rules, even resolved through runtimeV2.
+  const result = await runtimeV2.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Submit" });
+  expect(result.toState).toBe("submitted"); // not "approved"
+
+  // A brand-new instance always starts on the latest (v2) version.
+  const fresh = await runtimeV2.createInstance({ workflowName: "order" });
+  expect(fresh.definitionVersion).toBe(2);
+});
+```
+
+Notes for this pattern:
+
+- Without a `definitionStore`, this doesn't apply -- every instance resolves the latest registered definition regardless of what it was created under, and a `console.warn` fires once per runtime the first time a pinned definition is resolved.
+- To test `versionPolicy: "latest"` instead, register `v2` with `versionPolicy: "latest"` and drop a state the instance is sitting in (rather than renaming a target); assert `runtimeV2.triggerEvent(...)` rejects with `IncompatibleDefinitionError` (imported from `@duraflows/core`). A compatible instance (whose current state the new definition still has) resolves and adopts v2 normally.
+- `runtime.listDefinitionVersions("order")` after the above returns `[{ version: 1, activeInstances: 1, ... }, { version: 2, activeInstances: 1, ... }]` -- both versions have one non-terminal instance stamped with them.
 
 ---
 
@@ -1192,6 +1259,7 @@ The suite verifies:
 - `update` does NOT modify `metadata` (write-once after `create`)
 - `findExpired` honors limit + ordering and skips already-locked rows
 - **(v6.0.0)** `timeoutRetry` round-trips; `findExpired` skips parked and not-yet-due retries and orders by `timeoutRetry?.retryAt ?? expiresAt`; `findParkedTimeouts` filters, orders and limits parked instances
+- **(v7.0.0)** `countInstances` filters by workflow, definition version and excluded states; an empty `excludeStates` counts every matching instance
 - Nested-transaction reuse via `transactionRunner.runInTransaction`
 
 A passing run is the contract guarantee that your adapter works with the runtime. `@duraflows/pg` and `@duraflows/kysely` both run it in CI.
