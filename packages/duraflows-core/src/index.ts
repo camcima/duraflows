@@ -57,6 +57,7 @@ export {
   CommandFailureError,
   OnEnterDepthExceededError,
   IncompatibleDefinitionError,
+  MigrationInterruptedError,
 } from "./errors/index.js";
 
 // Registries

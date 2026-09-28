@@ -31,9 +31,10 @@ export class DefinitionResolver {
   private readonly compiler: WorkflowCompiler;
   private readonly definitionStore?: WorkflowDefinitionStore;
   private readonly validator: WorkflowValidator;
-  // Resolved snapshots of older versions, keyed "name@version". Failures are
-  // not cached, so a transient store error is retried on the next call.
-  private readonly snapshots = new Map<string, ResolvedDefinition>();
+  // Resolved snapshots of older versions, keyed "name@version", with the content
+  // hash they were built from. Failures are not cached, so a transient store
+  // error is retried on the next call.
+  private readonly snapshots = new Map<string, { resolved: ResolvedDefinition; contentHash: string }>();
   private warnedNoStore = false;
 
   constructor(options: DefinitionResolverOptions) {
@@ -77,6 +78,7 @@ export class DefinitionResolver {
       instance.workflowName,
       instance.definitionVersion,
       `instance ${instance.uuid} is pinned to version ${instance.definitionVersion}, which is not in the definition store`,
+      true,
     );
   }
 
@@ -98,7 +100,13 @@ export class DefinitionResolver {
       workflowName,
       version,
       `version ${version} is not in the definition store`,
+      false,
     );
+  }
+
+  /** Drops a cached snapshot so the next resolution of `workflowName@version` reads the store again. */
+  evict(workflowName: string, version: number): void {
+    this.snapshots.delete(`${workflowName}@${version}`);
   }
 
   private latest(workflowName: string): ResolvedDefinition {
@@ -111,15 +119,21 @@ export class DefinitionResolver {
     workflowName: string,
     version: number,
     missingMessage: string,
+    revalidate: boolean,
   ): Promise<ResolvedDefinition> {
     const key = `${workflowName}@${version}`;
     const cached = this.snapshots.get(key);
-    if (cached) return cached;
+    // A migration target is checked against the store when the instance is written, so its cached
+    // copy can be used as is. A pinned instance executes the copy directly, and the copy may have
+    // been read from a row whose transaction later rolled back before different content was
+    // committed under the same version — so re-read the row and reuse the copy only if it matches.
+    if (cached && !revalidate) return cached.resolved;
 
     const stored = await store.findByNameAndVersion(workflowName, version);
     if (!stored) {
       throw new WorkflowDefinitionError(workflowName, missingMessage);
     }
+    if (cached && cached.contentHash === stored.contentHash) return cached.resolved;
     const definition = deepFreeze(structuredClone(stored.definitionJson));
     // Structure only: whether its commands and guards are registered is the
     // startup executability check's job.
@@ -131,7 +145,7 @@ export class DefinitionResolver {
       );
     }
     const resolved = { definition, compiled: this.compiler.compile(definition) };
-    this.snapshots.set(key, resolved);
+    this.snapshots.set(key, { resolved, contentHash: stored.contentHash });
     return resolved;
   }
 

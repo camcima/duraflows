@@ -123,13 +123,17 @@ export class InMemoryInstanceStore implements WorkflowInstanceStore, Snapshotabl
     definitionVersion: number;
     limit: number;
     afterUuid?: string;
+    states?: readonly string[];
+    excludeStates?: readonly string[];
   }): Promise<string[]> {
     return [...this.instances.values()]
       .filter(
         (instance) =>
           instance.workflowName === options.workflowName &&
           instance.definitionVersion === options.definitionVersion &&
-          (options.afterUuid === undefined || instance.uuid > options.afterUuid),
+          (options.afterUuid === undefined || instance.uuid > options.afterUuid) &&
+          (options.states === undefined || options.states.includes(instance.currentState)) &&
+          (options.excludeStates === undefined || !options.excludeStates.includes(instance.currentState)),
       )
       .map((instance) => instance.uuid)
       .sort()

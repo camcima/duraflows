@@ -164,15 +164,26 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
     definitionVersion: number;
     limit: number;
     afterUuid?: string;
+    states?: readonly string[];
+    excludeStates?: readonly string[];
   }): Promise<string[]> {
     const client = this.getClient();
     const result = await client.query(
       `SELECT uuid FROM workflow_instances
        WHERE workflow_name = $1 AND definition_version = $2
          AND ($3::uuid IS NULL OR uuid > $3::uuid)
+         AND ($5::text[] IS NULL OR current_state = ANY($5::text[]))
+         AND ($6::text[] IS NULL OR NOT (current_state = ANY($6::text[])))
        ORDER BY uuid
        LIMIT $4`,
-      [options.workflowName, options.definitionVersion, options.afterUuid ?? null, options.limit],
+      [
+        options.workflowName,
+        options.definitionVersion,
+        options.afterUuid ?? null,
+        options.limit,
+        options.states ? [...options.states] : null,
+        options.excludeStates ? [...options.excludeStates] : null,
+      ],
     );
     return result.rows.map((row: { uuid: string }) => row.uuid);
   }

@@ -70,9 +70,14 @@ function isTimeoutDue(instance: WorkflowInstance, now: Date): boolean {
   return !retryAt || retryAt <= now;
 }
 
-/** Whether `instance` is still the one a sweep scanned: same state, deadline and failure count. */
+/**
+ * Whether `instance` is still the one a sweep scanned. The row version changes on every update
+ * (a migration, a manual transition, a re-arm), so a failure is never recorded against a row that
+ * moved on — even one that kept the same state, deadline and failure count.
+ */
 function matchesTimeoutSnapshot(instance: WorkflowInstance, snapshot: WorkflowInstance): boolean {
   return (
+    instance.version === snapshot.version &&
     instance.currentState === snapshot.currentState &&
     instance.expiresAt?.getTime() === snapshot.expiresAt?.getTime() &&
     (instance.timeoutRetry?.attempts ?? 0) === (snapshot.timeoutRetry?.attempts ?? 0)
@@ -195,6 +200,9 @@ export class WorkflowRuntime {
       clock: this.clock,
       definitionResolver: this.definitionResolver,
       timeoutResolver: this.timeoutResolver,
+      commandRegistry: this.commandRegistry,
+      guardRegistry: this.guardRegistry,
+      ensureSnapshot: (definition: WorkflowDefinition) => this.ensureSnapshot(definition),
       runWithObservers: <T>(work: (eventsToFire: StateEnterEvent[]) => Promise<T>) => this.runWithObservers(work),
     });
   }
@@ -264,22 +272,65 @@ export class WorkflowRuntime {
   private async syncDefinitions(): Promise<void> {
     if (!this.definitionStore) return;
     for (const definition of this.definitionRegistry.getAll()) {
-      const version = this.definitionVersionOf(definition);
-      const contentHash = computeDefinitionHash(definition);
-      const stored = await this.definitionStore.ensure({
-        workflowName: definition.name,
-        version,
-        contentHash,
-        definitionJson: definition,
-      });
-      if (stored.contentHash !== contentHash) {
-        throw new WorkflowDefinitionError(
-          definition.name,
-          `Definition content changed but version ${version} was not bumped ` +
-            `(stored ${stored.contentHash}, registered ${contentHash}). ` +
-            `Bump the definition's "version" field to publish the change.`,
-        );
-      }
+      await this.writeSnapshot(this.definitionStore, definition);
+    }
+  }
+
+  /** Stores `definition`'s snapshot if absent and enforces the version-bump guard. */
+  private async writeSnapshot(store: WorkflowDefinitionStore, definition: WorkflowDefinition): Promise<void> {
+    const version = this.definitionVersionOf(definition);
+    const contentHash = computeDefinitionHash(definition);
+    const stored = await store.ensure({
+      workflowName: definition.name,
+      version,
+      contentHash,
+      definitionJson: definition,
+    });
+    if (stored.contentHash !== contentHash) {
+      throw new WorkflowDefinitionError(
+        definition.name,
+        `Definition content changed but version ${version} was not bumped ` +
+          `(stored ${stored.contentHash}, registered ${contentHash}). ` +
+          `Bump the definition's "version" field to publish the change.`,
+      );
+    }
+  }
+
+  /**
+   * Writes the snapshot of the version an instance is about to be stamped with, in the current
+   * transaction: a new instance, a legacy or "latest"-policy instance adopting the latest version,
+   * a migration. The instance row and its version's snapshot then commit or roll back together,
+   * whoever owns the transaction — so an instance can never commit pinned to a version the store
+   * lacks. Keyed by name and version only: neither a cached definition (it may have been read from
+   * a row a since-rolled-back transaction wrote) nor a registry's object identity proves a
+   * snapshot is persisted.
+   */
+  private async ensureSnapshot(definition: WorkflowDefinition): Promise<void> {
+    if (!this.definitionStore) return;
+    const version = this.definitionVersionOf(definition);
+    const registered = this.definitionRegistry.get(definition.name);
+    if (version === this.definitionVersionOf(registered)) {
+      // The registered version: also enforce the version-bump guard.
+      await this.writeSnapshot(this.definitionStore, registered);
+      return;
+    }
+    // Another version (a migration target): re-insert it from the content we hold if it is gone,
+    // and refuse to stamp if what is stored differs from the copy the caller planned with (e.g. a
+    // cached copy of a row that rolled back before different content was committed).
+    const contentHash = computeDefinitionHash(definition);
+    const stored = await this.definitionStore.ensure({
+      workflowName: definition.name,
+      version,
+      contentHash,
+      definitionJson: definition,
+    });
+    if (stored.contentHash !== contentHash) {
+      this.definitionResolver.evict(definition.name, version);
+      throw new WorkflowDefinitionError(
+        definition.name,
+        `stored version ${version} differs from the copy loaded earlier ` +
+          `(stored ${stored.contentHash}, loaded ${contentHash}); retry to use the stored version`,
+      );
     }
   }
 
@@ -314,6 +365,7 @@ export class WorkflowRuntime {
 
     if (stateDef?.onEnter) {
       return this.runWithObservers(async (eventsToFire) => {
+        await this.ensureSnapshot(definition);
         await this.instanceStore.create(instance);
 
         const executionContext: WorkflowExecutionContext = {
@@ -345,6 +397,7 @@ export class WorkflowRuntime {
     }
 
     return this.runWithObservers(async (eventsToFire) => {
+      await this.ensureSnapshot(definition);
       await this.instanceStore.create(instance);
 
       eventsToFire.push(
@@ -372,6 +425,9 @@ export class WorkflowRuntime {
       }
 
       const { definition, compiled } = await this.definitionResolver.forInstance(instance);
+      if (instance.definitionVersion !== this.definitionVersionOf(definition)) {
+        await this.ensureSnapshot(definition);
+      }
 
       const eventDef = definition.states[instance.currentState]?.events?.[input.eventName];
       const prospectiveToState = eventDef?.targetState ?? instance.currentState;
@@ -513,6 +569,9 @@ export class WorkflowRuntime {
 
           // Resolve definition + eventName from the FRESHLY-LOCKED state, not the pre-lock snapshot.
           const { definition } = await this.definitionResolver.forInstance(instance);
+          if (instance.definitionVersion !== this.definitionVersionOf(definition)) {
+            await this.ensureSnapshot(definition);
+          }
           const eventName = this.timeoutResolver.getTimeoutEventName(definition, instance.currentState);
 
           if (!eventName) {

@@ -6,7 +6,12 @@ import {
   runDefinitionStoreConformance,
   runTransactionRunnerConformance,
 } from "@duraflows/core/testing";
-import type { WorkflowInstance, WorkflowHistoryRecord, WorkflowDefinition } from "@duraflows/core";
+import type {
+  WorkflowInstance,
+  WorkflowHistoryRecord,
+  WorkflowDefinition,
+  WorkflowDefinitionRegistry,
+} from "@duraflows/core";
 import {
   WorkflowRuntime,
   InMemoryDefinitionRegistry,
@@ -458,6 +463,307 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       ]);
       await runtimeV2.triggerEvent({ workflowInstanceUuid: uuids[0], eventName: "Approve" });
       expect((await runtimeV2.getInstance(uuids[0]))!.currentState).toBe("accepted");
+    });
+
+    it("filters by state in the query and finishes with a cursor loop", async () => {
+      const runtimeV1 = buildRuntime(v1);
+      const approved: string[] = [];
+      const reviewing: string[] = [];
+      for (let i = 0; i < 30; i++) {
+        const instance = await runtimeV1.createInstance({ workflowName: "migrating-order" });
+        await runtimeV1.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Submit" });
+        if (i % 3 === 0) {
+          await runtimeV1.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Approve" });
+          approved.push(instance.uuid);
+        } else {
+          reviewing.push(instance.uuid);
+        }
+      }
+
+      const runtimeV2 = buildRuntime(v2);
+      const migrated: string[] = [];
+      const skipped: unknown[] = [];
+      let cursor: string | undefined;
+      do {
+        const batch = await runtimeV2.migrateInstances({
+          workflowName: "migrating-order",
+          fromVersion: 1,
+          toVersion: 2,
+          stateMapping: { review: "checking" },
+          excludeStates: ["approved"],
+          limit: 7,
+          cursor,
+        });
+        migrated.push(...batch.migrated.map((m) => m.uuid));
+        skipped.push(...batch.skipped);
+        cursor = batch.nextCursor ?? undefined;
+      } while (cursor);
+
+      expect(skipped).toEqual([]);
+      expect([...migrated].sort()).toEqual([...reviewing].sort());
+      for (const uuid of approved) {
+        expect((await runtimeV2.getInstance(uuid))!.definitionVersion).toBe(1);
+      }
+    });
+  });
+
+  describe("pg definition snapshots and caller-owned transactions", () => {
+    const definition: WorkflowDefinition = {
+      name: "sync-rollback",
+      initialState: "open",
+      states: { open: { events: { Close: { targetState: "closed" } } }, closed: {} },
+    };
+
+    function build() {
+      const providers = pgWorkflowProviders(pool);
+      const definitionRegistry = new InMemoryDefinitionRegistry({
+        validator: new WorkflowValidator(),
+        compiler: new WorkflowCompiler(),
+      });
+      definitionRegistry.register(definition);
+      const runtime = new WorkflowRuntime({
+        definitionRegistry,
+        commandRegistry: new InMemoryCommandRegistry(),
+        ...providers,
+        clock: { now: () => new Date() },
+      });
+      return { runtime, providers };
+    }
+
+    const snapshots = async () =>
+      (
+        await pool.query("SELECT count(*)::int AS n FROM workflow_definitions WHERE workflow_name = $1", [
+          "sync-rollback",
+        ])
+      ).rows[0].n as number;
+
+    afterEach(async () => {
+      await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
+      await pool.query("TRUNCATE workflow_definitions");
+    });
+
+    it("restores a snapshot whose first sync was rolled back with the caller's transaction", async () => {
+      const { runtime, providers } = build();
+
+      await providers.transactionRunner
+        .runInTransaction(async () => {
+          await runtime.createInstance({ workflowName: "sync-rollback" });
+          throw new Error("caller rolls back");
+        })
+        .catch(() => undefined);
+      expect(await snapshots()).toBe(0);
+
+      await runtime.createInstance({ workflowName: "sync-rollback" });
+      expect(await snapshots()).toBe(1);
+    });
+
+    it("writes the snapshot with the instance in a transaction the caller owns and rolls back", async () => {
+      const { runtime } = build();
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await PgTransactionContext.run(pool, client, () => runtime.createInstance({ workflowName: "sync-rollback" }));
+        await client.query("ROLLBACK");
+      } finally {
+        client.release();
+      }
+      expect(await snapshots()).toBe(0);
+
+      const instance = await runtime.createInstance({ workflowName: "sync-rollback" });
+
+      expect(await snapshots()).toBe(1);
+      expect(await runtime.getInstance(instance.uuid)).not.toBeNull();
+    });
+
+    it("persists the snapshot even when a custom registry returns a fresh object on every get()", async () => {
+      const inner = new InMemoryDefinitionRegistry();
+      inner.register(definition);
+      const cloningRegistry: WorkflowDefinitionRegistry = {
+        get: (name) => structuredClone(inner.get(name)),
+        has: (name) => inner.has(name),
+        getAll: () => inner.getAll().map((d) => structuredClone(d)),
+      };
+      const providers = pgWorkflowProviders(pool);
+      const runtime = new WorkflowRuntime({
+        definitionRegistry: cloningRegistry,
+        commandRegistry: new InMemoryCommandRegistry(),
+        ...providers,
+        clock: { now: () => new Date() },
+      });
+
+      await providers.transactionRunner
+        .runInTransaction(async () => {
+          await runtime.createInstance({ workflowName: "sync-rollback" });
+          throw new Error("caller rolls back");
+        })
+        .catch(() => undefined);
+      expect(await snapshots()).toBe(0);
+
+      await runtime.createInstance({ workflowName: "sync-rollback" });
+      expect(await snapshots()).toBe(1);
+    });
+
+    it("re-establishes a cached migration target whose snapshot row was rolled back", async () => {
+      const versioned = (version: number): WorkflowDefinition => ({
+        ...definition,
+        version,
+        states: { ...definition.states, open: { events: { Close: { targetState: "closed" } }, metadata: { version } } },
+      });
+      const build = (def: WorkflowDefinition) => {
+        const registry = new InMemoryDefinitionRegistry();
+        registry.register(def);
+        return new WorkflowRuntime({
+          definitionRegistry: registry,
+          commandRegistry: new InMemoryCommandRegistry(),
+          ...pgWorkflowProviders(pool),
+          clock: { now: () => new Date() },
+        });
+      };
+      const instance = await build(versioned(1)).createInstance({ workflowName: "sync-rollback" });
+      const runtimeV3 = build(versioned(3));
+      await runtimeV3.initialize();
+      const toV2 = { workflowName: "sync-rollback", fromVersion: 1, toVersion: 2 };
+
+      // v2's row only exists inside this transaction; the migration loads (and caches) it, then all rolls back.
+      await pgWorkflowProviders(pool)
+        .transactionRunner.runInTransaction(async () => {
+          await build(versioned(2)).initialize();
+          await runtimeV3.migrateInstances(toV2);
+          throw new Error("caller rolls back");
+        })
+        .catch(() => undefined);
+
+      const retry = await runtimeV3.migrateInstances(toV2);
+
+      expect(retry.migrated.map((m) => m.uuid)).toEqual([instance.uuid]);
+      const v2Rows = await pool.query(
+        "SELECT count(*)::int AS n FROM workflow_definitions WHERE workflow_name = $1 AND version = 2",
+        ["sync-rollback"],
+      );
+      expect(v2Rows.rows[0].n).toBe(1);
+      await build(versioned(3)).triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Close" });
+      expect((await runtimeV3.getInstance(instance.uuid))!.currentState).toBe("closed");
+    });
+
+    it("refuses a cached migration target that no longer matches the committed version", async () => {
+      const build = (def: WorkflowDefinition) => {
+        const registry = new InMemoryDefinitionRegistry();
+        registry.register(def);
+        return new WorkflowRuntime({
+          definitionRegistry: registry,
+          commandRegistry: new InMemoryCommandRegistry(),
+          ...pgWorkflowProviders(pool),
+          clock: { now: () => new Date() },
+        });
+      };
+      const v2Open: WorkflowDefinition = { ...definition, version: 2 };
+      const v2Replacement: WorkflowDefinition = {
+        name: "sync-rollback",
+        version: 2,
+        initialState: "replacement",
+        states: { replacement: { events: { Close: { targetState: "closed" } } }, closed: {} },
+      };
+      const instance = await build(definition).createInstance({ workflowName: "sync-rollback" });
+      const runtimeV3 = build({ ...definition, version: 3 });
+      await runtimeV3.initialize();
+      const toV2 = { workflowName: "sync-rollback", fromVersion: 1, toVersion: 2 };
+
+      // Cache v2 ("open") from a row that then rolls back; different v2 content is committed afterwards.
+      await pgWorkflowProviders(pool)
+        .transactionRunner.runInTransaction(async () => {
+          await build(v2Open).initialize();
+          await runtimeV3.migrateInstances(toV2);
+          throw new Error("caller rolls back");
+        })
+        .catch(() => undefined);
+      await build(v2Replacement).initialize();
+
+      const stale = await runtimeV3.migrateInstances(toV2);
+
+      expect(stale.migrated).toEqual([]);
+      expect(stale.failed).toEqual([
+        { uuid: instance.uuid, error: expect.stringMatching(/stored version 2 differs from the copy loaded earlier/) },
+      ]);
+      expect((await runtimeV3.getInstance(instance.uuid))!.definitionVersion).toBe(1);
+
+      // The retry reloads the committed v2 and plans against it.
+      const retry = await runtimeV3.migrateInstances({ ...toV2, stateMapping: { open: "replacement" } });
+      expect(retry.migrated).toEqual([{ uuid: instance.uuid, fromState: "open", toState: "replacement" }]);
+      await build({ ...definition, version: 3 }).triggerEvent({
+        workflowInstanceUuid: instance.uuid,
+        eventName: "Close",
+      });
+      expect((await runtimeV3.getInstance(instance.uuid))!.currentState).toBe("closed");
+    });
+
+    it("runs a pinned instance on the committed version, not a copy cached from a rolled-back row", async () => {
+      const build = (def: WorkflowDefinition) => {
+        const registry = new InMemoryDefinitionRegistry();
+        registry.register(def);
+        return new WorkflowRuntime({
+          definitionRegistry: registry,
+          commandRegistry: new InMemoryCommandRegistry(),
+          ...pgWorkflowProviders(pool),
+          clock: { now: () => new Date() },
+        });
+      };
+      const v2WithoutHold: WorkflowDefinition = { ...definition, version: 2 };
+      const v2WithHold: WorkflowDefinition = {
+        name: "sync-rollback",
+        version: 2,
+        initialState: "open",
+        states: {
+          open: { events: { Close: { targetState: "closed" }, Hold: { targetState: "held" } } },
+          held: {},
+          closed: {},
+        },
+      };
+      const runtimeV3 = build({ ...definition, version: 3 });
+      await runtimeV3.initialize();
+
+      // runtimeV3 caches v2 (no Hold) from a row that then rolls back.
+      await pgWorkflowProviders(pool)
+        .transactionRunner.runInTransaction(async () => {
+          const doomed = await build(v2WithoutHold).createInstance({ workflowName: "sync-rollback" });
+          await runtimeV3.getAvailableEvents({ workflowInstanceUuid: doomed.uuid });
+          throw new Error("caller rolls back");
+        })
+        .catch(() => undefined);
+      const instance = await build(v2WithHold).createInstance({ workflowName: "sync-rollback" });
+
+      await runtimeV3.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Hold" });
+
+      expect((await runtimeV3.getInstance(instance.uuid))!.currentState).toBe("held");
+    });
+
+    it("gives an instance created during another request's rolled-back sync its own snapshot", async () => {
+      const { runtime, providers } = build();
+      let markSynced!: () => void;
+      const aSynced = new Promise<void>((resolve) => {
+        markSynced = resolve;
+      });
+      let markBStarted!: () => void;
+      const bStarted = new Promise<void>((resolve) => {
+        markBStarted = resolve;
+      });
+
+      // Request A syncs inside its own transaction, then rolls back after B has started.
+      const requestA = providers.transactionRunner
+        .runInTransaction(async () => {
+          await runtime.initialize();
+          markSynced();
+          await bStarted;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          throw new Error("request A rolls back");
+        })
+        .catch(() => undefined);
+      await aSynced;
+      const requestB = runtime.createInstance({ workflowName: "sync-rollback" });
+      markBStarted();
+      const [, instance] = await Promise.all([requestA, requestB]);
+
+      expect(await snapshots()).toBe(1);
+      expect(await runtime.getInstance(instance.uuid)).not.toBeNull();
     });
   });
 

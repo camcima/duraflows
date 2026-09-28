@@ -1,13 +1,22 @@
+import { runInNewContext } from "node:vm";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   WorkflowRuntime,
   InMemoryDefinitionRegistry,
   InMemoryCommandRegistry,
+  InMemoryGuardRegistry,
   WorkflowDefinitionError,
   WorkflowError,
   InvalidArgumentError,
+  MigrationInterruptedError,
 } from "../../src/index.js";
-import type { WorkflowDefinition, WorkflowObserver, StateEnterEvent, WorkflowInstance } from "../../src/index.js";
+import type {
+  WorkflowDefinition,
+  WorkflowObserver,
+  StateEnterEvent,
+  WorkflowInstance,
+  MigrateInstancesInput,
+} from "../../src/index.js";
 import { createInMemoryPersistence, InMemoryDefinitionStore } from "../helpers/in-memory-persistence.js";
 
 const start = Date.parse("2026-06-01T00:00:00Z");
@@ -125,6 +134,8 @@ describe("migrateInstances: relabeling", () => {
       migrated: [{ uuid: before.uuid, fromState: "review", toState: "checking" }],
       skipped: [],
       failed: [],
+      nextCursor: null,
+      warnings: [],
     });
     const after = (await runtimeV2.getInstance(before.uuid))!;
     expect(after.currentState).toBe("checking");
@@ -242,7 +253,7 @@ describe("migrateInstances: relabeling", () => {
 
     const second = await runtimeV2.migrateInstances({ ...toV2, stateMapping: { review: "checking" } });
 
-    expect(second).toEqual({ dryRun: false, migrated: [], skipped: [], failed: [] });
+    expect(second).toEqual({ dryRun: false, migrated: [], skipped: [], failed: [], nextCursor: null, warnings: [] });
   });
 
   it("migrates down to an older version loaded from its snapshot", async () => {
@@ -377,6 +388,8 @@ describe("migrateInstances: dry run", () => {
       migrated: [{ uuid: mapped.uuid, fromState: "review", toState: "checking" }],
       skipped: [],
       failed: [{ uuid: failing.uuid, error: "cannot transform" }],
+      nextCursor: null,
+      warnings: [],
     });
     expect((await runtimeV2.getInstance(mapped.uuid))!.definitionVersion).toBe(1);
     expect(await runtimeV2.getHistory(mapped.uuid)).toEqual(historyBefore);
@@ -515,5 +528,510 @@ describe("migrateInstances: upfront validation", () => {
     await expect(promise).rejects.toThrow(
       "migrateInstances without instanceUuids requires an instance store that implements findInstanceUuids",
     );
+  });
+});
+
+describe("migrateInstances: state filter", () => {
+  it("leaves filtered instances out of paging entirely", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    const reviewing = [];
+    for (let i = 0; i < 5; i++) reviewing.push(await inReview(runtimeV1));
+    for (let i = 0; i < 5; i++) await runtimeV1.createInstance({ workflowName: "order" });
+
+    const result = await runtimeV2.migrateInstances({ ...toV2, excludeStates: ["review"] });
+
+    expect(result.migrated).toHaveLength(5);
+    expect(result.skipped).toEqual([]);
+    for (const instance of reviewing) {
+      expect((await runtimeV2.getInstance(instance.uuid))!.definitionVersion).toBe(1);
+    }
+  });
+
+  it("filtered instances don't count against limit", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    for (let i = 0; i < 150; i++) await inReview(runtimeV1);
+    const fresh = [];
+    for (let i = 0; i < 3; i++) fresh.push(await runtimeV1.createInstance({ workflowName: "order" }));
+
+    const result = await runtimeV2.migrateInstances({ ...toV2, states: ["new"], limit: 3 });
+
+    expect(result.migrated.map((m) => m.uuid).sort()).toEqual(fresh.map((f) => f.uuid).sort());
+    expect(result.skipped).toEqual([]);
+  });
+
+  it("skips explicit instanceUuids in a filtered-out state", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    const reviewing = await inReview(runtimeV1);
+    const fresh = await runtimeV1.createInstance({ workflowName: "order" });
+
+    const result = await runtimeV2.migrateInstances({
+      ...toV2,
+      instanceUuids: [reviewing.uuid, fresh.uuid],
+      excludeStates: ["review"],
+    });
+
+    expect(result.skipped).toEqual([{ uuid: reviewing.uuid, reason: "state review is excluded by the state filter" }]);
+    expect(result.migrated.map((m) => m.uuid)).toEqual([fresh.uuid]);
+  });
+
+  it("stays correct when the store ignores the hints", async () => {
+    const { persistence, runtimeV1, runtimeV2 } = world();
+    const reviewing = await inReview(runtimeV1);
+    const fresh = await runtimeV1.createInstance({ workflowName: "order" });
+    const original = persistence.instanceStore.findInstanceUuids.bind(persistence.instanceStore);
+    vi.spyOn(persistence.instanceStore, "findInstanceUuids").mockImplementation((options) =>
+      original({ ...options, states: undefined, excludeStates: undefined }),
+    );
+
+    const result = await runtimeV2.migrateInstances({ ...toV2, excludeStates: ["review"] });
+
+    expect(result.migrated.map((m) => m.uuid)).toEqual([fresh.uuid]);
+    expect(result.skipped).toEqual([{ uuid: reviewing.uuid, reason: "state review is excluded by the state filter" }]);
+  });
+});
+
+describe("migrateInstances: cursor", () => {
+  it("a cursor loop migrates everything and never examines an instance twice", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    for (let i = 0; i < 60; i++) await inReview(runtimeV1); // no mapping → skipped
+    for (let i = 0; i < 70; i++) await runtimeV1.createInstance({ workflowName: "order" });
+
+    const seen: string[] = [];
+    let migrated = 0;
+    let skipped = 0;
+    let calls = 0;
+    let cursor: string | undefined;
+    do {
+      const batch = await runtimeV2.migrateInstances({ ...toV2, limit: 25, cursor });
+      seen.push(...batch.migrated.map((m) => m.uuid), ...batch.skipped.map((s) => s.uuid));
+      migrated += batch.migrated.length;
+      skipped += batch.skipped.length;
+      cursor = batch.nextCursor ?? undefined;
+      calls++;
+    } while (cursor);
+
+    expect(new Set(seen).size).toBe(seen.length);
+    expect([migrated, skipped]).toEqual([70, 60]);
+    expect(calls).toBe(6);
+  });
+
+  it("returns a null nextCursor when every candidate was examined, and with instanceUuids", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    const a = await runtimeV1.createInstance({ workflowName: "order" });
+    await runtimeV1.createInstance({ workflowName: "order" });
+
+    expect((await runtimeV2.migrateInstances({ ...toV2, instanceUuids: [a.uuid], limit: 1 })).nextCursor).toBeNull();
+    expect((await runtimeV2.migrateInstances({ ...toV2, limit: 10 })).nextCursor).toBeNull();
+  });
+
+  it("sets nextCursor when the limit is reached exactly on the last candidate", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    const uuids = [];
+    for (let i = 0; i < 5; i++) uuids.push((await runtimeV1.createInstance({ workflowName: "order" })).uuid);
+
+    const first = await runtimeV2.migrateInstances({ ...toV2, limit: 5 });
+    const second = await runtimeV2.migrateInstances({ ...toV2, limit: 5, cursor: first.nextCursor! });
+
+    expect(first.nextCursor).toBe([...uuids].sort()[4]);
+    expect(second).toEqual({ dryRun: false, migrated: [], skipped: [], failed: [], nextCursor: null, warnings: [] });
+  });
+
+  it("honours the cursor in a dry run", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    for (let i = 0; i < 30; i++) await runtimeV1.createInstance({ workflowName: "order" });
+
+    const first = await runtimeV2.migrateInstances({ ...toV2, dryRun: true, limit: 10 });
+    const second = await runtimeV2.migrateInstances({ ...toV2, dryRun: true, limit: 10, cursor: first.nextCursor! });
+
+    const firstUuids = first.migrated.map((m) => m.uuid);
+    expect(second.migrated).toHaveLength(10);
+    for (const { uuid } of second.migrated) {
+      expect(uuid > first.nextCursor!).toBe(true);
+      expect(firstUuids).not.toContain(uuid);
+    }
+  });
+});
+
+describe("migrateInstances: interruption", () => {
+  it("throws MigrationInterruptedError with the partial result when paging fails, and resuming finishes", async () => {
+    const { persistence, runtimeV1, runtimeV2 } = world();
+    for (let i = 0; i < 150; i++) await runtimeV1.createInstance({ workflowName: "order" });
+    const original = persistence.instanceStore.findInstanceUuids.bind(persistence.instanceStore);
+    const spy = vi.spyOn(persistence.instanceStore, "findInstanceUuids");
+    spy.mockImplementationOnce(original).mockRejectedValueOnce(new Error("connection lost"));
+
+    const error = await runtimeV2.migrateInstances({ ...toV2 }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(MigrationInterruptedError);
+    const interrupted = error as MigrationInterruptedError;
+    expect(interrupted.message).toBe(
+      "migrateInstances was interrupted after examining 100 candidates: connection lost",
+    );
+    expect((interrupted.cause as Error).message).toBe("connection lost");
+    expect(interrupted.result.migrated).toHaveLength(100);
+    expect(interrupted.result.nextCursor).toBe(interrupted.result.migrated[99].uuid);
+
+    spy.mockRestore();
+    const rest = await runtimeV2.migrateInstances({ ...toV2, cursor: interrupted.result.nextCursor! });
+    expect(rest.migrated).toHaveLength(50);
+    expect(rest.nextCursor).toBeNull();
+  });
+
+  it("interrupts when a page does not advance past the cursor", async () => {
+    const { persistence, runtimeV1, runtimeV2 } = world();
+    const a = await runtimeV1.createInstance({ workflowName: "order" });
+    vi.spyOn(persistence.instanceStore, "findInstanceUuids").mockResolvedValue([a.uuid]);
+
+    const error = (await runtimeV2.migrateInstances({ ...toV2 }).catch((caught: unknown) => caught)) as Error;
+
+    expect(error).toBeInstanceOf(MigrationInterruptedError);
+    expect(error.message).toBe(
+      `migrateInstances was interrupted after examining 1 candidates: ` +
+        `findInstanceUuids returned a page that does not advance past ${a.uuid}`,
+    );
+    expect((error as MigrationInterruptedError).result.nextCursor).toBe(a.uuid);
+  });
+
+  it("safely formats a non-Error, unstringifiable rejection from findInstanceUuids", async () => {
+    const { persistence, runtimeV2 } = world();
+    vi.spyOn(persistence.instanceStore, "findInstanceUuids").mockRejectedValue(Object.create(null));
+
+    const error = (await runtimeV2.migrateInstances({ ...toV2 }).catch((caught: unknown) => caught)) as Error;
+
+    expect(error).toBeInstanceOf(MigrationInterruptedError);
+    expect(error.message).toBe("migrateInstances was interrupted after examining 0 candidates: [object Object]");
+  });
+
+  it("drops rows beyond the requested limit", async () => {
+    const { persistence, runtimeV1, runtimeV2 } = world();
+    for (let i = 0; i < 10; i++) await runtimeV1.createInstance({ workflowName: "order" });
+    const original = persistence.instanceStore.findInstanceUuids.bind(persistence.instanceStore);
+    vi.spyOn(persistence.instanceStore, "findInstanceUuids").mockImplementation((options) =>
+      original({ ...options, limit: 1000 }),
+    );
+
+    const result = await runtimeV2.migrateInstances({ ...toV2, limit: 3 });
+
+    expect(result.migrated).toHaveLength(3);
+    expect(result.nextCursor).toBe(result.migrated[2].uuid);
+  });
+
+  it("interrupts on a page entry that is not a UUID string, without looping forever", async () => {
+    const { persistence, runtimeV2 } = world();
+    vi.spyOn(persistence.instanceStore, "findInstanceUuids").mockResolvedValue([undefined as unknown as string]);
+
+    const error = (await runtimeV2.migrateInstances({ ...toV2 }).catch((caught: unknown) => caught)) as Error;
+
+    expect(error).toBeInstanceOf(MigrationInterruptedError);
+    expect(error.message).toBe(
+      "migrateInstances was interrupted after examining 0 candidates: " +
+        "findInstanceUuids returned a page with an entry that is not a UUID string",
+    );
+    expect((error as MigrationInterruptedError).result.nextCursor).toBeNull();
+  });
+
+  it("interrupts when the first page (no cursor) is not internally ascending", async () => {
+    const { persistence, runtimeV1, runtimeV2 } = world();
+    const a = await runtimeV1.createInstance({ workflowName: "order" });
+    const b = await runtimeV1.createInstance({ workflowName: "order" });
+    const [lo, hi] = [a.uuid, b.uuid].sort();
+    vi.spyOn(persistence.instanceStore, "findInstanceUuids").mockResolvedValue([hi, lo]);
+
+    const error = (await runtimeV2.migrateInstances({ ...toV2 }).catch((caught: unknown) => caught)) as Error;
+
+    expect(error).toBeInstanceOf(MigrationInterruptedError);
+    expect(error.message).toBe(
+      "migrateInstances was interrupted after examining 0 candidates: " +
+        "findInstanceUuids returned a page that does not advance past the start",
+    );
+    expect((error as MigrationInterruptedError).result.nextCursor).toBeNull();
+  });
+});
+
+describe("migrateInstances: target warnings", () => {
+  const w1: WorkflowDefinition = {
+    name: "billing",
+    initialState: "open",
+    states: { open: { events: { Pay: { targetState: "paid" } } }, paid: {} },
+  };
+  const w2: WorkflowDefinition = {
+    name: "billing",
+    version: 2,
+    initialState: "open",
+    states: {
+      open: { events: { Pay: { targetState: "paid", guard: { name: "isVip" }, commands: [{ name: "chargeV2" }] } } },
+      paid: {},
+    },
+  };
+
+  function runtimeFor(
+    definition: WorkflowDefinition,
+    persistence: ReturnType<typeof createInMemoryPersistence>,
+    store: InMemoryDefinitionStore,
+    registered: { commands?: string[]; guards?: string[] },
+  ) {
+    const definitionRegistry = new InMemoryDefinitionRegistry();
+    definitionRegistry.register(definition);
+    const commandRegistry = new InMemoryCommandRegistry();
+    for (const name of registered.commands ?? [])
+      commandRegistry.register(name, { execute: async () => ({ ok: true }) });
+    let guardRegistry: InMemoryGuardRegistry | undefined;
+    if (registered.guards) {
+      guardRegistry = new InMemoryGuardRegistry();
+      for (const name of registered.guards) guardRegistry.register(name, { name, evaluate: () => true });
+    }
+    return new WorkflowRuntime({
+      definitionRegistry,
+      commandRegistry,
+      guardRegistry,
+      ...persistence,
+      definitionStore: store,
+      clock,
+    });
+  }
+
+  async function onV1() {
+    const persistence = createInMemoryPersistence();
+    const store = new InMemoryDefinitionStore();
+    const instance = await runtimeFor(w1, persistence, store, {}).createInstance({ workflowName: "billing" });
+    return { persistence, store, instance };
+  }
+
+  const billing = { workflowName: "billing", fromVersion: 1, toVersion: 2 };
+
+  it("warns about unregistered commands and guards but still migrates", async () => {
+    const { persistence, store, instance } = await onV1();
+    const runtime = runtimeFor(w2, persistence, store, { commands: [], guards: [] });
+
+    const result = await runtime.migrateInstances(billing);
+
+    expect(result.warnings).toEqual(["version 2 references unregistered commands [chargeV2], guards [isVip]"]);
+    expect(result.migrated.map((m) => m.uuid)).toEqual([instance.uuid]);
+  });
+
+  it("counts guard references as missing without a guard registry", async () => {
+    const { persistence, store } = await onV1();
+    const runtime = runtimeFor(w2, persistence, store, { commands: ["chargeV2"] });
+
+    expect((await runtime.migrateInstances({ ...billing, dryRun: true })).warnings).toEqual([
+      "version 2 references unregistered guards [isVip]",
+    ]);
+  });
+
+  it("has no warnings when everything is registered", async () => {
+    const { persistence, store } = await onV1();
+    const runtime = runtimeFor(w2, persistence, store, { commands: ["chargeV2"], guards: ["isVip"] });
+
+    expect((await runtime.migrateInstances(billing)).warnings).toEqual([]);
+  });
+});
+
+describe("migrateInstances: 7.2 validation and hardening", () => {
+  it.each([
+    [{ states: [] }, "states must not be empty"],
+    [{ states: ["new", 7] }, "states must contain only strings"],
+    [{ excludeStates: [null] }, "excludeStates must contain only strings"],
+    [{ cursor: "" }, "cursor must be a non-empty string"],
+    [
+      { cursor: "00000000-0000-0000-0000-000000000001", instanceUuids: [] },
+      "cursor cannot be combined with instanceUuids",
+    ],
+  ])("rejects %j", async (patch, message) => {
+    const { runtimeV2 } = world();
+    const promise = runtimeV2.migrateInstances({ ...toV2, ...(patch as Partial<MigrateInstancesInput>) });
+    await expect(promise).rejects.toBeInstanceOf(InvalidArgumentError);
+    await expect(promise).rejects.toThrow(message);
+  });
+
+  it.each([
+    ["a Date", () => new Date(0)],
+    ["a Map", () => new Map()],
+    [
+      "a class instance",
+      () =>
+        new (class Custom {
+          value = 1;
+        })(),
+    ],
+  ])("fails an instance whose transformContext returns %s", async (_kind, make) => {
+    const { runtimeV1, runtimeV2 } = world();
+    const instance = await runtimeV1.createInstance({ workflowName: "order" });
+
+    const result = await runtimeV2.migrateInstances({
+      ...toV2,
+      transformContext: () => make() as unknown as Record<string, unknown>,
+    });
+
+    expect(result.failed).toEqual([{ uuid: instance.uuid, error: "transformContext must return a plain object" }]);
+  });
+
+  it("accepts a null-prototype object from transformContext", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    const instance = await runtimeV1.createInstance({ workflowName: "order" });
+
+    const result = await runtimeV2.migrateInstances({
+      ...toV2,
+      transformContext: (context) =>
+        Object.assign(Object.create(null) as Record<string, unknown>, context, { tier: "gold" }),
+    });
+
+    expect(result.migrated).toHaveLength(1);
+    expect((await runtimeV2.getInstance(instance.uuid))!.context).toEqual({ tier: "gold" });
+  });
+
+  it("accepts a plain object from another realm (e.g. a Jest vm context)", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    const instance = await runtimeV1.createInstance({ workflowName: "order" });
+    const foreign = runInNewContext("({ tier: 'gold' })") as Record<string, unknown>;
+    expect(Object.getPrototypeOf(foreign)).not.toBe(Object.prototype);
+
+    const result = await runtimeV2.migrateInstances({ ...toV2, transformContext: () => foreign });
+
+    expect(result.failed).toEqual([]);
+    expect(result.migrated.map((m) => m.uuid)).toEqual([instance.uuid]);
+    expect((await runtimeV2.getInstance(instance.uuid))!.context).toEqual({ tier: "gold" });
+  });
+
+  it("accepts the context argument mutated and returned", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    const instance = await runtimeV1.createInstance({ workflowName: "order", context: { id: 7 } });
+
+    const result = await runtimeV2.migrateInstances({
+      ...toV2,
+      transformContext: (context) => {
+        context.tier = "gold";
+        return context;
+      },
+    });
+
+    expect(result.migrated.map((m) => m.uuid)).toEqual([instance.uuid]);
+    expect((await runtimeV2.getInstance(instance.uuid))!.context).toEqual({ id: 7, tier: "gold" });
+  });
+
+  it.each([
+    ["a string", () => "x"],
+    ["undefined", () => undefined],
+  ])("fails an instance whose transformContext result serializes to %s via toJSON", async (_kind, toJSON) => {
+    const { runtimeV1, runtimeV2 } = world();
+    const instance = await runtimeV1.createInstance({ workflowName: "order" });
+
+    const result = await runtimeV2.migrateInstances({ ...toV2, transformContext: () => ({ toJSON }) });
+
+    expect(result.failed).toEqual([{ uuid: instance.uuid, error: "transformContext must return a plain object" }]);
+    expect((await runtimeV2.getInstance(instance.uuid))!.definitionVersion).toBe(1);
+  });
+
+  it("fails an instance whose thrown error has a throwing message getter, not an interruption", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    const bad = await runtimeV1.createInstance({ workflowName: "order", context: { bad: true } });
+    const good = await runtimeV1.createInstance({ workflowName: "order" });
+    const hostile = new Error("hidden");
+    Object.defineProperty(hostile, "message", {
+      get() {
+        throw new Error("message getter");
+      },
+    });
+
+    const result = await runtimeV2.migrateInstances({
+      ...toV2,
+      instanceUuids: [bad.uuid, good.uuid],
+      transformContext: (context) => {
+        if (context.bad) throw hostile;
+        return context;
+      },
+    });
+
+    expect(result.failed).toEqual([{ uuid: bad.uuid, error: "unknown error" }]);
+    expect(result.migrated.map((m) => m.uuid)).toEqual([good.uuid]);
+  });
+
+  it("interrupts with a generic reason when the paging error has a throwing message getter", async () => {
+    const { persistence, runtimeV2 } = world();
+    const hostile = new Error("hidden");
+    Object.defineProperty(hostile, "message", {
+      get() {
+        throw new Error("message getter");
+      },
+    });
+    vi.spyOn(persistence.instanceStore, "findInstanceUuids").mockRejectedValue(hostile);
+
+    const error = (await runtimeV2.migrateInstances({ ...toV2 }).catch((caught: unknown) => caught)) as Error;
+
+    expect(error).toBeInstanceOf(MigrationInterruptedError);
+    expect(error.message).toBe("migrateInstances was interrupted after examining 0 candidates: unknown error");
+    expect(error.cause).toBe(hostile);
+  });
+
+  it("fails an instance whose transformContext throws a null-prototype object, not an interruption", async () => {
+    const { runtimeV1, runtimeV2 } = world();
+    const bad = await runtimeV1.createInstance({ workflowName: "order", context: { bad: true } });
+    const good = await runtimeV1.createInstance({ workflowName: "order" });
+
+    const result = await runtimeV2.migrateInstances({
+      ...toV2,
+      instanceUuids: [bad.uuid, good.uuid],
+      transformContext: (context) => {
+        if (context.bad) throw Object.create(null) as Error;
+        return context;
+      },
+    });
+
+    expect(result.failed).toEqual([{ uuid: bad.uuid, error: "[object Object]" }]);
+    expect(result.migrated.map((m) => m.uuid)).toEqual([good.uuid]);
+    expect((await runtimeV2.getInstance(bad.uuid))!.definitionVersion).toBe(1);
+  });
+});
+
+describe("migrateInstances: snapshot written with the instance", () => {
+  it("writes the target's snapshot in each migration, whether it is in code or loaded from the store", async () => {
+    const { store, runtimeV1, runtimeV2 } = world();
+    await runtimeV1.createInstance({ workflowName: "order" });
+    await runtimeV2.initialize();
+    const ensure = vi.spyOn(store, "ensure");
+
+    await runtimeV2.migrateInstances({ ...toV2 });
+
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect(ensure.mock.calls[0][0]).toMatchObject({ workflowName: "order", version: 2 });
+
+    // A stored target may have been read from a row a since-rolled-back transaction wrote,
+    // so it is re-ensured in the migrating transaction too.
+    ensure.mockClear();
+    await runtimeV2.migrateInstances({ workflowName: "order", fromVersion: 2, toVersion: 1 });
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect(ensure.mock.calls[0][0]).toMatchObject({ workflowName: "order", version: 1 });
+  });
+});
+
+describe("migrateInstances: a stale cached target", () => {
+  it("fails the candidate when the stored target no longer matches, then reloads it on retry", async () => {
+    const { store, runtimeV1, runtimeV2 } = world();
+    await runtimeV1.initialize(); // stores v1
+    const instance = await runtimeV2.createInstance({ workflowName: "order" });
+    const find = vi.spyOn(store, "findByNameAndVersion");
+    // The v1 row now holds different content than the copy this runtime will load and cache.
+    vi.spyOn(store, "ensure").mockImplementationOnce(async (record) => ({
+      ...record,
+      contentHash: "sha256:different",
+      registeredAt: new Date(),
+    }));
+    const toV1 = { workflowName: "order", fromVersion: 2, toVersion: 1 };
+
+    const first = await runtimeV2.migrateInstances(toV1);
+
+    expect(first.migrated).toEqual([]);
+    expect(first.failed).toEqual([
+      {
+        uuid: instance.uuid,
+        error: expect.stringMatching(/stored version 1 differs from the copy loaded earlier/),
+      },
+    ]);
+    expect((await runtimeV2.getInstance(instance.uuid))!.definitionVersion).toBe(2);
+
+    const loadsBefore = find.mock.calls.length;
+    const second = await runtimeV2.migrateInstances(toV1);
+
+    expect(second.migrated.map((m) => m.uuid)).toEqual([instance.uuid]);
+    expect(find.mock.calls.length).toBe(loadsBefore + 1); // the evicted target was reloaded
   });
 });

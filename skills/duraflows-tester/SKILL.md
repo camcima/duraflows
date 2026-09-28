@@ -98,18 +98,24 @@ class InMemoryInstanceStore implements WorkflowInstanceStore {
 
   // (v7.1.0) Optional: backs migrateInstances() when a caller omits instanceUuids.
   // Ascending by uuid, strictly after afterUuid when given, at most limit.
+  // (v7.2.0) states/excludeStates are hints -- honoring them is optional, but easy
+  // enough here that there's no reason not to.
   async findInstanceUuids(options: {
     workflowName: string;
     definitionVersion: number;
     limit: number;
     afterUuid?: string;
+    states?: readonly string[];
+    excludeStates?: readonly string[];
   }): Promise<string[]> {
     return [...this.instances.values()]
       .filter(
         (inst) =>
           inst.workflowName === options.workflowName &&
           inst.definitionVersion === options.definitionVersion &&
-          (options.afterUuid === undefined || inst.uuid > options.afterUuid),
+          (options.afterUuid === undefined || inst.uuid > options.afterUuid) &&
+          (options.states === undefined || options.states.includes(inst.currentState)) &&
+          (options.excludeStates === undefined || !options.excludeStates.includes(inst.currentState)),
       )
       .map((inst) => inst.uuid)
       .sort()
@@ -1240,7 +1246,7 @@ Notes for this pattern:
 
 - Without a `definitionStore`, this doesn't apply -- every instance resolves the latest registered definition regardless of what it was created under, and a `console.warn` fires once per runtime the first time a pinned definition is resolved.
 - To test `versionPolicy: "latest"` instead, register `v2` with `versionPolicy: "latest"` and drop a state the instance is sitting in (rather than renaming a target); assert `runtimeV2.triggerEvent(...)` rejects with `IncompatibleDefinitionError` (imported from `@duraflows/core`). A compatible instance (whose current state the new definition still has) resolves and adopts v2 normally.
-- `runtime.listDefinitionVersions("order")` after the above returns `[{ version: 1, activeInstances: 0, ... }, { version: 2, activeInstances: 1, ... }]`. The v1 instance rests in `submitted`, which v1 defines as `submitted: {}` -- no events and no `onEnter` -- so `terminalStates()` excludes it from the count; the fresh v2 instance sits in `new`, which still has an event, so it counts as active.
+- `runtime.listDefinitionVersions("order")` after the above returns `[{ version: 1, activeInstances: 0, ... }, { version: 2, activeInstances: 1, ... }]`. The v1 instance rests in `submitted`, which v1 defines as `submitted: {}` -- no events -- so `terminalStates()` excludes it (a state with no events is terminal even if it has an `onEnter`, which only runs on entry) from the count; the fresh v2 instance sits in `new`, which still has an event, so it counts as active.
 
 ### 4. Testing migrateInstances (v7.1.0)
 
@@ -1282,6 +1288,8 @@ it("moves a pinned instance onto the target version and records $migrated", asyn
     migrated: [{ uuid: instance.uuid, fromState: "submitted", toState: "approved" }],
     skipped: [],
     failed: [],
+    nextCursor: null, // (v7.2.0) null: every candidate was examined
+    warnings: [], // (v7.2.0) toVersion's commands/guards are all registered here
   });
   expect((await runtimeV2.getInstance(instance.uuid))!.definitionVersion).toBe(1); // untouched
 

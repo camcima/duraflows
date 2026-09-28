@@ -116,7 +116,7 @@ describe("DefinitionResolver.forInstance", () => {
     expect(find).not.toHaveBeenCalled();
   });
 
-  it("loads an older pinned version from its snapshot once, then serves it from the cache", async () => {
+  it("loads an older pinned version once and reuses it while the stored content is unchanged", async () => {
     const { resolver, definitionStore } = await setup(v2, { snapshots: [v1] });
     const find = vi.spyOn(definitionStore!, "findByNameAndVersion");
 
@@ -128,8 +128,34 @@ describe("DefinitionResolver.forInstance", () => {
     expect(Object.isFrozen(first.definition)).toBe(true);
     expect(first.compiled.process).toBeDefined();
     expect(second).toBe(first);
-    expect(find).toHaveBeenCalledOnce();
+    // Each resolution re-reads the row to confirm the cached copy is still what is stored.
+    expect(find).toHaveBeenCalledTimes(2);
     expect(find).toHaveBeenCalledWith("order", 1);
+  });
+
+  it("reloads a pinned version whose stored content changed since it was cached", async () => {
+    const { resolver, definitionStore } = await setup(v2, { snapshots: [v1] });
+    const first = await resolver.forInstance(instanceOf());
+    // E.g. the cached copy came from a row that rolled back, and different v1 content was committed.
+    const replacement: WorkflowDefinition = {
+      ...v1,
+      states: {
+        ...v1.states,
+        review: { events: { Approve: { targetState: "done" }, Reject: { targetState: "done" } } },
+      },
+    };
+    vi.spyOn(definitionStore!, "findByNameAndVersion").mockResolvedValueOnce({
+      workflowName: "order",
+      version: 1,
+      contentHash: computeDefinitionHash(replacement),
+      definitionJson: replacement,
+      registeredAt: new Date(),
+    });
+
+    const second = await resolver.forInstance(instanceOf());
+
+    expect(second).not.toBe(first);
+    expect(Object.hasOwn(second.definition.states.review.events!, "Reject")).toBe(true);
   });
 
   it("throws WorkflowDefinitionError when the pinned version's snapshot is missing", async () => {
@@ -206,7 +232,7 @@ describe("DefinitionResolver.forVersion", () => {
     const byInstance = await resolver.forInstance(instanceOf());
     expect(Object.hasOwn(byVersion.definition.states, "review")).toBe(true);
     expect(byInstance).toBe(byVersion);
-    expect(find).toHaveBeenCalledOnce();
+    expect(find).toHaveBeenCalledTimes(2);
   });
 
   it("throws WorkflowDefinitionError when the version is not in the store", async () => {

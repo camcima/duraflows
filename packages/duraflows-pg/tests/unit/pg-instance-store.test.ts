@@ -354,7 +354,7 @@ describe("PgWorkflowInstanceStore", () => {
       const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("($3::uuid IS NULL OR uuid > $3::uuid)");
       expect(sql).toContain("ORDER BY uuid");
-      expect(params).toEqual(["order", 2, "u-0", 50]);
+      expect(params).toEqual(["order", 2, "u-0", 50, null, null]);
       expect(uuids).toEqual(["u-1", "u-2"]);
     });
 
@@ -364,7 +364,25 @@ describe("PgWorkflowInstanceStore", () => {
 
       await store.findInstanceUuids({ workflowName: "order", definitionVersion: 2, limit: 50 });
 
-      expect((pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual(["order", 2, null, 50]);
+      expect((pool.query as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual(["order", 2, null, 50, null, null]);
+    });
+
+    it("findInstanceUuids passes the state hints as text arrays", async () => {
+      const pool = createMockPool({ rows: [], rowCount: 0 });
+      const store = new PgWorkflowInstanceStore(pool);
+
+      await store.findInstanceUuids({
+        workflowName: "order",
+        definitionVersion: 2,
+        limit: 50,
+        states: ["open"],
+        excludeStates: ["done", "cancelled"],
+      });
+
+      const [sql, params] = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain("($5::text[] IS NULL OR current_state = ANY($5::text[]))");
+      expect(sql).toContain("($6::text[] IS NULL OR NOT (current_state = ANY($6::text[])))");
+      expect(params).toEqual(["order", 2, null, 50, ["open"], ["done", "cancelled"]]);
     });
   });
 });

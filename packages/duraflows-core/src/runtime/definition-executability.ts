@@ -6,12 +6,13 @@ import type { WorkflowGuardRegistry } from "../registry/guard-registry.js";
 import { WorkflowValidator } from "../validation/workflow-validator.js";
 
 /**
- * States an instance never leaves: no events and no onEnter. Instances resting
- * in one never execute their definition again, so they are not "active".
+ * States an instance never leaves: no events. An onEnter runs only on entry,
+ * inside the transition that entered the state, so an instance resting in an
+ * event-less state never executes its definition again and is not "active".
  */
 export function terminalStates(definition: WorkflowDefinition): string[] {
   return Object.entries(definition.states)
-    .filter(([, state]) => Object.keys(state.events ?? {}).length === 0 && !state.onEnter)
+    .filter(([, state]) => Object.keys(state.events ?? {}).length === 0)
     .map(([name]) => name);
 }
 

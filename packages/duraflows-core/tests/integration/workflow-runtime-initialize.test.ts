@@ -107,3 +107,57 @@ describe("WorkflowRuntime.initialize", () => {
     await expect(runtime.createInstance({ workflowName: "order" })).rejects.toThrow(WorkflowDefinitionError);
   });
 });
+
+describe("snapshots written with the instance", () => {
+  function setup() {
+    const persistence = createInMemoryPersistence();
+    const store = new InMemoryDefinitionStore();
+    const definitionRegistry = new InMemoryDefinitionRegistry();
+    definitionRegistry.register(orderV2);
+    const runtime = new WorkflowRuntime({
+      definitionRegistry,
+      commandRegistry: new InMemoryCommandRegistry(),
+      ...persistence,
+      definitionStore: store,
+      clock,
+    });
+    const ensure = vi.spyOn(store, "ensure");
+    return { runtime, persistence, ensure };
+  }
+
+  it("writes the snapshot inside createInstance even after initialize() synced", async () => {
+    const { runtime, ensure } = setup();
+    await runtime.initialize();
+    ensure.mockClear();
+
+    await runtime.createInstance({ workflowName: "order" });
+
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect(ensure.mock.calls[0][0]).toMatchObject({ workflowName: "order", version: 2 });
+  });
+
+  it("does not write it for a transition that keeps the instance's version", async () => {
+    const { runtime, ensure } = setup();
+    const instance = await runtime.createInstance({ workflowName: "order" });
+    ensure.mockClear();
+
+    await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Submit" });
+
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
+  it("writes it when a legacy (unstamped) instance adopts the latest version", async () => {
+    const { runtime, persistence, ensure } = setup();
+    const instance = await runtime.createInstance({ workflowName: "order" });
+    const raw = (await persistence.instanceStore.findByUuid(instance.uuid))!;
+    raw.definitionVersion = null;
+    raw.version++;
+    await persistence.instanceStore.update(raw);
+    ensure.mockClear();
+
+    await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Submit" });
+
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect((await runtime.getInstance(instance.uuid))!.definitionVersion).toBe(2);
+  });
+});

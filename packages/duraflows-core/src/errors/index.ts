@@ -1,4 +1,25 @@
-import type { CommandResult } from "../types/runtime.js";
+import type { CommandResult, MigrateInstancesResult } from "../types/runtime.js";
+
+/**
+ * A thrown value as text: an `Error`'s `message`, otherwise `String(value)`,
+ * otherwise its `Object.prototype.toString` tag (e.g. a null-prototype object
+ * with no inherited `toString`), otherwise "unknown error". Never throws, so a
+ * hostile throw — a throwing `message` getter, `toString` or
+ * `Symbol.toPrimitive` — cannot escape from formatting it. Internal: not
+ * re-exported from the package.
+ */
+export function describeThrown(value: unknown): string {
+  try {
+    if (value instanceof Error) return String(value.message);
+    try {
+      return String(value);
+    } catch {
+      return Object.prototype.toString.call(value);
+    }
+  } catch {
+    return "unknown error";
+  }
+}
 
 export class WorkflowError extends Error {
   constructor(message: string, cause?: unknown) {
@@ -102,6 +123,21 @@ export class CommandFailureError extends WorkflowError {
     this.workflowInstanceUuid = workflowInstanceUuid;
     this.eventName = eventName;
     this.commandName = commandName;
+    this.result = result;
+  }
+}
+
+/**
+ * Thrown by `migrateInstances` when listing candidates fails partway through:
+ * the store threw, or returned a page that breaks its contract. `result`
+ * holds everything done so far; resume with `result.nextCursor`.
+ */
+export class MigrationInterruptedError extends WorkflowError {
+  public readonly result: MigrateInstancesResult;
+
+  constructor(result: MigrateInstancesResult, examined: number, cause: unknown) {
+    super(`migrateInstances was interrupted after examining ${examined} candidates: ${describeThrown(cause)}`, cause);
+    this.name = "MigrationInterruptedError";
     this.result = result;
   }
 }

@@ -163,52 +163,116 @@ on their own and draining isn't an option. Migration is **pure relabeling**:
 no commands, guards or `onEnter` run, and `transformContext` is the one tool
 for adjusting context.
 
-Dry run first, then migrate in batches:
+**(v7.2.0) Three behavior changes reach every caller**, even a call that
+passes none of the new inputs below:
+
+1. `transformContext` returning an object whose prototype isn't a plain
+   object prototype -- a `Date`, a `Map`, a class instance -- or one whose
+   `toJSON` turns it into a non-object now fails that one instance with
+   `transformContext must return a plain object` instead of storing whatever
+   came back (non-objects and arrays were already rejected in 7.1). Plain
+   objects from another realm, such as Jest's vm contexts, are accepted.
+2. A `findInstanceUuids` page that isn't strictly ascending past the cursor,
+   or that contains an entry that isn't a non-empty UUID string, now
+   interrupts the whole call (`MigrationInterruptedError`, below) instead of
+   continuing on bad data; a page longer than the requested size is silently
+   truncated to it.
+3. A `findInstanceUuids` rejection while listing candidates now arrives
+   wrapped as `MigrationInterruptedError`, with the original error as
+   `cause`, instead of escaping unwrapped -- an `instanceof <YourStoreError>`
+   check must test `error.cause`, not `error` itself.
+
+`MigrateInstancesResult` also gains two required fields, `nextCursor` and
+`warnings`: hand-built results, mocks and exact `toEqual` assertions on a
+result need both.
+
+Dry run first, then migrate in batches with a cursor, collecting what didn't
+migrate:
 
 ```ts
-// See what would happen first.
-const preview = await runtime.migrateInstances({
+import { MigrationInterruptedError, type MigrateInstancesResult } from "@duraflows/core";
+
+const input = {
   workflowName: "order",
   fromVersion: 3,
   toVersion: 4,
   stateMapping: { awaiting_review: "awaiting_approval" },
-  dryRun: true,
-});
-console.log(preview.migrated.length, preview.skipped, preview.failed);
+  excludeStates: ["completed", "cancelled"], // leave finished instances alone
+};
 
-// Then migrate in batches.
-let batch;
-do {
-  batch = await runtime.migrateInstances({
-    workflowName: "order",
-    fromVersion: 3,
-    toVersion: 4,
-    stateMapping: { awaiting_review: "awaiting_approval" },
-    limit: 500,
-  });
-} while (batch.migrated.length > 0);
+// See what would happen first -- with the same filter as the real run.
+const preview = await runtime.migrateInstances({ ...input, dryRun: true });
+console.log(preview.migrated.length, preview.skipped, preview.failed, preview.warnings);
+
+const skipped: MigrateInstancesResult["skipped"] = [];
+const failed: MigrateInstancesResult["failed"] = [];
+let cursor: string | undefined;
+let interruptions = 0;
+for (;;) {
+  let batch: MigrateInstancesResult;
+  try {
+    batch = await runtime.migrateInstances({ ...input, limit: 500, cursor });
+    interruptions = 0;
+  } catch (error) {
+    // Listing candidates failed: keep the partial result, resume where it stopped.
+    if (!(error instanceof MigrationInterruptedError) || ++interruptions > 3) throw error;
+    batch = error.result;
+  }
+  skipped.push(...batch.skipped);
+  failed.push(...batch.failed);
+  if (interruptions === 0 && batch.nextCursor === null) break; // every candidate examined
+  cursor = batch.nextCursor ?? undefined;
+}
+
+// The cursor never re-examines a failure: retry those once by UUID.
+if (failed.length > 0) {
+  const retry = await runtime.migrateInstances({ ...input, instanceUuids: failed.map((f) => f.uuid) });
+  skipped.push(...retry.skipped);
+  failed.splice(0, failed.length, ...retry.failed);
+}
+console.warn("left on v3:", skipped, failed);
+
+// Confirm the version drained (see below for what one pass can't see).
+const v3 = (await runtime.listDefinitionVersions("order")).find((v) => v.version === 3);
+console.log(`v3 active instances: ${v3?.activeInstances ?? 0}`);
 ```
 
-The loop stops as soon as a call migrates nothing. Before assuming
-`fromVersion` has drained, check that last batch's `skipped` and `failed` --
-an instance that can't be placed stays on `fromVersion` and is examined
-again, from the lowest UUID, by every later call, so enough of them can make
-the loop stop early while migratable instances are still waiting further
-along. Confirm with `runtime.listDefinitionVersions(name)`. If you expect
-many skips, fix them first -- the dry run lists them -- or drop `limit`: one
-call without it pages through every candidate internally and never revisits
-one.
+With a `cursor`, `nextCursor` from one call becomes the next call's
+`cursor`, so every candidate is examined exactly once across the whole loop
+and a skip or failure never makes it stop early. The flip side: a skipped or
+failed instance is never re-examined either -- hence collecting both, and
+retrying `failed` (an optimistic-lock conflict, or a database outage that
+failed instances just before the listing itself threw) once by UUID after
+the loop. `skipped` needs a fix first --
+typically a `stateMapping` entry. One pass also can't see an instance
+created on `fromVersion` behind the cursor, or one that moves into the
+filter after the cursor passed it; confirm with
+`runtime.listDefinitionVersions(name)` and run the loop again if anything
+remains. Without a `cursor`, this is the 7.1 caveat, now scoped to
+cursor-less calls: each call starts over from the lowest UUID, so a call
+migrating nothing doesn't mean `fromVersion` has drained -- an instance that
+can't be placed stays on `fromVersion` and is examined again by every later
+call, letting enough of them starve migratable instances waiting further
+along. If you expect many skips, fix them first -- the dry run lists them --
+or drop `limit` entirely: one call without it pages through every candidate
+internally and never revisits one.
 
 For each candidate instance:
 
+- `states`/`excludeStates`, when given, are checked against its current
+  state; a non-matching instance is skipped -- see below;
 - its current state is looked up in `stateMapping`, or kept as-is when the
   target version has a state of the same name;
 - an instance that can't be placed is skipped, with a reason -- see below --
   and stays on `fromVersion`, untouched;
 - `transformContext`, when given, is called with a deep clone of the context
-  and a frozen clone of the instance; it must be pure, and its result is
-  stored as its JSON round trip (a `Date`, for example, comes back as a
-  string, not a `Date`);
+  and a frozen clone of the instance; it must be pure and return a plain
+  object (its prototype `null` or any realm's `Object.prototype`) -- a
+  `Date`, `Map`, array or class instance, or an object whose `toJSON` turns it
+  into a non-object, fails the instance with
+  `transformContext must return a plain object` _(v7.2.0)_ -- and the result
+  is stored as its JSON round trip (a `Date` inside the object, for example,
+  comes back as a string, not a `Date`);
 - `expiresAt` is recomputed from `lastTransitionAt` and the target state's
   timeout, so time already spent waiting in the state is preserved rather
   than reset;
@@ -234,9 +298,28 @@ onEnter: async (event) => {
 Candidates are every instance stamped with `fromVersion`, terminal
 (completed) ones included -- unlike the startup executability check and
 `listDefinitionVersions`, which only count active instances. A migration run
-without `instanceUuids` therefore relabels completed instances too, appending
-a `$migrated` history row and firing observers for them; pass `instanceUuids`
-for just the active ones if leaving finished instances alone matters.
+without `excludeStates` (or `instanceUuids`) therefore relabels completed
+instances too, appending a `$migrated` history row and firing observers for
+them; pass `excludeStates` -- e.g. `["completed", "cancelled"]` -- to leave
+finished instances alone, or `instanceUuids` to scope to specific ones.
+
+**Filtering by state (v7.2.0).** `states` (only these current states) and
+`excludeStates` (never these) both apply to every candidate, however it was
+found. Passed alongside
+`instanceUuids`, they still run: an explicit UUID whose current state
+doesn't pass is skipped with `state <s> is excluded by the state filter` and
+still counts against `limit`, same as any other candidate. Passed without
+`instanceUuids`, they're also forwarded to `instanceStore.findInstanceUuids`
+as hints (see [Persistence](./persistence.md#workflowinstancestore)): a store
+that honors them filters server-side, so an excluded instance is never
+returned, never examined, and -- unlike the `instanceUuids` case -- neither
+reported in the result nor counted against `limit` while paging. A store
+that ignores the hints (honoring them is optional) still filters correctly,
+just less efficiently, since the migrator re-checks the same condition
+itself and skips a non-matching instance the ordinary way. `migrateInstances`
+rejects an empty `states` up front (see the validation table in
+[`migrateInstances()`](./core-runtime.md#migrateinstances)); `excludeStates`
+may be empty (excludes nothing).
 
 **Mapping into a state with an `onEnter` never happens.** If `stateMapping`
 names a target state that has an `onEnter` in the target version,
@@ -254,21 +337,55 @@ there would strand it.
 | `belongs to workflow <name>`                                         | The UUID belongs to a different workflow                                                                                    |
 | `unstamped`                                                          | `definitionVersion` is `null` (a pre-5.0 instance)                                                                          |
 | `on version <v>, not <fromVersion>`                                  | Already migrated, or re-stamped, since being listed -- or an explicit `instanceUuids` entry that was never on `fromVersion` |
+| `state <s> is excluded by the state filter` _(v7.2.0)_               | Current state doesn't pass `states`/`excludeStates`                                                                         |
 | `state <s> has no mapping and does not exist in version <toVersion>` | No `stateMapping` entry, and no same-named state in the target                                                              |
 | `state <s> has an onEnter in version <toVersion>`                    | Keeps its name, but that state now has an `onEnter`                                                                         |
 
-**Batching with `limit`.** `limit` caps how many candidates one call
-examines -- skipped and failed instances count against it too, not just
-migrated ones. Its cursor holds only within that one call, so a call never
-revisits a candidate itself. Across calls it resets to the lowest UUID: a
-migrated instance has left `fromVersion` for good, but a skipped or failed
-one stays on it and is examined again by the next call with the same input
--- see the loop example above for what that means in practice.
+**Batching with `limit` and `cursor`.** `limit` caps how many candidates one
+call examines -- skipped and failed instances count against it too, not just
+migrated ones (filtered-out instances count too, unless the store filters
+them out server-side -- see "Filtering by state" above). Within one call, a
+candidate is never revisited: paging always moves strictly past the last
+UUID examined. `result.nextCursor` carries that
+progress out to the caller -- the last UUID examined when the call stopped
+at `limit`, or `null` when every candidate was examined or `instanceUuids`
+was given. Pass it back as the next call's `cursor` (see the loop example
+above) and paging resumes exactly there, so a skipped or failed instance is
+never revisited across calls either. Omit `cursor` and each call still
+starts over from the lowest UUID -- the 7.1 caveat -- so a skipped or failed
+instance stays on `fromVersion` and is examined, and counted against
+`limit`, again by the next call with the same input.
 
-Dropping `limit` avoids that cross-call starvation -- one call pages through
-every candidate internally and never revisits one -- at the cost of holding
-the whole result (every migrated, skipped and failed entry) in memory for as
+Dropping `limit` avoids batching altogether -- one call pages through every
+candidate internally and never revisits one -- at the cost of holding the
+whole result (every migrated, skipped and failed entry) in memory for as
 long as that one call runs.
+
+**Result fields.** `warnings` lists non-fatal problems with `toVersion` --
+currently just one case, `version <toVersion> references unregistered
+commands [<name>, ...], guards [<name>, ...]` (either list omitted when
+empty) when the target definition references a command or guard this
+process hasn't registered; migration still runs, since it never calls them.
+`nextCursor` is covered above.
+
+**`MigrationInterruptedError` (v7.2.0).** Thrown instead of returning when
+_listing_ candidates itself fails -- the store's `findInstanceUuids`
+rejected, or returned a page that isn't strictly ascending past the cursor
+or that isn't made only of non-empty UUID strings (see
+[`migrateInstances()`](./core-runtime.md#migrateinstances) for exact page
+requirements). It is never thrown for a per-instance problem -- a throwing
+`transformContext`, an optimistic-lock conflict, a database error migrating
+one instance -- those land in `result.failed` and the batch continues.
+`error.result` is the same shape `migrateInstances` would otherwise have
+returned, complete up to the interruption; `error.result.nextCursor` is the
+last UUID examined, or the input `cursor` (`null` without one) if none was
+examined yet. `error.cause` is the original error -- a store rejection, or
+the `WorkflowError` the migrator itself threw over a bad page -- so an
+`instanceof <YourStoreError>` check must test `error.cause`, not `error`.
+To resume, keep `error.result`'s `skipped` and `failed` -- a resumed call
+won't examine them again -- and call again with
+`cursor: error.result.nextCursor ?? undefined`, capping consecutive retries;
+the batch loop above does exactly that.
 
 A workflow's `fromVersion` won't drain, batched or not, while any worker's
 in-code registered `version` is still `fromVersion`: `createInstance()`
@@ -296,8 +413,10 @@ stops the app from booting, so `WorkflowService.migrateInstances` /
 `runtime.migrateInstances` is never reached through it. Either:
 
 - run the migration from a one-off script that builds its own
-  `WorkflowRuntime` against the same persistence and definitions and calls
-  `migrateInstances` directly, without calling `initialize()` first; or
+  `WorkflowRuntime` against the same persistence, definitions and
+  **observers** as the app and calls `migrateInstances` directly, without
+  calling `initialize()` first -- passing the app's own observers means
+  audit and projection observers still see the `$migrated` events; or
 - deploy temporarily with `onUnresolvable: "warn"`, migrate, then restore
   `"fail"`.
 

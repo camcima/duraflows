@@ -153,7 +153,12 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
     definitionVersion: number;
     limit: number;
     afterUuid?: string;
+    states?: readonly string[];
+    excludeStates?: readonly string[];
   }): Promise<string[]> {
+    if (options.states !== undefined && options.states.length === 0) {
+      return [];
+    }
     let query = this.getExecutor()
       .selectFrom("workflow_instances")
       .select("uuid")
@@ -161,6 +166,12 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
       .where("definition_version", "=", options.definitionVersion);
     if (options.afterUuid !== undefined) {
       query = query.where("uuid", ">", options.afterUuid);
+    }
+    if (options.states !== undefined) {
+      query = query.where("current_state", "in", [...options.states]);
+    }
+    if (options.excludeStates !== undefined && options.excludeStates.length > 0) {
+      query = query.where("current_state", "not in", [...options.excludeStates]);
     }
     const rows = await query.orderBy("uuid").limit(options.limit).execute();
     return rows.map((row) => row.uuid);

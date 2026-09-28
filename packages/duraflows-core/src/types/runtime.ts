@@ -171,6 +171,12 @@ export interface MigrateInstancesInput {
   limit?: number;
   /** Validate and report; write nothing and fire no observers. */
   dryRun?: boolean;
+  /** Only instances whose current state is one of these. Must not be empty. */
+  states?: readonly string[];
+  /** Never instances whose current state is one of these. */
+  excludeStates?: readonly string[];
+  /** Resume paging strictly after this UUID (a previous result's `nextCursor`). Not with `instanceUuids`. */
+  cursor?: string;
 }
 
 /** Result of `WorkflowRuntime.migrateInstances`. */
@@ -180,4 +186,12 @@ export interface MigrateInstancesResult {
   migrated: Array<{ uuid: string; fromState: string; toState: string }>;
   skipped: Array<{ uuid: string; reason: string }>;
   failed: Array<{ uuid: string; error: string }>;
+  /**
+   * The last UUID examined when the call stopped at `limit` while paging; pass
+   * it as `cursor` to continue. null when every candidate was examined, or
+   * when `instanceUuids` was given.
+   */
+  nextCursor: string | null;
+  /** Non-fatal problems, such as a target version that references commands or guards this process hasn't registered. */
+  warnings: string[];
 }
