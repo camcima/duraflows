@@ -171,7 +171,7 @@ interface WorkflowPersistenceProvider {
 }
 ```
 
-`definitionStore` is optional so existing custom providers keep compiling without changes; without it, definition-versioning features (the version-bump guard, the `workflow_definitions` snapshot table) are simply inert. The bundled `pgWorkflowProviders()` and `kyselyWorkflowProviders()` always supply it.
+`definitionStore` is optional so existing custom providers keep compiling without changes; without it, definition-versioning features are simply inert: there is no version-bump guard or `workflow_definitions` snapshot table, pinning is off (every instance runs the latest registered definition), the startup executability check doesn't run, and `runtime.listDefinitionVersions()` throws. The bundled `pgWorkflowProviders()` and `kyselyWorkflowProviders()` always supply it.
 
 This is what `WorkflowModuleOptions.persistence` expects and what `pgWorkflowProviders()` returns.
 

@@ -602,19 +602,19 @@ CREATE INDEX IF NOT EXISTS workflow_instances_timeout_parked_idx
 
 ### v7.0.0 — Adding definition-version pinning to an existing adapter
 
-No schema change is required -- `definition_version` already exists on `workflow_instances` from `004_definition_versions.sql`. Two method additions are:
-
-```sql
--- Recommended, not required: keeps countInstances() cheap on large tables.
--- @duraflows/pg ships this as 006_definition_version_index.sql.
-CREATE INDEX IF NOT EXISTS workflow_instances_definition_version_idx
-  ON workflow_instances (workflow_name, definition_version);
-```
+No schema change is required -- `definition_version` already exists on `workflow_instances` from `004_definition_versions.sql`. Two methods are new, and the `@duraflows/core` types require both:
 
 1. **Add `WorkflowInstanceStore.countInstances()`.** This is required on **every** adapter, whether or not it implements `WorkflowDefinitionStore` -- see [countInstances](#countinstances----active-instance-counting).
 2. **If you implement `WorkflowDefinitionStore`, add `listVersions()`** -- see [listVersions](#listversions----all-stored-snapshots).
 
-Without both, `WorkflowRuntime.initialize()`'s startup executability check and `runtime.listDefinitionVersions()` throw at the call site (a missing method fails to typecheck; an adapter that only compiles against an older `@duraflows/core` typing needs the update regardless). Definition-version pinning itself needs no adapter changes beyond these two methods -- `DefinitionResolver` reads existing snapshots through `findByNameAndVersion()`, already implemented for the version-bump guard.
+The runtime calls both in `initialize()` (for the startup executability check, when a definition store is configured) and in `runtime.listDefinitionVersions()`. An adapter missing either fails to typecheck against 7.0.0; one built without type checking fails at those calls. Definition-version pinning itself needs no further adapter changes -- `DefinitionResolver` reads existing snapshots through `findByNameAndVersion()`, already implemented for the version-bump guard.
+
+Separately, a new index is **recommended, not required**: it keeps `countInstances()` cheap on large tables. `@duraflows/pg` ships it as `006_definition_version_index.sql`:
+
+```sql
+CREATE INDEX IF NOT EXISTS workflow_instances_definition_version_idx
+  ON workflow_instances (workflow_name, definition_version);
+```
 
 ---
 
