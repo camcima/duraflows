@@ -70,9 +70,14 @@ function isTimeoutDue(instance: WorkflowInstance, now: Date): boolean {
   return !retryAt || retryAt <= now;
 }
 
-/** Whether `instance` is still the one a sweep scanned: same state, deadline and failure count. */
+/**
+ * Whether `instance` is still the one a sweep scanned. The row version changes on every update
+ * (a migration, a manual transition, a re-arm), so a failure is never recorded against a row that
+ * moved on — even one that kept the same state, deadline and failure count.
+ */
 function matchesTimeoutSnapshot(instance: WorkflowInstance, snapshot: WorkflowInstance): boolean {
   return (
+    instance.version === snapshot.version &&
     instance.currentState === snapshot.currentState &&
     instance.expiresAt?.getTime() === snapshot.expiresAt?.getTime() &&
     (instance.timeoutRetry?.attempts ?? 0) === (snapshot.timeoutRetry?.attempts ?? 0)

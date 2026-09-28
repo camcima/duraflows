@@ -315,3 +315,57 @@ describe("processExpiredWorkflows retry scheduling and parking", () => {
     });
   });
 });
+
+describe("recording a timeout failure after a concurrent change", () => {
+  it("does not record it on an instance another operation updated in between", async () => {
+    let now = new Date("2026-01-01T00:00:00Z").getTime();
+    const persistence = createInMemoryPersistence();
+    const definitionRegistry = new InMemoryDefinitionRegistry();
+    definitionRegistry.register({
+      name: "broken",
+      initialState: "start",
+      states: {
+        start: {
+          events: { expire: { targetState: "done", commands: [{ name: "boom" }], timeout: { afterMinutes: 1 } } },
+        },
+        done: {},
+      },
+    });
+    const commandRegistry = new InMemoryCommandRegistry();
+    commandRegistry.register("boom", {
+      execute: async () => {
+        throw new Error("js boom");
+      },
+    });
+    const runtime = new WorkflowRuntime({
+      definitionRegistry,
+      commandRegistry,
+      ...persistence,
+      clock: { now: () => new Date(now) },
+      timeoutRetry: { maxAttempts: 1 },
+    });
+    const instance = await runtime.createInstance({ workflowName: "broken" });
+    now += 5 * 60_000;
+
+    // Between the failed attempt and recording it, another operation (e.g. a
+    // migration that kept the state name and deadline) updates the row.
+    const store = persistence.instanceStore;
+    const originalLock = store.lockByUuid.bind(store);
+    let locks = 0;
+    vi.spyOn(store, "lockByUuid").mockImplementation(async (uuid) => {
+      locks++;
+      if (locks === 2) {
+        const raw = (await store.findByUuid(uuid))!;
+        raw.version++;
+        await store.update(raw);
+      }
+      return originalLock(uuid);
+    });
+
+    const result = await runtime.processExpiredWorkflows();
+
+    expect(result.failed).toEqual([{ uuid: instance.uuid, error: "js boom" }]);
+    expect(result.parked).toEqual([]);
+    expect((await store.findByUuid(instance.uuid))!.timeoutRetry).toBeNull();
+  });
+});
