@@ -97,7 +97,7 @@ Both options create three tables:
 | `definition_version`     | `integer`     | The definition version that governed this transition                                           |
 | `created_at`             | `timestamptz` | When this history entry was created                                                            |
 
-**`workflow_definitions`** -- one immutable snapshot per `(workflow_name, version)`, written by `WorkflowRuntime.initialize()`; see [Definition versions](./workflow-definitions.md#definition-versions):
+**`workflow_definitions`** -- one immutable snapshot per `(workflow_name, version)`, written by `WorkflowRuntime.initialize()` and (since 7.2.0) inside every transaction that stamps an instance with a definition version; see [Definition versions](./workflow-definitions.md#definition-versions):
 
 | Column            | Type           | Description                                 |
 | ----------------- | -------------- | ------------------------------------------- |

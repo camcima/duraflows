@@ -73,7 +73,7 @@ class WorkflowDefinitionError extends WorkflowError {
 - Validation failure during `register()` (e.g., invalid state references, missing target states, unknown command names, a `version` that isn't a positive safe integer)
 - Compilation failure during `register()` (e.g., non-existent target/error state in finita process)
 - Looking up a workflow that doesn't exist in the registry (via `get()`)
-- `initialize()` finding that a known `(workflowName, version)` pair's stored content hash differs from the registered definition's — i.e., the definition's content changed without its `version` being bumped. _(v7.2.0)_ The same check also runs when an instance is stamped with the registered version — inside `createInstance()`'s transaction, and when a legacy or `"latest"`-policy instance adopts the latest version in `triggerEvent()` or the timeout sweep — so it can surface from those calls too, not only from `initialize()`
+- `initialize()` finding that a known `(workflowName, version)` pair's stored content hash differs from the registered definition's — i.e., the definition's content changed without its `version` being bumped. _(v7.2.0)_ The same check also runs when an instance is stamped with the registered version — inside `createInstance()`'s transaction, and when a legacy or `"latest"`-policy instance adopts the latest version in `triggerEvent()` or the timeout sweep — so `createInstance()` and `triggerEvent()` can throw it too, not only `initialize()`. The timeout sweep doesn't throw it: it catches it like any other per-instance failure (the instance lands in `failed` and goes through retry/parking), and a migration whose `toVersion` is the registered version reports it in that instance's `result.failed` entry
 - _(v7.2.0)_ `migrateInstances()` finding that the target version's stored snapshot differs from the copy the call loaded (`stored version <v> differs from the copy loaded earlier ...`) — reported per instance in `result.failed`, not thrown
 - `initialize()`'s startup executability check (`onUnresolvable: "fail"`, the default): a stored definition version that still has active instances references a command or guard that is not registered, or its snapshot is structurally invalid
 - A pinned instance resolving to a stored version that is missing from the definition store, or whose stored snapshot fails structural validation
@@ -467,15 +467,15 @@ try {
     return { status: 404, message: err.message };
   }
   if (err instanceof InvalidEventError) {
-    // Event not available on current state
-    return { status: 400, message: `Event "${err.eventName}" is not available in state "${err.currentState}"` };
+    // Event not available on current state -- 409, like the bundled NestJS filter
+    return { status: 409, message: `Event "${err.eventName}" is not available in state "${err.currentState}"` };
   }
   if (err instanceof IncompatibleDefinitionError) {
     // Instance's state doesn't exist in the latest ("latest"-policy) definition
     return { status: 409, message: err.message };
   }
   if (err instanceof CommandFailureError) {
-    // Command failed with no error state
+    // Command failed with no error state -- 422 is a choice; the bundled NestJS filter answers 500
     return { status: 422, message: `Command "${err.commandName}" failed: ${err.result.message}` };
   }
   if (err instanceof OnEnterDepthExceededError) {
@@ -512,23 +512,42 @@ try {
 
 ### NestJS Exception Filter
 
+`@duraflows/nestjs` already ships a filter, `WorkflowExceptionFilter`, which its REST controllers apply and which you can register for your own controllers too (e.g. `app.useGlobalFilters(new WorkflowExceptionFilter())`). Its status mapping is listed in [NestJS Integration: Error Responses](./nestjs-integration.md#error-responses). Prefer it; write your own only to change that mapping. The custom filter below keeps the bundled mapping and deliberately differs in one place: it answers `CommandFailureError` with 422 instead of the bundled 500.
+
 ```ts
-import { ExceptionFilter, Catch, ArgumentsHost, HttpStatus } from "@nestjs/common";
-import { InvalidEventError, CommandFailureError, WorkflowError } from "@duraflows/core";
+import { ExceptionFilter, Catch, ArgumentsHost, HttpStatus, Logger } from "@nestjs/common";
+import {
+  WorkflowError,
+  WorkflowInstanceNotFoundError,
+  InvalidEventError,
+  IncompatibleDefinitionError,
+  InvalidArgumentError,
+  CommandFailureError,
+} from "@duraflows/core";
 
 @Catch(WorkflowError)
-export class WorkflowExceptionFilter implements ExceptionFilter {
+export class MyWorkflowExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(MyWorkflowExceptionFilter.name);
+
   catch(exception: WorkflowError, host: ArgumentsHost) {
-    const ctx = host.switchToHttp();
-    const response = ctx.getResponse();
+    const response = host.switchToHttp().getResponse();
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
-    if (exception instanceof InvalidEventError) status = HttpStatus.BAD_REQUEST;
-    if (exception instanceof CommandFailureError) status = HttpStatus.UNPROCESSABLE_ENTITY;
+    if (exception instanceof WorkflowInstanceNotFoundError) status = HttpStatus.NOT_FOUND;
+    if (exception instanceof InvalidEventError || exception instanceof IncompatibleDefinitionError) {
+      status = HttpStatus.CONFLICT;
+    }
+    if (exception instanceof InvalidArgumentError) status = HttpStatus.BAD_REQUEST;
+    if (exception instanceof CommandFailureError) status = HttpStatus.UNPROCESSABLE_ENTITY; // bundled: 500
 
-    response.status(status).json({
+    if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
+      // Don't echo internal messages to clients: log the error (and its cause) instead.
+      this.logger.error(exception.message, (exception.cause instanceof Error ? exception.cause : exception).stack);
+    }
+    response.status(status).send({
+      statusCode: status,
       error: exception.name,
-      message: exception.message,
+      message: status === HttpStatus.INTERNAL_SERVER_ERROR ? "Internal server error" : exception.message,
     });
   }
 }
