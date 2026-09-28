@@ -39,6 +39,7 @@ import { ObserverRegistry } from "./observer-registry.js";
 import { computeDefinitionHash } from "../util/definition-hash.js";
 import { assertNonNegativeSafeInteger, assertPositiveSafeInteger } from "../util/assert.js";
 import { TimeoutRetryPolicy } from "./timeout-retry-policy.js";
+import { DefinitionResolver } from "./definition-resolver.js";
 
 const DEFAULT_MAX_ON_ENTER_DEPTH = 10;
 
@@ -129,7 +130,9 @@ export interface WorkflowRuntimeOptions {
    * Optional store for definition snapshots. When present, `initialize()`
    * (called explicitly or lazily by the first mutating operation) syncs every
    * registered definition into it and fails if a definition's content changed
-   * without a version bump. When absent, definition versioning is inert.
+   * without a version bump, and pinned instances load older versions from it.
+   * When absent, versioning is inert: every instance executes the latest
+   * registered definition (a warning is logged once while any is pinned).
    */
   definitionStore?: WorkflowDefinitionStore;
   maxOnEnterDepth?: number;
@@ -151,6 +154,7 @@ export class WorkflowRuntime {
   private readonly definitionStore?: WorkflowDefinitionStore;
   private initPromise: Promise<void> | null = null;
   private readonly compiler: WorkflowCompiler;
+  private readonly definitionResolver: DefinitionResolver;
   private readonly eventExecutor: EventExecutor;
   private readonly onEnterExecutor: OnEnterExecutor;
   private readonly timeoutResolver: TimeoutResolver;
@@ -166,6 +170,11 @@ export class WorkflowRuntime {
     this.clock = options.clock;
     this.definitionStore = options.definitionStore;
     this.compiler = new WorkflowCompiler();
+    this.definitionResolver = new DefinitionResolver({
+      definitionRegistry: options.definitionRegistry,
+      compiler: this.compiler,
+      definitionStore: options.definitionStore,
+    });
     const commandExecutor = new CommandExecutor(options.commandRegistry);
     this.eventExecutor = new EventExecutor(commandExecutor, options.guardRegistry);
     this.onEnterExecutor = new OnEnterExecutor(commandExecutor);
@@ -223,7 +232,7 @@ export class WorkflowRuntime {
 
   async createInstance(input: CreateWorkflowInstanceInput): Promise<WorkflowInstance> {
     await this.initialize();
-    const definition = this.definitionRegistry.get(input.workflowName);
+    const { definition } = this.definitionResolver.forNewInstance(input.workflowName);
 
     const now = this.clock.now();
 
@@ -309,8 +318,7 @@ export class WorkflowRuntime {
         throw new WorkflowInstanceNotFoundError(input.workflowInstanceUuid);
       }
 
-      const definition = this.definitionRegistry.get(instance.workflowName);
-      const compiled = this.compiler.compile(definition);
+      const { definition, compiled } = await this.definitionResolver.forInstance(instance);
 
       const eventDef = definition.states[instance.currentState]?.events?.[input.eventName];
       const prospectiveToState = eventDef?.targetState ?? instance.currentState;
@@ -451,7 +459,7 @@ export class WorkflowRuntime {
           }
 
           // Resolve definition + eventName from the FRESHLY-LOCKED state, not the pre-lock snapshot.
-          const definition = this.definitionRegistry.get(instance.workflowName);
+          const { definition } = await this.definitionResolver.forInstance(instance);
           const eventName = this.timeoutResolver.getTimeoutEventName(definition, instance.currentState);
 
           if (!eventName) {
@@ -765,7 +773,7 @@ export class WorkflowRuntime {
       throw new WorkflowInstanceNotFoundError(input.workflowInstanceUuid);
     }
 
-    const definition = this.definitionRegistry.get(instance.workflowName);
+    const { definition } = await this.definitionResolver.forInstance(instance);
     const stateDef = definition.states[instance.currentState];
     if (!stateDef?.events) return [];
 
