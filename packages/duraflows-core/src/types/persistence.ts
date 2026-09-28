@@ -86,6 +86,12 @@ export interface WorkflowInstanceStore {
    * Optional. UUIDs of instances of `workflowName` stamped with
    * `definitionVersion`, ascending, strictly after `afterUuid` when given, at
    * most `limit`. Instances with a null `definitionVersion` never match.
+   * "Ascending" and "after" mean by JavaScript string comparison of the
+   * returned UUID strings: `migrateInstances` checks each page with `>` and
+   * interrupts on one that doesn't advance. PostgreSQL `uuid` ordering and
+   * lowercase canonical text agree; a store whose native order differs
+   * (SQL Server `uniqueidentifier`, MySQL `UUID_TO_BIN(u, 1)`) must order
+   * and compare by the canonical lowercase text form.
    * `states` / `excludeStates` are hints: stores should keep only instances
    * whose current state is in `states` (an empty list matches nothing) and
    * drop those in `excludeStates` (an empty list excludes nothing). Callers
