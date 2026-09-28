@@ -684,4 +684,26 @@ describe("WorkflowValidator", () => {
       expect(result.warnings).toEqual([]);
     });
   });
+
+  it('rejects event names starting with "$" as reserved', () => {
+    const result = new WorkflowValidator().validate({
+      name: "wf",
+      initialState: "a",
+      states: { a: { events: { $migrated: { targetState: "b" } } }, b: {} },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual({
+      path: "states.a.events.$migrated",
+      message: 'Event names starting with "$" are reserved',
+    });
+  });
+
+  it('accepts a "$" that is not the first character of an event name', () => {
+    const result = new WorkflowValidator().validate({
+      name: "wf",
+      initialState: "a",
+      states: { a: { events: { pay$: { targetState: "b" } } }, b: {} },
+    });
+    expect(result.valid).toBe(true);
+  });
 });

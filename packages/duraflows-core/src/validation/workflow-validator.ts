@@ -89,6 +89,12 @@ export class WorkflowValidator {
         const event = state.events[eventName];
         const eventPath = `states.${stateName}.events.${eventName}`;
 
+        // Reserved for system events (e.g. the "$migrated" history rows of the
+        // planned migration API), so user events can never collide with them.
+        if (eventName.startsWith("$")) {
+          errors.push({ path: eventPath, message: 'Event names starting with "$" are reserved' });
+        }
+
         // An event must do something: transition state, route on error, or run commands.
         // A completely empty event is a declarative no-op and is rejected.
         if (!event.targetState && !event.errorState && (!event.commands || event.commands.length === 0)) {
