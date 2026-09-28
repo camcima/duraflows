@@ -1,4 +1,4 @@
-import type { CommandResult } from "../types/runtime.js";
+import type { CommandResult, MigrateInstancesResult } from "../types/runtime.js";
 
 export class WorkflowError extends Error {
   constructor(message: string, cause?: unknown) {
@@ -102,6 +102,22 @@ export class CommandFailureError extends WorkflowError {
     this.workflowInstanceUuid = workflowInstanceUuid;
     this.eventName = eventName;
     this.commandName = commandName;
+    this.result = result;
+  }
+}
+
+/**
+ * Thrown by `migrateInstances` when listing candidates fails partway through:
+ * the store threw, or returned a page that breaks its contract. `result`
+ * holds everything done so far; resume with `result.nextCursor`.
+ */
+export class MigrationInterruptedError extends WorkflowError {
+  public readonly result: MigrateInstancesResult;
+
+  constructor(result: MigrateInstancesResult, examined: number, cause: unknown) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    super(`migrateInstances was interrupted after examining ${examined} candidates: ${reason}`, cause);
+    this.name = "MigrationInterruptedError";
     this.result = result;
   }
 }

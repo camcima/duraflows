@@ -195,6 +195,8 @@ export class WorkflowRuntime {
       clock: this.clock,
       definitionResolver: this.definitionResolver,
       timeoutResolver: this.timeoutResolver,
+      commandRegistry: this.commandRegistry,
+      guardRegistry: this.guardRegistry,
       runWithObservers: <T>(work: (eventsToFire: StateEnterEvent[]) => Promise<T>) => this.runWithObservers(work),
     });
   }
