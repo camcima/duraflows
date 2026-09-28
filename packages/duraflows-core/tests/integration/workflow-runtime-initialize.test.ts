@@ -6,7 +6,7 @@ import {
   WorkflowDefinitionError,
   computeDefinitionHash,
 } from "../../src/index.js";
-import type { WorkflowDefinition, WorkflowTransactionRunner } from "../../src/index.js";
+import type { WorkflowDefinition } from "../../src/index.js";
 import { createInMemoryPersistence, InMemoryDefinitionStore } from "../helpers/in-memory-persistence.js";
 
 const clock = { now: () => new Date("2026-06-01T00:00:00Z") };
@@ -108,8 +108,8 @@ describe("WorkflowRuntime.initialize", () => {
   });
 });
 
-describe("WorkflowRuntime.initialize inside a caller's transaction", () => {
-  function setup(transactionRunner?: WorkflowTransactionRunner) {
+describe("snapshots written with the instance", () => {
+  function setup() {
     const persistence = createInMemoryPersistence();
     const store = new InMemoryDefinitionStore();
     const definitionRegistry = new InMemoryDefinitionRegistry();
@@ -118,44 +118,46 @@ describe("WorkflowRuntime.initialize inside a caller's transaction", () => {
       definitionRegistry,
       commandRegistry: new InMemoryCommandRegistry(),
       ...persistence,
-      transactionRunner: transactionRunner ?? persistence.transactionRunner,
       definitionStore: store,
       clock,
     });
     const ensure = vi.spyOn(store, "ensure");
-    return { runtime, runner: persistence.transactionRunner, ensure };
+    return { runtime, persistence, ensure };
   }
 
-  it("syncs again after the enclosing transaction rolls back", async () => {
-    const { runtime, runner, ensure } = setup();
-
-    await runner
-      .runInTransaction(async () => {
-        await runtime.initialize();
-        throw new Error("caller rolls back");
-      })
-      .catch(() => undefined);
+  it("writes the snapshot inside createInstance even after initialize() synced", async () => {
+    const { runtime, ensure } = setup();
     await runtime.initialize();
+    ensure.mockClear();
 
-    expect(ensure).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not sync again once the enclosing transaction commits", async () => {
-    const { runtime, runner, ensure } = setup();
-
-    await runner.runInTransaction(() => runtime.initialize());
-    await runtime.initialize();
+    await runtime.createInstance({ workflowName: "order" });
 
     expect(ensure).toHaveBeenCalledTimes(1);
+    expect(ensure.mock.calls[0][0]).toMatchObject({ workflowName: "order", version: 2 });
   });
 
-  it("caches the sync at once with a runner that has no afterCommit", async () => {
-    const plainRunner: WorkflowTransactionRunner = { runInTransaction: (callback) => callback() };
-    const { runtime, ensure } = setup(plainRunner);
+  it("does not write it for a transition that keeps the instance's version", async () => {
+    const { runtime, ensure } = setup();
+    const instance = await runtime.createInstance({ workflowName: "order" });
+    ensure.mockClear();
 
-    await plainRunner.runInTransaction(() => runtime.initialize());
-    await runtime.initialize();
+    await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Submit" });
+
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
+  it("writes it when a legacy (unstamped) instance adopts the latest version", async () => {
+    const { runtime, persistence, ensure } = setup();
+    const instance = await runtime.createInstance({ workflowName: "order" });
+    const raw = (await persistence.instanceStore.findByUuid(instance.uuid))!;
+    raw.definitionVersion = null;
+    raw.version++;
+    await persistence.instanceStore.update(raw);
+    ensure.mockClear();
+
+    await runtime.triggerEvent({ workflowInstanceUuid: instance.uuid, eventName: "Submit" });
 
     expect(ensure).toHaveBeenCalledTimes(1);
+    expect((await runtime.getInstance(instance.uuid))!.definitionVersion).toBe(2);
   });
 });

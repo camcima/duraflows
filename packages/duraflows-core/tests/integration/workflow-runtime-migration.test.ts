@@ -981,3 +981,21 @@ describe("migrateInstances: 7.2 validation and hardening", () => {
     expect((await runtimeV2.getInstance(bad.uuid))!.definitionVersion).toBe(1);
   });
 });
+
+describe("migrateInstances: snapshot written with the instance", () => {
+  it("writes the in-code target's snapshot in each migration, but not a stored target's", async () => {
+    const { store, runtimeV1, runtimeV2 } = world();
+    await runtimeV1.createInstance({ workflowName: "order" });
+    await runtimeV2.initialize();
+    const ensure = vi.spyOn(store, "ensure");
+
+    await runtimeV2.migrateInstances({ ...toV2 });
+
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect(ensure.mock.calls[0][0]).toMatchObject({ workflowName: "order", version: 2 });
+
+    ensure.mockClear();
+    await runtimeV2.migrateInstances({ workflowName: "order", fromVersion: 2, toVersion: 1 });
+    expect(ensure).not.toHaveBeenCalled();
+  });
+});

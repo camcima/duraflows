@@ -24,6 +24,8 @@ export interface InstanceMigratorDeps {
   timeoutResolver: TimeoutResolver;
   commandRegistry: WorkflowCommandRegistry;
   guardRegistry?: WorkflowGuardRegistry;
+  /** Writes the target's snapshot in the current transaction when it is the registered definition. */
+  ensureSnapshot: (definition: WorkflowDefinition) => Promise<void>;
   /** Runs `work` in a transaction and delivers the observer events it queues once it commits. */
   runWithObservers: <T>(work: (eventsToFire: StateEnterEvent[]) => Promise<T>) => Promise<T>;
 }
@@ -280,6 +282,7 @@ export class InstanceMigrator {
     target: WorkflowDefinition,
     eventsToFire: StateEnterEvent[],
   ): Promise<void> {
+    await this.deps.ensureSnapshot(target);
     const now = this.deps.clock.now();
     instance.currentState = plan.toState;
     instance.definitionVersion = input.toVersion;

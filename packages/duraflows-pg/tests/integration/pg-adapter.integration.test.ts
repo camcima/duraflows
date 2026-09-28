@@ -502,19 +502,14 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     });
   });
 
-  describe("pg definition sync inside a caller's transaction", () => {
+  describe("pg definition snapshots and caller-owned transactions", () => {
     const definition: WorkflowDefinition = {
       name: "sync-rollback",
       initialState: "open",
       states: { open: { events: { Close: { targetState: "closed" } } }, closed: {} },
     };
 
-    afterEach(async () => {
-      await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
-      await pool.query("TRUNCATE workflow_definitions");
-    });
-
-    it("restores a snapshot whose first sync was rolled back with the caller's transaction", async () => {
+    function build() {
       const providers = pgWorkflowProviders(pool);
       const definitionRegistry = new InMemoryDefinitionRegistry({
         validator: new WorkflowValidator(),
@@ -527,12 +522,23 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
         ...providers,
         clock: { now: () => new Date() },
       });
-      const snapshots = async () =>
-        (
-          await pool.query("SELECT count(*)::int AS n FROM workflow_definitions WHERE workflow_name = $1", [
-            "sync-rollback",
-          ])
-        ).rows[0].n as number;
+      return { runtime, providers };
+    }
+
+    const snapshots = async () =>
+      (
+        await pool.query("SELECT count(*)::int AS n FROM workflow_definitions WHERE workflow_name = $1", [
+          "sync-rollback",
+        ])
+      ).rows[0].n as number;
+
+    afterEach(async () => {
+      await pool.query("TRUNCATE workflow_history, workflow_instances CASCADE");
+      await pool.query("TRUNCATE workflow_definitions");
+    });
+
+    it("restores a snapshot whose first sync was rolled back with the caller's transaction", async () => {
+      const { runtime, providers } = build();
 
       await providers.transactionRunner
         .runInTransaction(async () => {
@@ -544,6 +550,54 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
 
       await runtime.createInstance({ workflowName: "sync-rollback" });
       expect(await snapshots()).toBe(1);
+    });
+
+    it("writes the snapshot with the instance in a transaction the caller owns and rolls back", async () => {
+      const { runtime } = build();
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await PgTransactionContext.run(pool, client, () => runtime.createInstance({ workflowName: "sync-rollback" }));
+        await client.query("ROLLBACK");
+      } finally {
+        client.release();
+      }
+      expect(await snapshots()).toBe(0);
+
+      const instance = await runtime.createInstance({ workflowName: "sync-rollback" });
+
+      expect(await snapshots()).toBe(1);
+      expect(await runtime.getInstance(instance.uuid)).not.toBeNull();
+    });
+
+    it("gives an instance created during another request's rolled-back sync its own snapshot", async () => {
+      const { runtime, providers } = build();
+      let markSynced!: () => void;
+      const aSynced = new Promise<void>((resolve) => {
+        markSynced = resolve;
+      });
+      let markBStarted!: () => void;
+      const bStarted = new Promise<void>((resolve) => {
+        markBStarted = resolve;
+      });
+
+      // Request A syncs inside its own transaction, then rolls back after B has started.
+      const requestA = providers.transactionRunner
+        .runInTransaction(async () => {
+          await runtime.initialize();
+          markSynced();
+          await bStarted;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          throw new Error("request A rolls back");
+        })
+        .catch(() => undefined);
+      await aSynced;
+      const requestB = runtime.createInstance({ workflowName: "sync-rollback" });
+      markBStarted();
+      const [, instance] = await Promise.all([requestA, requestB]);
+
+      expect(await snapshots()).toBe(1);
+      expect(await runtime.getInstance(instance.uuid)).not.toBeNull();
     });
   });
 

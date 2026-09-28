@@ -145,8 +145,6 @@ export class WorkflowRuntime {
   private readonly clock: WorkflowClock;
   private readonly definitionStore?: WorkflowDefinitionStore;
   private syncPromise: Promise<void> | null = null;
-  /** True once a sync is known to be durable (committed, not just finished). */
-  private synced = false;
   private checkPromise: Promise<void> | null = null;
   private readonly instanceMigrator: InstanceMigrator;
   private readonly compiler: WorkflowCompiler;
@@ -204,6 +202,7 @@ export class WorkflowRuntime {
       timeoutResolver: this.timeoutResolver,
       commandRegistry: this.commandRegistry,
       guardRegistry: this.guardRegistry,
+      ensureSnapshot: (definition: WorkflowDefinition) => this.ensureSnapshot(definition),
       runWithObservers: <T>(work: (eventsToFire: StateEnterEvent[]) => Promise<T>) => this.runWithObservers(work),
     });
   }
@@ -215,8 +214,7 @@ export class WorkflowRuntime {
   /**
    * Syncs registered definitions into the definition store and enforces the
    * version-bump guard. Idempotent: concurrent and repeated calls share one
-   * sync. A failed sync is not cached — the next call retries — and a sync
-   * run inside a caller's transaction only counts once it commits. Called lazily
+   * sync. A failed sync is not cached — the next call retries. Called lazily
    * by mutating operations, but calling it explicitly at boot is recommended
    * so registration errors surface at startup. With a definition store, it
    * then checks that every stored version with active instances can still
@@ -234,44 +232,15 @@ export class WorkflowRuntime {
     return this.checkPromise;
   }
 
-  /**
-   * The definition sync alone. Concurrent callers share one in-flight sync; a
-   * failure is not cached, and neither is a sync that has not committed yet.
-   */
+  /** The definition sync alone, shared by every caller; a failure is not cached. */
   private ensureSynced(): Promise<void> {
-    if (this.synced) {
-      return Promise.resolve();
-    }
     if (!this.syncPromise) {
-      this.syncPromise = this.syncDefinitions()
-        .then(() => this.markSyncedWhenDurable())
-        .finally(() => {
-          this.syncPromise = null;
-        });
+      this.syncPromise = this.syncDefinitions().catch((error: unknown) => {
+        this.syncPromise = null;
+        throw error;
+      });
     }
     return this.syncPromise;
-  }
-
-  /**
-   * A sync that ran inside a caller's transaction wrote its snapshots through
-   * that transaction; if it rolls back, the snapshots are gone. So it only
-   * counts once that transaction commits, and until then every call syncs
-   * again (idempotent). Outside a transaction — or with a runner that cannot
-   * report commits — the writes are already durable.
-   */
-  private markSyncedWhenDurable(): void {
-    const runner = this.transactionRunner;
-    if (runner.afterCommit) {
-      try {
-        runner.afterCommit(async () => {
-          this.synced = true;
-        });
-        return;
-      } catch {
-        // No transaction is active, so the sync's writes have committed.
-      }
-    }
-    this.synced = true;
   }
 
   private async checkExecutability(): Promise<void> {
@@ -303,23 +272,42 @@ export class WorkflowRuntime {
   private async syncDefinitions(): Promise<void> {
     if (!this.definitionStore) return;
     for (const definition of this.definitionRegistry.getAll()) {
-      const version = this.definitionVersionOf(definition);
-      const contentHash = computeDefinitionHash(definition);
-      const stored = await this.definitionStore.ensure({
-        workflowName: definition.name,
-        version,
-        contentHash,
-        definitionJson: definition,
-      });
-      if (stored.contentHash !== contentHash) {
-        throw new WorkflowDefinitionError(
-          definition.name,
-          `Definition content changed but version ${version} was not bumped ` +
-            `(stored ${stored.contentHash}, registered ${contentHash}). ` +
-            `Bump the definition's "version" field to publish the change.`,
-        );
-      }
+      await this.writeSnapshot(this.definitionStore, definition);
     }
+  }
+
+  /** Stores `definition`'s snapshot if absent and enforces the version-bump guard. */
+  private async writeSnapshot(store: WorkflowDefinitionStore, definition: WorkflowDefinition): Promise<void> {
+    const version = this.definitionVersionOf(definition);
+    const contentHash = computeDefinitionHash(definition);
+    const stored = await store.ensure({
+      workflowName: definition.name,
+      version,
+      contentHash,
+      definitionJson: definition,
+    });
+    if (stored.contentHash !== contentHash) {
+      throw new WorkflowDefinitionError(
+        definition.name,
+        `Definition content changed but version ${version} was not bumped ` +
+          `(stored ${stored.contentHash}, registered ${contentHash}). ` +
+          `Bump the definition's "version" field to publish the change.`,
+      );
+    }
+  }
+
+  /**
+   * Writes the registered definition's snapshot in the current transaction, just before an
+   * instance is stamped with its version for the first time: a new instance, a legacy or
+   * "latest"-policy instance adopting the latest version, a migration. The instance row and its
+   * version's snapshot then commit or roll back together, whoever owns the transaction — so an
+   * instance can never commit pinned to a version the store lacks, even if `initialize()`'s sync
+   * ran in a transaction that later rolled back. Snapshots loaded from the store already exist.
+   */
+  private async ensureSnapshot(definition: WorkflowDefinition): Promise<void> {
+    if (!this.definitionStore) return;
+    if (this.definitionRegistry.get(definition.name) !== definition) return;
+    await this.writeSnapshot(this.definitionStore, definition);
   }
 
   async createInstance(input: CreateWorkflowInstanceInput): Promise<WorkflowInstance> {
@@ -353,6 +341,7 @@ export class WorkflowRuntime {
 
     if (stateDef?.onEnter) {
       return this.runWithObservers(async (eventsToFire) => {
+        await this.ensureSnapshot(definition);
         await this.instanceStore.create(instance);
 
         const executionContext: WorkflowExecutionContext = {
@@ -384,6 +373,7 @@ export class WorkflowRuntime {
     }
 
     return this.runWithObservers(async (eventsToFire) => {
+      await this.ensureSnapshot(definition);
       await this.instanceStore.create(instance);
 
       eventsToFire.push(
@@ -411,6 +401,9 @@ export class WorkflowRuntime {
       }
 
       const { definition, compiled } = await this.definitionResolver.forInstance(instance);
+      if (instance.definitionVersion !== this.definitionVersionOf(definition)) {
+        await this.ensureSnapshot(definition);
+      }
 
       const eventDef = definition.states[instance.currentState]?.events?.[input.eventName];
       const prospectiveToState = eventDef?.targetState ?? instance.currentState;
@@ -552,6 +545,9 @@ export class WorkflowRuntime {
 
           // Resolve definition + eventName from the FRESHLY-LOCKED state, not the pre-lock snapshot.
           const { definition } = await this.definitionResolver.forInstance(instance);
+          if (instance.definitionVersion !== this.definitionVersionOf(definition)) {
+            await this.ensureSnapshot(definition);
+          }
           const eventName = this.timeoutResolver.getTimeoutEventName(definition, instance.currentState);
 
           if (!eventName) {
