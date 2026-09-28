@@ -1,5 +1,29 @@
 # Changelog
 
+## [7.1.0](https://github.com/camcima/duraflows/compare/v7.0.0...v7.1.0) (2026-09-28)
+
+Operators can now move in-flight instances from one definition version to another. This is the escape hatch that 7.0's pinning needed: it retires old versions, reaches in-flight instances with a fix, and rescues instances stuck on a missing or incompatible snapshot. See [Migrating instances](./docs/workflow-definitions.md#migrating-instances).
+
+### Features
+
+* **core:** add the optional findInstanceUuids store method ([c35060a](https://github.com/camcima/duraflows/commit/c35060a97e04d7640e3db75ed237b3a2196c2438))
+* **core:** migrate instances between definition versions ([3fcd098](https://github.com/camcima/duraflows/commit/3fcd098a173b46ab9a5a24cc0268d6da5b892910))
+* **nestjs:** expose migrateInstances on WorkflowService ([e31c398](https://github.com/camcima/duraflows/commit/e31c3985657f6dd345cdf0388b156b2de423f9f4))
+
+### Notes
+
+* **Migration only relabels.** It runs no commands, guards or `onEnter`. Each instance moves in its own transaction:
+  * the state is mapped, or kept when a state of the same name exists in the target version;
+  * `context` can be reshaped with `transformContext`;
+  * the deadline is recomputed from `lastTransitionAt`, so elapsed time is kept;
+  * `timeoutRetry` is cleared, which un-parks the instance;
+  * a `$migrated` history row is written.
+* **Dry run first.** `dryRun: true` reports what would be migrated, skipped (with a reason) or failed, and writes nothing.
+* **Observers receive migrations**, with `triggerEvent: "$migrated"`, including for completed instances on the old version. Observers with side effects should ignore that trigger.
+* **Batching:** migrated instances leave `fromVersion`. Skipped and failed ones stay on it and are examined again by the next call.
+* **Rescue:** migration runs the definition sync but not the startup executability check, so it can fix what the check reports. If the check is blocking boot (for example in NestJS), run the migration from a one-off script, or deploy temporarily with `onUnresolvable: "warn"`.
+* **Custom persistence adapters work unchanged.** Implement the optional `WorkflowInstanceStore.findInstanceUuids` to migrate without listing `instanceUuids`.
+
 ## [7.0.0](https://github.com/camcima/duraflows/compare/v6.1.0...v7.0.0) (2026-09-28)
 
 Instances now run on the definition version they were stamped with, not on whatever is registered today. Deploying a definition that renames a state or changes an event no longer changes the rules for instances already in flight. Read [Upgrading to 7.0.0](./docs/workflow-definitions.md#upgrading-to-700) before deploying.
