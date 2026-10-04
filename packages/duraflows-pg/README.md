@@ -150,3 +150,7 @@ See the full documentation in the [duraflows repository](https://github.com/camc
 ## License
 
 MIT
+
+## Optional event idempotency
+
+Apply `sql/dbmate/007_event_idempotency.sql` (or use `generateIdempotencyMigrationSql()`), then use `pgWorkflowProviders(pool, { idempotency: true })`. Fresh schemas can use `generateMigrationSql({ includeIdempotency: true })`. Default factories and schemas leave the feature disabled; deployments without keyed calls need no new table. `PgWorkflowIdempotencyStore` is also exported for custom wiring. Receipts join the same active transaction as workflow writes. Deploy supporting application code everywhere before enabling keyed traffic. See [the guide](../../docs/event-idempotency.md) for storage retention, rollback, and replay behavior.

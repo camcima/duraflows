@@ -10,6 +10,7 @@ import {
   PgWorkflowHistoryStore,
   PgWorkflowDefinitionStore,
   PgTransactionRunner,
+  PgWorkflowIdempotencyStore,
 } from "@duraflows/pg";
 
 // This suite proves that the shipped dbmate migration artifacts, applied
@@ -30,6 +31,7 @@ const MIGRATION_FILENAMES = [
   "004_definition_versions.sql",
   "005_timeout_retries.sql",
   "006_definition_version_index.sql",
+  "007_event_idempotency.sql",
 ];
 
 const dbmateDir = fileURLToPath(new URL("../../sql/dbmate/", import.meta.url));
@@ -89,6 +91,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
   const instanceStore = new PgWorkflowInstanceStore(pool);
   const historyStore = new PgWorkflowHistoryStore(pool);
   const definitionStore = new PgWorkflowDefinitionStore(pool);
+  const idempotencyStore = new PgWorkflowIdempotencyStore(pool);
 
   beforeAll(async () => {
     const client = await pool.connect();
@@ -111,6 +114,30 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       client.release();
     }
     await pool.end();
+  });
+
+  it("007's incremental schema stores receipts and cascades instance deletion", async () => {
+    const uuid = randomUUID();
+    await pool.query(
+      "INSERT INTO workflow_instances (uuid, workflow_name, current_state) VALUES ($1, 'idempotency-migration', 'new')",
+      [uuid],
+    );
+    await transactionRunner.runInTransaction(async () => {
+      await instanceStore.lockByUuid(uuid);
+      await idempotencyStore.reserve({ workflowInstanceUuid: uuid, key: "migration-key", eventName: "Submit" });
+      await idempotencyStore.complete(uuid, "migration-key", {
+        outcome: "success",
+        fromState: "new",
+        toState: "done",
+        commandResults: [],
+        historyUuid: randomUUID(),
+      });
+      expect((await idempotencyStore.find(uuid, "migration-key"))!.result!.outcome).toBe("success");
+    });
+    await pool.query("DELETE FROM workflow_instances WHERE uuid = $1", [uuid]);
+    expect(
+      (await pool.query("SELECT * FROM workflow_event_idempotency WHERE workflow_instance_uuid = $1", [uuid])).rows,
+    ).toEqual([]);
   });
 
   describe("pg sequential dbmate migrations (001 -> 006 applied in order)", () => {

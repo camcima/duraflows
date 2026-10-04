@@ -552,3 +552,15 @@ export class MyWorkflowExceptionFilter implements ExceptionFilter {
   }
 }
 ```
+
+## Idempotency errors
+
+All three new errors extend `WorkflowError`:
+
+| Error                          | Meaning                                                                                        | REST status   |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- | ------------- |
+| `IdempotencyConflictError`     | The instance's key was reused for a different event or fingerprint, including changed presence | 409           |
+| `IdempotencyInProgressError`   | Recursive use of the same key in its active transaction                                        | 409           |
+| `IdempotencyNotSupportedError` | A keyed call has no configured idempotency store                                               | Sanitized 500 |
+
+Invalid keys/fingerprints throw `InvalidArgumentError` (400). A lock timeout retains existing error behavior. Guard rejection and routed business failure are committed results, so the same key replays them; a new business attempt requires a new key. Exceptions and outer rollbacks remove receipts and permit retry. See [Event idempotency](./event-idempotency.md).

@@ -21,6 +21,7 @@ export {
   WORKFLOW_TRANSACTION_RUNNER,
   WORKFLOW_CLOCK,
   WORKFLOW_DEFINITION_STORE,
+  WORKFLOW_IDEMPOTENCY_STORE,
 } from "./providers/injection-tokens.js";
 export { NestCommandRegistry } from "./providers/nest-command-registry.js";
 export type { WorkflowCommandRegistration } from "./providers/nest-command-registry.js";
@@ -72,6 +73,9 @@ export type {
   WorkflowInstanceStore,
   WorkflowHistoryStore,
   WorkflowHistoryRecord,
+  WorkflowIdempotencyStore,
+  WorkflowIdempotencyReservation,
+  WorkflowIdempotencyRecord,
   DefinitionVersionSummary,
   MigrateInstancesInput,
   MigrateInstancesResult,
@@ -90,6 +94,9 @@ export type {
 export {
   WorkflowError,
   WorkflowDefinitionError,
+  IdempotencyConflictError,
+  IdempotencyInProgressError,
+  IdempotencyNotSupportedError,
   WorkflowInstanceNotFoundError,
   InvalidEventError,
   IncompatibleDefinitionError,

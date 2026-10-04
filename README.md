@@ -477,3 +477,17 @@ brew install semgrep
 ## License
 
 MIT
+
+## Event idempotency
+
+Enable `pgWorkflowProviders(pool, { idempotency: true })` or the Kysely equivalent after applying optional migration `007_event_idempotency.sql`. Retry a request with the same key:
+
+```ts
+await handle.triggerEvent("PaymentReceived", {
+  subject: order,
+  idempotencyKey: "payment-provider:event_123",
+  idempotencyFingerprint: "payment:pay_456:amount:2500:currency:USD", // Optional input identity.
+});
+```
+
+Committed duplicates return the original result without commands, history, or observers running again. A rolled-back execution remains retryable. Fingerprints are caller-supplied; changed subjects are not compared when they are omitted. See [Event idempotency](docs/event-idempotency.md) for guard/business-failure semantics, JSON results, retention, and external-effect limits.

@@ -1,4 +1,5 @@
 import type { ColumnType, Generated } from "kysely";
+import type { WorkflowExecutionResult } from "@duraflows/core";
 
 /**
  * JSON column type that accepts Record<string, unknown> in TS
@@ -60,4 +61,18 @@ export interface WorkflowDatabase {
   workflow_instances: WorkflowInstancesTable;
   workflow_history: WorkflowHistoryTable;
   workflow_definitions: WorkflowDefinitionsTable;
+}
+
+export interface WorkflowEventIdempotencyTable {
+  workflow_instance_uuid: string;
+  idempotency_key: string;
+  event_name: string;
+  fingerprint: string | null;
+  result_json: ColumnType<WorkflowExecutionResult | null, string | null | undefined, string | null>;
+  created_at: Generated<Date>;
+}
+
+/** Optional extension; existing WorkflowDatabase consumers need no new required table. */
+export interface WorkflowDatabaseWithIdempotency extends WorkflowDatabase {
+  workflow_event_idempotency: WorkflowEventIdempotencyTable;
 }

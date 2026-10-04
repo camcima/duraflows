@@ -899,3 +899,23 @@ describe("MyInstanceStore (custom)", () => {
 ```
 
 Don't re-test the contract — let `runInstanceStoreConformance` own that.
+
+## Optional WorkflowIdempotencyStore
+
+Add optional `idempotencyStore` to `WorkflowPersistenceProvider`; existing adapters need no new required methods. The runtime locks the instance before all three transaction-required methods:
+
+```ts
+interface WorkflowIdempotencyStore {
+  find(workflowInstanceUuid: string, key: string): Promise<WorkflowIdempotencyRecord | null>;
+  reserve(input: WorkflowIdempotencyReservation): Promise<void>;
+  complete(workflowInstanceUuid: string, key: string, result: WorkflowExecutionResult): Promise<void>;
+}
+```
+
+Reservation fields are `workflowInstanceUuid`, `key`, `eventName`, and optional `fingerprint`; records add `createdAt: Date` and `result: WorkflowExecutionResult | null`. Null represents an unfinished reservation in the current transaction. Reserve must never overwrite; complete must reject a missing/completed row. All writes/read checks must use the exact transaction connection shared with instance state/history and roll back with savepoints and outer transactions. Never commit an unfinished reservation from a successful event or use a separately committed in-memory receipt cache.
+
+Use a unique composite `(instance UUID, key)` with exact case/Unicode-sensitive key/fingerprint comparisons. Normalize database null fingerprints to undefined. Retain receipts for the life of the instance; deleting them removes deduplication. Bundled migration `007_event_idempotency.sql` is optional, factories use `{ idempotency: true }`, and fresh-schema generation uses `{ includeIdempotency: true }`. Default calls must work without the new table. Kysely keeps `WorkflowDatabase` compatible and exports `WorkflowDatabaseWithIdempotency` separately.
+
+Run `runIdempotencyStoreConformance(label, harness)` from `@duraflows/core/testing`. Supply fresh storage, transaction runner, existing instance UUID, `withInstanceLock(work)` under its transaction/lock, and teardown. Also race duplicates using real separate connections: after commit they replay; after rollback one may execute. Test outer rollback, failed savepoints, and recursion through another runtime sharing the transaction.
+
+If an outer transaction catches a failed nested call and continues, the runner must isolate the nested writes/reservation with a savepoint or equivalent rollback. Flat nesting cannot provide that guarantee.

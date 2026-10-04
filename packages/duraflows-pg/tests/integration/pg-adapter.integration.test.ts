@@ -1,3 +1,4 @@
+import { runDatabaseIdempotencyCases } from "../../../duraflows-core/tests/helpers/database-idempotency-cases.js";
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
@@ -89,7 +90,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     try {
       await client.query("CREATE SCHEMA IF NOT EXISTS duraflows_pg_it");
       await client.query("DROP TABLE IF EXISTS workflow_history, workflow_instances, workflow_definitions CASCADE");
-      const { up } = generateMigrationSql();
+      const { up } = generateMigrationSql({ includeIdempotency: true });
       await client.query(up);
     } finally {
       client.release();
@@ -105,6 +106,8 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     }
     await pool.end();
   });
+
+  runDatabaseIdempotencyCases("pg", () => pgWorkflowProviders(pool, { idempotency: true }));
 
   runInstanceStoreConformance("pg (real PostgreSQL)", {
     setup: async () => ({

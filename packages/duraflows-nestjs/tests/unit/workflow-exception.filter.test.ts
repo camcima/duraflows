@@ -7,6 +7,8 @@ import {
   InvalidArgumentError,
   IncompatibleDefinitionError,
   MigrationInterruptedError,
+  IdempotencyConflictError,
+  IdempotencyInProgressError,
 } from "@duraflows/core";
 import { WorkflowExceptionFilter } from "../../src/filters/workflow-exception.filter.js";
 // Imported statically: a dynamic import of the whole entry point can exceed the 5s test timeout
@@ -25,6 +27,11 @@ function mockHost() {
 }
 
 describe("WorkflowExceptionFilter", () => {
+  it.each([IdempotencyConflictError, IdempotencyInProgressError])("maps %s to 409", (ErrorClass) => {
+    const { host, status } = mockHost();
+    new WorkflowExceptionFilter().catch(new ErrorClass("instance"), host);
+    expect(status).toHaveBeenCalledWith(409);
+  });
   it("maps WorkflowInstanceNotFoundError to 404", () => {
     const { host, status, send } = mockHost();
     new WorkflowExceptionFilter().catch(new WorkflowInstanceNotFoundError("abc"), host);

@@ -20,6 +20,8 @@ export class WorkflowEventController {
       eventName: params.eventName,
       subject: body.subject,
       triggerMetadata: body.triggerMetadata,
+      idempotencyKey: body.idempotencyKey,
+      idempotencyFingerprint: body.idempotencyFingerprint,
     });
   }
 }

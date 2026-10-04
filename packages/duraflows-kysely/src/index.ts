@@ -5,6 +5,7 @@ import type { WorkflowDatabase } from "./kysely-database.js";
 import { KyselyWorkflowInstanceStore } from "./kysely-instance-store.js";
 import { KyselyWorkflowHistoryStore } from "./kysely-history-store.js";
 import { KyselyWorkflowDefinitionStore } from "./kysely-definition-store.js";
+import { KyselyWorkflowIdempotencyStore } from "./kysely-idempotency-store.js";
 import { KyselyTransactionRunner, type KyselyTransactionRunnerOptions } from "./kysely-transaction-runner.js";
 import { kyselyTransactionScopes, runInKyselySavepoint } from "./kysely-transaction-context.js";
 
@@ -14,18 +15,24 @@ export type { KyselyTransactionRunnerOptions } from "./kysely-transaction-runner
 export { KyselyWorkflowInstanceStore } from "./kysely-instance-store.js";
 export { KyselyWorkflowHistoryStore } from "./kysely-history-store.js";
 export { KyselyWorkflowDefinitionStore } from "./kysely-definition-store.js";
+export { KyselyWorkflowIdempotencyStore } from "./kysely-idempotency-store.js";
 export type {
   WorkflowDatabase,
   WorkflowInstancesTable,
   WorkflowHistoryTable,
   WorkflowDefinitionsTable,
+  WorkflowEventIdempotencyTable,
+  WorkflowDatabaseWithIdempotency,
 } from "./kysely-database.js";
 
 /**
  * Options accepted by {@link kyselyWorkflowProviders}. Every field is optional
  * and omitting the argument entirely reproduces the pre-existing behaviour.
  */
-export type KyselyWorkflowProvidersOptions = KyselyTransactionRunnerOptions;
+export interface KyselyWorkflowProvidersOptions extends KyselyTransactionRunnerOptions {
+  /** Opt-in; apply the event-idempotency migration before keyed calls. */
+  idempotency?: boolean;
+}
 
 /**
  * Creates long-lived persistence providers from a Kysely instance.
@@ -44,7 +51,13 @@ export function kyselyWorkflowProviders<DB extends WorkflowDatabase>(
   const instanceStore = new KyselyWorkflowInstanceStore(narrowed);
   const historyStore = new KyselyWorkflowHistoryStore(narrowed);
   const definitionStore = new KyselyWorkflowDefinitionStore(narrowed);
-  return { instanceStore, historyStore, transactionRunner, definitionStore };
+  return {
+    instanceStore,
+    historyStore,
+    transactionRunner,
+    definitionStore,
+    ...(options.idempotency ? { idempotencyStore: new KyselyWorkflowIdempotencyStore(narrowed) } : {}),
+  };
 }
 
 /**
@@ -54,6 +67,7 @@ export function kyselyWorkflowProviders<DB extends WorkflowDatabase>(
  */
 export function kyselyWorkflowProvidersFromTransaction<DB extends WorkflowDatabase>(
   trx: Transaction<DB>,
+  options: Pick<KyselyWorkflowProvidersOptions, "idempotency"> = {},
 ): WorkflowPersistenceProvider {
   const narrowed = trx as unknown as Kysely<WorkflowDatabase>;
   const boundTrx = trx as unknown as Transaction<WorkflowDatabase>;
@@ -85,5 +99,11 @@ export function kyselyWorkflowProvidersFromTransaction<DB extends WorkflowDataba
   const instanceStore = new KyselyWorkflowInstanceStore(narrowed);
   const historyStore = new KyselyWorkflowHistoryStore(narrowed);
   const definitionStore = new KyselyWorkflowDefinitionStore(narrowed);
-  return { instanceStore, historyStore, transactionRunner, definitionStore };
+  return {
+    instanceStore,
+    historyStore,
+    transactionRunner,
+    definitionStore,
+    ...(options.idempotency ? { idempotencyStore: new KyselyWorkflowIdempotencyStore(narrowed) } : {}),
+  };
 }

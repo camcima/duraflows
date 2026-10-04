@@ -179,6 +179,7 @@ interface WorkflowPersistenceProvider {
   historyStore: WorkflowHistoryStore;
   transactionRunner: WorkflowTransactionRunner;
   definitionStore?: WorkflowDefinitionStore;
+  idempotencyStore?: WorkflowIdempotencyStore;
 }
 ```
 
@@ -808,3 +809,9 @@ The suite covers:
 | `findByNameAndVersion` unknown pair | Returns `null` for an unknown version or an unknown workflow name                                                                  |
 | Independent versions                | Two versions of the same workflow are stored and retrieved as independent rows                                                     |
 | `listVersions` ordering             | Returns only the named workflow's snapshots, ordered by `version` ascending                                                        |
+
+## Optional WorkflowIdempotencyStore
+
+`WorkflowPersistenceProvider.idempotencyStore` adds event deduplication without requiring changes to existing custom adapters. Its `find`, `reserve`, and `complete` methods must use the active workflow transaction/connection, after the instance is locked. Reservations cannot be overwritten; completion rejects missing or completed records. An unfinished reservation must never commit from a successful event. Validate your adapter with `runIdempotencyStoreConformance` from `@duraflows/core/testing` and separate real-connection concurrency tests.
+
+Bundled factories opt in with `{ idempotency: true }`. Migration `007_event_idempotency.sql` and `generateIdempotencyMigrationSql()` add the optional table. `generateMigrationSql({ includeIdempotency: true })` includes it for fresh installs; defaults still work without it. The Kysely database extension is `WorkflowDatabaseWithIdempotency`. See [the complete contract](./event-idempotency.md#custom-adapters) for records, retention, and deployment.

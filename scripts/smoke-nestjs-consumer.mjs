@@ -11,6 +11,8 @@
 // CJS run exercises Node's require(esm).
 //
 // Run after `pnpm run build`:  node scripts/smoke-nestjs-consumer.mjs
+// Test another supported version without changing the workspace lockfile:
+// NEST_SMOKE_VERSION=11.0.0 node scripts/smoke-nestjs-consumer.mjs
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -34,9 +36,9 @@ function run(cmd, args, cwd) {
 }
 
 const nestVersions = {
-  "@nestjs/common": installedVersion("@nestjs/common"),
-  "@nestjs/core": installedVersion("@nestjs/core"),
-  "@nestjs/platform-express": installedVersion("@nestjs/platform-express"),
+  "@nestjs/common": process.env.NEST_SMOKE_VERSION || installedVersion("@nestjs/common"),
+  "@nestjs/core": process.env.NEST_SMOKE_VERSION || installedVersion("@nestjs/core"),
+  "@nestjs/platform-express": process.env.NEST_SMOKE_VERSION || installedVersion("@nestjs/platform-express"),
 };
 
 const workDir = mkdtempSync(join(tmpdir(), "duraflows-nestjs-smoke-"));
@@ -54,6 +56,8 @@ module.exports = async function scenario({ common, core, duraflows }) {
 
   const instances = new Map();
   const history = [];
+  const receipts = new Map();
+  let approvals = 0;
   const persistence = {
     instanceStore: {
       async create(i) { instances.set(i.uuid, structuredClone(i)); },
@@ -67,10 +71,19 @@ module.exports = async function scenario({ common, core, duraflows }) {
       async findByInstanceUuid(u) { return history.filter((h) => h.workflowInstanceUuid === u); },
     },
     transactionRunner: { async runInTransaction(cb) { return cb(); } },
+    // This smoke fixture verifies published wiring; real adapter tests prove
+    // transactional rollback and concurrent locking.
+    idempotencyStore: {
+      async find(uuid, key) { return receipts.get(uuid + ":" + key) ?? null; },
+      async reserve(input) {
+        receipts.set(input.workflowInstanceUuid + ":" + input.key, { ...input, result: null, createdAt: new Date() });
+      },
+      async complete(uuid, key, result) { receipts.get(uuid + ":" + key).result = structuredClone(result); },
+    },
   };
 
   class ApproveCommand {
-    async execute() { return { ok: true, code: "APPROVED" }; }
+    async execute() { approvals++; return { ok: true, code: "APPROVED" }; }
   }
   WorkflowCommand("smoke-approve")(ApproveCommand);
 
@@ -128,6 +141,19 @@ module.exports = async function scenario({ common, core, duraflows }) {
     expectStatus("timeouts", (await call("POST", "/workflows/timeouts/process?limit=10")).status, 201);
     const state = instances.get(uuid) && instances.get(uuid).currentState;
     if (state !== "approved") failures.push("final state: expected approved, got " + state);
+
+    const keyedInstance = await call("POST", "/workflows", { workflowName: "smoke-order" });
+    expectStatus("keyed create", keyedInstance.status, 201);
+    const keyedPath = "/workflows/" + keyedInstance.body.uuid + "/events/approve";
+    const request = { idempotencyKey: "approval:123", idempotencyFingerprint: "order:123" };
+    const first = await call("POST", keyedPath, request);
+    const replay = await call("POST", keyedPath, request);
+    expectStatus("keyed trigger", first.status, 201);
+    expectStatus("keyed replay", replay.status, 201);
+    if (JSON.stringify(first.body) !== JSON.stringify(replay.body)) failures.push("replay result differs");
+    if (approvals !== 2) failures.push("expected one approval per instance, got " + approvals);
+    expectStatus("keyed conflict", (await call("POST", keyedPath, { ...request, idempotencyFingerprint: "changed" })).status, 409);
+    expectStatus("null key validation", (await call("POST", keyedPath, { idempotencyKey: null })).status, 400);
   } finally {
     await app.close();
   }

@@ -41,6 +41,9 @@ export type {
   WorkflowPersistenceProvider,
   StoredWorkflowDefinition,
   WorkflowDefinitionStore,
+  WorkflowIdempotencyStore,
+  WorkflowIdempotencyReservation,
+  WorkflowIdempotencyRecord,
 } from "./types/persistence.js";
 
 // Transaction scopes (for persistence adapters)
@@ -52,6 +55,9 @@ export {
   WorkflowError,
   WorkflowDefinitionError,
   InvalidArgumentError,
+  IdempotencyConflictError,
+  IdempotencyInProgressError,
+  IdempotencyNotSupportedError,
   WorkflowInstanceNotFoundError,
   InvalidEventError,
   CommandFailureError,

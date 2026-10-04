@@ -2,6 +2,24 @@ export type UuidStrategy = "uuidv7" | "gen_random_uuid";
 
 export interface MigrationSqlOptions {
   uuidStrategy?: UuidStrategy;
+  /** Include the optional event-idempotency table in a fresh schema. Default false. */
+  includeIdempotency?: boolean;
+}
+
+/** Additive migration; required only when enabling event idempotency. */
+export function generateIdempotencyMigrationSql(): { up: string; down: string } {
+  return {
+    up: `CREATE TABLE workflow_event_idempotency (
+  workflow_instance_uuid uuid NOT NULL REFERENCES workflow_instances(uuid) ON DELETE CASCADE,
+  idempotency_key text COLLATE "C" NOT NULL CHECK (octet_length(idempotency_key) BETWEEN 1 AND 256),
+  event_name text NOT NULL,
+  fingerprint text COLLATE "C" NULL CHECK (fingerprint IS NULL OR octet_length(fingerprint) BETWEEN 1 AND 256),
+  result_json jsonb NULL CHECK (result_json IS NULL OR jsonb_typeof(result_json) = 'object'),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (workflow_instance_uuid, idempotency_key)
+);`,
+    down: "DROP TABLE IF EXISTS workflow_event_idempotency;",
+  };
 }
 
 /**
@@ -28,7 +46,7 @@ export interface MigrationSqlOptions {
 export function generateMigrationSql(options?: MigrationSqlOptions): { up: string; down: string } {
   const uuidDefault = options?.uuidStrategy === "uuidv7" ? "uuidv7()" : "gen_random_uuid()";
 
-  const up = `-- UUIDs for workflow_instances are generated application-side (randomUUID).
+  let up = `-- UUIDs for workflow_instances are generated application-side (randomUUID).
 -- UUIDs for workflow_history are generated database-side (${uuidDefault}).
 
 CREATE TABLE workflow_instances (
@@ -95,7 +113,9 @@ CREATE TABLE workflow_definitions (
   PRIMARY KEY (workflow_name, version)
 );`;
 
-  const down = `DROP TABLE IF EXISTS workflow_definitions;
+  if (options?.includeIdempotency) up += `\n\n${generateIdempotencyMigrationSql().up}`;
+
+  const down = `${options?.includeIdempotency ? `${generateIdempotencyMigrationSql().down}\n` : ""}DROP TABLE IF EXISTS workflow_definitions;
 DROP TABLE IF EXISTS workflow_history;
 DROP TABLE IF EXISTS workflow_instances;`;
 

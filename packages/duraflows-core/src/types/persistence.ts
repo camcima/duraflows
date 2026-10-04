@@ -1,4 +1,4 @@
-import type { CommandResult, WorkflowInstance } from "./runtime.js";
+import type { CommandResult, WorkflowInstance, WorkflowExecutionResult } from "./runtime.js";
 import type { WorkflowDefinition } from "./definition.js";
 import type { AfterCommitCallback } from "../transaction/scoped-transaction-context.js";
 
@@ -251,4 +251,34 @@ export interface WorkflowPersistenceProvider {
    * inert without it.
    */
   definitionStore?: WorkflowDefinitionStore;
+  /** Optional capability. Required only for calls supplying an idempotency key. */
+  idempotencyStore?: WorkflowIdempotencyStore;
+}
+
+export interface WorkflowIdempotencyReservation {
+  workflowInstanceUuid: string;
+  key: string;
+  eventName: string;
+  fingerprint?: string;
+}
+
+export interface WorkflowIdempotencyRecord extends WorkflowIdempotencyReservation {
+  /** Null only while reserved inside the active transaction; never commit an unfinished reservation. */
+  result: WorkflowExecutionResult | null;
+  createdAt: Date;
+}
+
+/**
+ * All methods REQUIRE the active workflow transaction and its connection.
+ * The runtime locks the instance first. Reservations and completed results
+ * commit or roll back with state/history, including nested savepoints.
+ * A runner that supports caught nested failures must isolate them with a
+ * savepoint (or equivalent); flat nesting cannot provide that guarantee.
+ * Keys/fingerprints compare exactly; reserve and complete must never overwrite
+ * an existing reservation/completed result, respectively.
+ */
+export interface WorkflowIdempotencyStore {
+  find(workflowInstanceUuid: string, key: string): Promise<WorkflowIdempotencyRecord | null>;
+  reserve(input: WorkflowIdempotencyReservation): Promise<void>;
+  complete(workflowInstanceUuid: string, key: string, result: WorkflowExecutionResult): Promise<void>;
 }

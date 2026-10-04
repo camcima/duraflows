@@ -1,6 +1,6 @@
 # duraflows Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-09-27
+Auto-generated from all feature plans. Last updated: 2026-10-03
 
 ## Active Technologies
 
@@ -15,7 +15,7 @@ Auto-generated from all feature plans. Last updated: 2026-09-27
 
 ```text
 packages/duraflows-core/src/
-packages/duraflows-pg/src/        # also sql/dbmate/ migrations 001–006
+packages/duraflows-pg/src/        # also sql/dbmate/ migrations 001–006; optional 007 for event idempotency
 packages/duraflows-kysely/src/
 packages/duraflows-nestjs/src/
 skills/                            # agent skills shipped with the repo

@@ -1,3 +1,4 @@
+import { runDatabaseIdempotencyCases } from "../../../duraflows-core/tests/helpers/database-idempotency-cases.js";
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Kysely, PostgresDialect, sql } from "kysely";
@@ -91,7 +92,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     try {
       await client.query("CREATE SCHEMA IF NOT EXISTS kysely_it");
       await client.query("DROP TABLE IF EXISTS workflow_history, workflow_instances, workflow_definitions CASCADE");
-      const { up } = generateMigrationSql();
+      const { up } = generateMigrationSql({ includeIdempotency: true });
       await client.query(up);
     } finally {
       client.release();
@@ -106,6 +107,42 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       client.release();
     }
     await db.destroy();
+  });
+
+  runDatabaseIdempotencyCases("kysely", () => kyselyWorkflowProviders(db, { idempotency: true }));
+
+  it("transaction-bound providers replay and roll receipts back with the caller's transaction", async () => {
+    const definitions = new InMemoryDefinitionRegistry();
+    definitions.register({
+      name: "bound-idempotency",
+      initialState: "new",
+      states: { new: { events: { submit: { targetState: "done" } } }, done: {} },
+    });
+    let uuid = "";
+    await expect(
+      db.transaction().execute(async (trx) => {
+        const p = kyselyWorkflowProvidersFromTransaction(trx, { idempotency: true });
+        const runtime = new WorkflowRuntime({
+          ...p,
+          definitionRegistry: definitions,
+          commandRegistry: new InMemoryCommandRegistry(),
+          clock: { now: () => new Date() },
+        });
+        uuid = (await runtime.createInstance({ workflowName: "bound-idempotency" })).uuid;
+        const input = { workflowInstanceUuid: uuid, eventName: "submit", idempotencyKey: "bound" };
+        const first = await runtime.triggerEvent(input);
+        expect(await runtime.triggerEvent(input)).toEqual(first);
+        await p.transactionRunner.runInTransaction(async () => {
+          expect((await p.idempotencyStore!.find(uuid, "bound"))!.result).toEqual(first);
+        });
+        throw new Error("caller rollback");
+      }),
+    ).rejects.toThrow("caller rollback");
+    expect(await instanceStore.findByUuid(uuid)).toBeNull();
+    const receipts = await pool.query("SELECT 1 FROM workflow_event_idempotency WHERE workflow_instance_uuid = $1", [
+      uuid,
+    ]);
+    expect(receipts.rowCount).toBe(0);
   });
 
   runInstanceStoreConformance("kysely (real PostgreSQL)", {

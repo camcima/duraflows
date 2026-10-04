@@ -187,3 +187,7 @@ See the full documentation in the [duraflows repository](https://github.com/camc
 ## License
 
 MIT
+
+## Event idempotency
+
+Pass persistence configured with `{ idempotency: true }` to `WorkflowModule.forRoot` or `forRootAsync`, after applying migration `007_event_idempotency.sql`. Services, handles, and the optional REST event controller accept `idempotencyKey` and optional `idempotencyFingerprint`. REST fields go in the JSON body; conflicts return 409. See [the guide](../../docs/event-idempotency.md) for a complete example and retry semantics.

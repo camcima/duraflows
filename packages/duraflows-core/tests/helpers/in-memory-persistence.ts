@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { WorkflowError } from "../../src/errors/index.js";
 import { runAfterCommitCallbacks, type AfterCommitCallback } from "../../src/transaction/scoped-transaction-context.js";
-import type { WorkflowInstance } from "../../src/types/runtime.js";
+import type { WorkflowInstance, WorkflowExecutionResult } from "../../src/types/runtime.js";
 import type { WorkflowDefinition } from "../../src/types/definition.js";
 import type {
   WorkflowHistoryRecord,
@@ -24,6 +24,9 @@ import type {
   WorkflowTransactionRunner,
   StoredWorkflowDefinition,
   WorkflowDefinitionStore,
+  WorkflowIdempotencyStore,
+  WorkflowIdempotencyRecord,
+  WorkflowIdempotencyReservation,
 } from "../../src/types/persistence.js";
 
 /** A store whose entire state can be captured and put back by the transaction runner. */
@@ -193,6 +196,10 @@ export class InMemoryTransactionRunner implements WorkflowTransactionRunner {
 
   constructor(private readonly stores: readonly SnapshotableStore[]) {}
 
+  isActive(): boolean {
+    return this.scopes.getStore() !== undefined;
+  }
+
   async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
     const parent = this.scopes.getStore();
     const scope = { callbacks: [] as AfterCommitCallback[] };
@@ -229,15 +236,61 @@ export class InMemoryTransactionRunner implements WorkflowTransactionRunner {
  * the runner is already bound to both stores, so a throw anywhere inside a
  * transaction reverts instance state and history together.
  */
-export function createInMemoryPersistence(): {
+export function createInMemoryPersistence(options: { idempotency?: boolean } = {}): {
   instanceStore: InMemoryInstanceStore;
   historyStore: InMemoryHistoryStore;
   transactionRunner: InMemoryTransactionRunner;
+  idempotencyStore?: InMemoryIdempotencyStore;
 } {
   const instanceStore = new InMemoryInstanceStore();
   const historyStore = new InMemoryHistoryStore();
-  const transactionRunner = new InMemoryTransactionRunner([instanceStore, historyStore]);
-  return { instanceStore, historyStore, transactionRunner };
+  const idempotencyStore = new InMemoryIdempotencyStore(() => transactionRunner.isActive());
+  const transactionRunner = new InMemoryTransactionRunner([
+    instanceStore,
+    historyStore,
+    ...(options.idempotency ? [idempotencyStore] : []),
+  ]);
+  return {
+    instanceStore,
+    historyStore,
+    transactionRunner,
+    ...(options.idempotency ? { idempotencyStore } : {}),
+  };
+}
+
+export class InMemoryIdempotencyStore implements WorkflowIdempotencyStore, SnapshotableStore {
+  private records = new Map<string, WorkflowIdempotencyRecord>();
+  constructor(private readonly isActive: () => boolean) {}
+
+  private identity(uuid: string, key: string): string {
+    if (!this.isActive()) throw new WorkflowError("WorkflowIdempotencyStore requires an active transaction");
+    return JSON.stringify([uuid, key]);
+  }
+
+  async find(uuid: string, key: string): Promise<WorkflowIdempotencyRecord | null> {
+    const record = this.records.get(this.identity(uuid, key));
+    return record ? structuredClone(record) : null;
+  }
+
+  async reserve(input: WorkflowIdempotencyReservation): Promise<void> {
+    const key = this.identity(input.workflowInstanceUuid, input.key);
+    if (this.records.has(key)) throw new WorkflowError("Idempotency reservation already exists");
+    this.records.set(key, { ...input, result: null, createdAt: new Date() });
+  }
+
+  async complete(uuid: string, key: string, result: WorkflowExecutionResult): Promise<void> {
+    const record = this.records.get(this.identity(uuid, key));
+    if (!record || record.result !== null)
+      throw new WorkflowError("Idempotency reservation is missing or already completed");
+    record.result = JSON.parse(JSON.stringify(result)) as WorkflowExecutionResult;
+  }
+
+  snapshot(): unknown {
+    return structuredClone(this.records);
+  }
+  restore(snapshot: unknown): void {
+    this.records = snapshot as Map<string, WorkflowIdempotencyRecord>;
+  }
 }
 
 /**

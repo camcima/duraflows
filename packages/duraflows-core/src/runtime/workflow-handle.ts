@@ -32,13 +32,15 @@ export class WorkflowHandle {
 
   async triggerEvent(
     eventName: string,
-    options?: { subject?: unknown; triggerMetadata?: Record<string, unknown> },
+    options?: Omit<TriggerWorkflowEventInput, "workflowInstanceUuid" | "eventName">,
   ): Promise<WorkflowExecutionResult> {
     return this.client.triggerEvent({
       workflowInstanceUuid: this.uuid,
       eventName,
       subject: options?.subject,
       triggerMetadata: options?.triggerMetadata,
+      idempotencyKey: options?.idempotencyKey,
+      idempotencyFingerprint: options?.idempotencyFingerprint,
     });
   }
 

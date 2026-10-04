@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { generateMigrationSql } from "../../src/pg-schema-manager.js";
+import { generateMigrationSql, generateIdempotencyMigrationSql } from "../../src/pg-schema-manager.js";
 
 describe("generateMigrationSql", () => {
+  it("includes optional idempotency DDL only when requested and drops it before the instance table", () => {
+    expect(generateMigrationSql().up).not.toContain("workflow_event_idempotency");
+    const { up, down } = generateMigrationSql({ includeIdempotency: true });
+    expect(up).toContain(generateIdempotencyMigrationSql().up);
+    expect(down.indexOf("workflow_event_idempotency")).toBeLessThan(down.indexOf("workflow_instances"));
+  });
   it("defaults to gen_random_uuid()", () => {
     const { up } = generateMigrationSql();
     expect(up).toContain("gen_random_uuid()");

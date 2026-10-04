@@ -30,6 +30,12 @@
       "prompt": "We already have this duraflows order workflow live in production (currently `version: 1`). Product now wants us to add a new `partial_refund` event to the `shipped` state — refunds only allowed within 14 days of shipping, otherwise reject outright. This modifies the existing WorkflowDefinition, it's not a brand-new workflow. What do I need to do differently compared to building one from scratch?",
       "expected_output": "Should walk through the normal design steps for the new event/state changes (Step 3 event shape, Step 4 commands for the 14-day window check, Step 5 error handling), but should also flag that this is a content change to an already-shipped definition and that `version` must be bumped (e.g. from 1 to 2) as part of the assembled WorkflowDefinition in Step 7 — otherwise `WorkflowRuntime.initialize()` throws `WorkflowDefinitionError` on the content-hash mismatch (a version-bump guard) the next time it runs, which fails NestJS startup. Should NOT claim that bumping the version changes how already-running order instances are evaluated, or that anything needs to happen to in-flight instances — that's outside this skill's scope (see duraflows-developer for the full mechanics).",
       "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "Build the caller-side integration for a retryable PaymentReceived webhook in duraflows. The provider supplies an event ID and amount/currency. Keep arbitrary order subjects and explain how retries and a deliberate new attempt differ.",
+      "expected_output": "Use stable occurrence keys scoped to an instance; optional caller fingerprints compare exactly including presence. Enable optional transactional storage with idempotency:true after migration 007; preserve unkeyed calls and existing Kysely types. Replay committed success, routed failure, and guard rejection without commands, guards, observers or writes; outer rollback removes receipts. Same-key transaction-local recursion fails. Keyed results are JSON snapshots. Test real concurrent commit/rollback and do not claim exactly-once external effects or automatic pruning.",
+      "files": []
     }
   ]
 }
