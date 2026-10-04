@@ -1,5 +1,11 @@
 # Changelog
 
+## [7.3.0](https://github.com/camcima/duraflows/compare/v7.2.0...v7.3.0) (2026-10-04)
+
+### Features
+
+* add opt-in durable event idempotency ([0edc07a](https://github.com/camcima/duraflows/commit/0edc07ac744bed636a164f19fe75864722c76398))
+
 ## [7.2.0](https://github.com/camcima/duraflows/compare/v7.1.0...v7.2.0) (2026-09-28)
 
 `migrateInstances` becomes practical on large, mature tables: state filters, a resumable cursor, warnings, and interruption that carries its partial result. This release also fixes several durability bugs in definition versioning that were found in review. See [Migrating instances](./docs/workflow-definitions.md#migrating-instances).
