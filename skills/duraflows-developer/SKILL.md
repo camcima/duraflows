@@ -18,7 +18,7 @@ duraflows is a **durable workflow runtime** for TypeScript built on [@camcima/fi
 
 **Compatibility:** duraflows v2.0.0+ declares `engines.node >= 20` (carried through from `@camcima/finita` v3). The pre-v2 line predates the Node 20 floor and shipped without an `engines` field — check the published package's `engines.node` for exact runtime requirements. The public WorkflowDefinition surface is unchanged across the v1 → v2 boundary; the v2 bump is an internal Finita upgrade plus the Node floor.
 
-**Important**: duraflows is NOT like Temporal. Commands are intentionally side-effecting -- they call APIs, write to databases, send messages. There is no replay or checkpointing. Durability comes from:
+Commands call APIs, write to databases, and send messages. They are not replayed or checkpointed. Opt-in event idempotency returns a recorded event result without running its commands again. Durability comes from:
 
 - Persisted workflow state (current state, context, version)
 - Complete immutable audit history of every transition

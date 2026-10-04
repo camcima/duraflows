@@ -1,5 +1,7 @@
 # Event idempotency
 
+Available in duraflows 7.3.0 and later.
+
 Event idempotency lets you safely retry an event after losing its response. A stable key identifies one request
 on one workflow instance. Once that request commits, retries return its recorded result without running the event again.
 
