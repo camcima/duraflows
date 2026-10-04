@@ -2,6 +2,10 @@
 
 ## [7.3.0](https://github.com/camcima/duraflows/compare/v7.2.0...v7.3.0) (2026-10-04)
 
+Retry committed event requests with a stable `idempotencyKey` without rerunning guards, commands, entry chains, or observers. Optional `idempotencyFingerprint` detects conflicting inputs. Receipts roll back with workflow writes; success, routed failure, and guard rejection replay their original result.
+
+Apply optional migration `007_event_idempotency.sql`, then enable `{ idempotency: true }` on the pg or Kysely provider. Existing unkeyed calls remain unchanged. External effects before a rollback still need downstream idempotency. Documentation and all five repository skills include the feature. See [Event idempotency](https://github.com/camcima/duraflows/blob/v7.3.0/docs/event-idempotency.md).
+
 ### Features
 
 * add opt-in durable event idempotency ([0edc07a](https://github.com/camcima/duraflows/commit/0edc07ac744bed636a164f19fe75864722c76398))
