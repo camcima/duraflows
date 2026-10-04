@@ -369,3 +369,16 @@ When a workflow enters `validating` (via any event or timeout), the `runValidati
 - [Persistence](persistence.md) -- custom adapters for Prisma, Drizzle, etc.
 - [NestJS Integration](nestjs-integration.md) -- module configuration, services, controllers
 - [Error Handling](error-handling.md) -- error types and recovery strategies
+
+## Retry a webhook safely
+
+Apply optional migration `007_event_idempotency.sql` and configure your persistence with `{ idempotency: true }`. Use the provider's webhook event ID for every retry of that occurrence:
+
+```ts
+await handle.triggerEvent("PaymentReceived", {
+  subject: order,
+  idempotencyKey: "payment-provider:event_123",
+});
+```
+
+A duplicate returns the committed original result, even after the workflow changes states. Different business attempts need new keys. Supply `idempotencyFingerprint` if you need conflicting-input detection; the library does not automatically compare subjects. Read [Event idempotency](./event-idempotency.md) before enabling it.

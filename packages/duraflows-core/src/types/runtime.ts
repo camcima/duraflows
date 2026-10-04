@@ -108,6 +108,10 @@ export interface TriggerWorkflowEventInput {
   eventName: string;
   subject?: unknown;
   triggerMetadata?: Record<string, unknown>;
+  /** Stable identity of one request, scoped to this workflow instance. */
+  idempotencyKey?: string;
+  /** Optional caller-supplied identity of business inputs; compared exactly, including presence. */
+  idempotencyFingerprint?: string;
 }
 
 export interface ProcessExpiredWorkflowsInput {

@@ -402,3 +402,19 @@ Start from the template closest to your use case:
 | [fan-out-fan-in.ts](./assets/fan-out-fan-in.ts)                 | Multi-step onEnter chains | Processing pipelines, multi-stage enrichment     |
 | [saga-compensation.ts](./assets/saga-compensation.ts)           | Forward + rollback chains | Multi-service transactions needing rollback      |
 | [approval-human-in-loop.ts](./assets/approval-human-in-loop.ts) | Waiting states + timeout  | Approval flows, review processes, escalation     |
+
+## Retryable event inputs
+
+For webhook/message/API retries, opt in to persistence with `{ idempotency: true }` and apply optional migration `007_event_idempotency.sql`. Generate call-site examples using a stable upstream occurrence ID:
+
+```ts
+await handle.triggerEvent("PaymentReceived", {
+  subject: order,
+  idempotencyKey: "payment-provider:event_123",
+  idempotencyFingerprint: "payment:pay_456:amount:2500:currency:USD", // Optional business input identity.
+});
+```
+
+A key identifies one occurrence on an instance, including after state changes. Same-key retries return the committed original result without executing guards, commands, or observers. Routed failures and rejected guards also replay; a deliberate new attempt needs a new key. Rolled-back executions remain retryable. Without a caller fingerprint, changed subjects are not compared. Preserve arbitrary subjects, but keyed results are JSON snapshots.
+
+Do not introduce a fresh key on each retry, use just an event name, or claim that event idempotency guarantees exactly-once external calls. Commands still need stable downstream idempotency when their external effects can survive database rollback. Existing unkeyed applications need no extra table or adapter capability.

@@ -317,6 +317,8 @@ interface TriggerWorkflowEventInput {
   eventName: string; // must exist on current state
   subject?: unknown; // domain entity passed to commands
   triggerMetadata?: Record<string, unknown>; // who/what triggered
+  idempotencyKey?: string;
+  idempotencyFingerprint?: string;
 }
 ```
 
@@ -480,7 +482,8 @@ interface WorkflowPersistenceProvider {
   instanceStore: WorkflowInstanceStore;
   historyStore: WorkflowHistoryStore;
   transactionRunner: WorkflowTransactionRunner;
-  definitionStore?: WorkflowDefinitionStore; // v5.0.0: optional; omit to leave definition versioning inert
+  definitionStore?: WorkflowDefinitionStore;
+  idempotencyStore?: WorkflowIdempotencyStore; // v5.0.0: optional; omit to leave definition versioning inert
 }
 ```
 
@@ -1277,3 +1280,17 @@ class MigrationInterruptedError extends WorkflowError {
 ```
 
 Thrown when: `migrateInstances()` fails while _listing_ candidates -- `instanceStore.findInstanceUuids` rejects, or returns a page that isn't strictly ascending past the cursor or that contains an entry that isn't a non-empty string (the migrator's message calls it "not a UUID string", but the check is only that it is a non-empty string). Never thrown for a per-instance failure (a throwing `transformContext`, an optimistic-lock conflict, a database error migrating one instance); those land in `result.failed` and the batch continues. `result` is the same `MigrateInstancesResult` the call would otherwise have returned, complete up to the interruption, with `nextCursor` set to the last UUID examined (or the input `cursor`, or `null`, if none was examined yet) -- pass it back as `cursor` to resume. `cause` (inherited from `WorkflowError`) is the original error: the store's rejection, or the `WorkflowError` the migrator raised over a bad page (then wrapped as `cause`). An `instanceof <YourStoreError>` check on a wrapped store failure must test `error.cause`, not `error`. See [Instance Migration (v7.1.0)](#instance-migration-v710).
+
+## Event idempotency API
+
+- Core exports: `WorkflowIdempotencyStore`, `WorkflowIdempotencyReservation`, `WorkflowIdempotencyRecord`, `IdempotencyConflictError`, `IdempotencyInProgressError`, and `IdempotencyNotSupportedError`. The NestJS barrel re-exports these and `WORKFLOW_IDEMPOTENCY_STORE`.
+- `WorkflowRuntimeOptions` and `WorkflowPersistenceProvider` gain optional `idempotencyStore`.
+- `TriggerWorkflowEventInput` and handle options gain optional `idempotencyKey` and `idempotencyFingerprint`, both strings. `WorkflowExecutionResult` is unchanged.
+- `pgWorkflowProviders(pool, options?)` and `kyselyWorkflowProviders(db, options?)` accept optional `idempotency: boolean` (default false). `kyselyWorkflowProvidersFromTransaction(trx, options?)` accepts the same option.
+- pg exports `PgWorkflowIdempotencyStore`, `PgWorkflowProvidersOptions`, and `generateIdempotencyMigrationSql(): { up: string; down: string }`. `MigrationSqlOptions.includeIdempotency?: boolean` defaults false.
+- Kysely exports `KyselyWorkflowIdempotencyStore<DB extends WorkflowDatabase>`, `KyselyWorkflowProvidersOptions`, `WorkflowEventIdempotencyTable`, and `WorkflowDatabaseWithIdempotency`.
+- `@duraflows/core/testing` exports `runIdempotencyStoreConformance(label, harness)` and `IdempotencyStoreConformanceHarness`.
+
+`WorkflowIdempotencyReservation` has `workflowInstanceUuid`, `key`, `eventName`, and optional `fingerprint`. `WorkflowIdempotencyRecord` adds `createdAt: Date` and `result: WorkflowExecutionResult | null`. Store methods `find(uuid, key)`, `reserve(input)`, and `complete(uuid, key, result)` all require the workflow transaction and connection; incomplete reservations are transaction-local. The conformance harness supplies `store`, `transactionRunner`, `instanceUuid`, transactional `withInstanceLock(work)`, and `teardown`.
+
+For validation, JSON result normalization, replay semantics, schema, HTTP examples, and guarantee limits, see [Event idempotency](../docs/event-idempotency.md).

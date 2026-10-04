@@ -6,3 +6,6 @@ export type { DefinitionStoreConformanceHarness } from "./definition-store-confo
 
 export { runTransactionRunnerConformance } from "./transaction-runner-conformance.js";
 export type { TransactionRunnerConformanceHarness } from "./transaction-runner-conformance.js";
+
+export { runIdempotencyStoreConformance } from "./idempotency-store-conformance.js";
+export type { IdempotencyStoreConformanceHarness } from "./idempotency-store-conformance.js";

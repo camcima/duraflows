@@ -732,3 +732,17 @@ class NestCommandRegistry implements WorkflowCommandRegistry {
 ```
 
 This is an internal class. You interact with it through `WorkflowModuleOptions.commands` or the `@WorkflowCommand` decorator. The `WorkflowCommandRegistry` interface only exposes `get()` and `has()` -- registration happens at construction time from the merged command registrations (explicit + discovered).
+
+## Event idempotency
+
+Configure persistence with `{ idempotency: true }` after applying optional migration `007_event_idempotency.sql`; both `forRoot` and `forRootAsync` forward its optional store through `WORKFLOW_IDEMPOTENCY_STORE`. `WorkflowService.triggerEvent`, `triggerEventFor`, and handles accept the identity fields. The REST event body supports:
+
+```json
+{
+  "idempotencyKey": "payment-provider:event_123",
+  "idempotencyFingerprint": "payment:pay_456:amount:2500:currency:USD",
+  "subject": { "orderId": "ORD-123" }
+}
+```
+
+First execution and replay return the existing 201 result shape. Conflict and transaction-local reentry return 409; invalid identity fields, including null, return 400. Missing adapter capability returns a sanitized 500. Identity fields are body fields, not HTTP headers. See [Event idempotency](./event-idempotency.md) for fingerprint limits and outcome semantics.

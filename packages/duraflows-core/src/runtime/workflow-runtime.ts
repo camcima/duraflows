@@ -9,6 +9,7 @@ import type {
   WorkflowTransactionRunner,
   WorkflowClock,
   WorkflowDefinitionStore,
+  WorkflowIdempotencyStore,
 } from "../types/persistence.js";
 import type {
   CreateWorkflowInstanceInput,
@@ -40,6 +41,9 @@ import {
   WorkflowDefinitionError,
   WorkflowError,
   InvalidArgumentError,
+  IdempotencyConflictError,
+  IdempotencyInProgressError,
+  IdempotencyNotSupportedError,
 } from "../errors/index.js";
 import { WorkflowHandle } from "./workflow-handle.js";
 import type { WorkflowObserver, StateEnterEvent, ObserverErrorHandler } from "../types/observer.js";
@@ -119,6 +123,8 @@ export interface WorkflowRuntimeOptions {
    * registered definition (a warning is logged once while any is pinned).
    */
   definitionStore?: WorkflowDefinitionStore;
+  /** Opt-in durable request deduplication; unused by unkeyed calls. */
+  idempotencyStore?: WorkflowIdempotencyStore;
   maxOnEnterDepth?: number;
   observers?: readonly WorkflowObserver[];
   onObserverError?: ObserverErrorHandler;
@@ -144,6 +150,7 @@ export class WorkflowRuntime {
   private readonly transactionRunner: WorkflowTransactionRunner;
   private readonly clock: WorkflowClock;
   private readonly definitionStore?: WorkflowDefinitionStore;
+  private readonly idempotencyStore?: WorkflowIdempotencyStore;
   private syncPromise: Promise<void> | null = null;
   private checkPromise: Promise<void> | null = null;
   private readonly instanceMigrator: InstanceMigrator;
@@ -166,6 +173,7 @@ export class WorkflowRuntime {
     this.transactionRunner = options.transactionRunner;
     this.clock = options.clock;
     this.definitionStore = options.definitionStore;
+    this.idempotencyStore = options.idempotencyStore;
     this.commandRegistry = options.commandRegistry;
     this.guardRegistry = options.guardRegistry;
     if (
@@ -416,12 +424,33 @@ export class WorkflowRuntime {
   }
 
   async triggerEvent(input: TriggerWorkflowEventInput): Promise<WorkflowExecutionResult> {
+    // Keep a keyed request's identity stable across awaits and command calls.
+    if (input.idempotencyKey !== undefined) input = { ...input };
+    this.validateIdempotency(input);
     await this.initialize();
 
     return this.runWithObservers(async (eventsToFire) => {
       const instance = await this.instanceStore.lockByUuid(input.workflowInstanceUuid);
       if (!instance) {
         throw new WorkflowInstanceNotFoundError(input.workflowInstanceUuid);
+      }
+
+      if (input.idempotencyKey !== undefined) {
+        const store = this.idempotencyStore!;
+        const record = await store.find(instance.uuid, input.idempotencyKey);
+        if (record) {
+          if (record.eventName !== input.eventName || record.fingerprint !== input.idempotencyFingerprint) {
+            throw new IdempotencyConflictError(instance.uuid);
+          }
+          if (record.result === null) throw new IdempotencyInProgressError(instance.uuid);
+          return structuredClone(record.result);
+        }
+        await store.reserve({
+          workflowInstanceUuid: instance.uuid,
+          key: input.idempotencyKey,
+          eventName: input.eventName,
+          fingerprint: input.idempotencyFingerprint,
+        });
       }
 
       const { definition, compiled } = await this.definitionResolver.forInstance(instance);
@@ -467,14 +496,14 @@ export class WorkflowRuntime {
           definitionVersion: this.definitionVersionOf(definition),
         });
 
-        return {
+        return this.completeIdempotency(input, {
           outcome: "guard-rejected" as const,
           fromState: eventResult.fromState,
           toState: eventResult.toState,
           commandResults: [] as CommandResult[],
           rejectedBy: eventResult.rejectedBy,
           historyUuid: lastHistoryUuid,
-        };
+        });
       }
 
       this.applyTransition(instance, definition, eventResult.toState, now, executionContext);
@@ -522,14 +551,51 @@ export class WorkflowRuntime {
       const finalOutcome: "success" | "failure" =
         eventResult.outcome === "failure" || onEnterResult.chainOutcome === "failure" ? "failure" : "success";
 
-      return {
+      return this.completeIdempotency(input, {
         outcome: finalOutcome,
         fromState: eventResult.fromState,
         toState: instance.currentState,
         commandResults: allCommandResults,
         historyUuid: lastHistoryUuid,
-      };
+      });
     });
+  }
+
+  private validateIdempotency(input: TriggerWorkflowEventInput): void {
+    for (const field of ["idempotencyKey", "idempotencyFingerprint"] as const) {
+      const value = input[field];
+      if (value === undefined) continue;
+      if (
+        typeof value !== "string" ||
+        !value.trim() ||
+        value.includes("\0") ||
+        Buffer.byteLength(value, "utf8") > 256 ||
+        Buffer.from(value, "utf8").toString("utf8") !== value
+      ) {
+        throw new InvalidArgumentError(
+          `${field} must be a nonblank valid Unicode string of at most 256 UTF-8 bytes without NUL`,
+        );
+      }
+    }
+    if (input.idempotencyFingerprint !== undefined && input.idempotencyKey === undefined) {
+      throw new InvalidArgumentError("idempotencyFingerprint requires idempotencyKey");
+    }
+    if (input.idempotencyKey !== undefined && !this.idempotencyStore) throw new IdempotencyNotSupportedError();
+  }
+
+  private async completeIdempotency(
+    input: TriggerWorkflowEventInput,
+    result: WorkflowExecutionResult,
+  ): Promise<WorkflowExecutionResult> {
+    if (input.idempotencyKey === undefined) return result;
+    let snapshot: WorkflowExecutionResult;
+    try {
+      snapshot = JSON.parse(JSON.stringify(result)) as WorkflowExecutionResult;
+    } catch (error) {
+      throw new WorkflowError("Idempotent event result must be JSON-serializable", error);
+    }
+    await this.idempotencyStore!.complete(input.workflowInstanceUuid, input.idempotencyKey, snapshot);
+    return structuredClone(snapshot);
   }
 
   async processExpiredWorkflows(input?: ProcessExpiredWorkflowsInput): Promise<ProcessExpiredWorkflowsResult> {

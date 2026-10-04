@@ -137,3 +137,7 @@ See the full documentation in the [duraflows repository](https://github.com/camc
 ## License
 
 MIT
+
+## Event idempotency
+
+Provide optional `WorkflowIdempotencyStore` and pass a stable `idempotencyKey` to `triggerEvent` or a handle. Keys identify one occurrence per instance; duplicates replay the committed result. An optional `idempotencyFingerprint` detects conflicting business inputs. Unkeyed calls retain existing behavior. See [the guide](../../docs/event-idempotency.md) for the transaction contract, outcome semantics, and limits.

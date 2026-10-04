@@ -1504,3 +1504,15 @@ expect(rejected).toMatchObject({
   commandResultsJson: [], // WorkflowHistoryRecord field name (the runtime result uses commandResults)
 });
 ```
+
+## Event idempotency testing
+
+Use optional transactional `WorkflowIdempotencyStore` with the same rollback-capable runner as workflow state/history. Keys identify a single occurrence per instance; fingerprints are caller-provided and compare exactly, including presence. Keyed first results and replays are JSON snapshots.
+
+Assert that duplicate requests return the original `historyUuid` and full result even after state changes/migration. Verify guards, commands, `onEnter`, observers, history, and instance versions do not change on replay. Include self-transitions and command-only events; merely checking that an old event becomes invalid misses duplicate side effects.
+
+Test committed routed failures and guard rejections: they replay; only a new key reevaluates a guard. Test command/entry/receipt/serialization errors, failed savepoints, and outer rollback: all database writes and receipts disappear, so retry can execute. Verify returned-result mutation cannot alter stored receipts. Validate Unicode byte bounds, null, fingerprint-without-key, different events/fingerprints, and configured versus unsupported storage.
+
+`runIdempotencyStoreConformance(label, harness)` checks reservation/completion, exact keys, transaction requirements, and rollback/savepoint behavior. Its harness supplies store, runner, existing instance UUID, transactional `withInstanceLock(work)`, and teardown. Real PostgreSQL tests with separate connections must also race duplicates against commit and rollback; an in-memory double cannot prove locks. Test transaction-bound Kysely providers, NestJS sync/async modules, typed service forwarding, HTTP replay/409, and DTO null rejection.
+
+Event idempotency does not make pre-rollback external effects exactly once. Tests should not assume commands run once across failed transactions. Existing unkeyed fixtures should compile and run without the optional store/table.

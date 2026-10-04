@@ -166,3 +166,7 @@ See the full documentation in the [duraflows repository](https://github.com/camc
 ## License
 
 MIT
+
+## Optional event idempotency
+
+Apply migration `007_event_idempotency.sql` from `@duraflows/pg`, or use its `generateIdempotencyMigrationSql()`, then enable `kyselyWorkflowProviders(db, { idempotency: true })`. Transaction-bound providers support `kyselyWorkflowProvidersFromTransaction(trx, { idempotency: true })`. Both default to disabled. `KyselyWorkflowIdempotencyStore`, `WorkflowEventIdempotencyTable`, and the optional `WorkflowDatabaseWithIdempotency` extension are exported; existing `WorkflowDatabase` consumer types remain valid. Receipts use the same transaction and roll back with it. See [the guide](../../docs/event-idempotency.md) for deployment and guarantees.

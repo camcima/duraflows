@@ -17,6 +17,7 @@ import type {
   WorkflowTransactionRunner,
   WorkflowDefinitionRegistry,
   WorkflowDefinitionStore,
+  WorkflowIdempotencyStore,
   WorkflowObserver,
   ObserverErrorHandler,
   WorkflowGuard,
@@ -42,6 +43,7 @@ import {
   WORKFLOW_CLOCK,
   WORKFLOW_GUARD_REGISTRY,
   WORKFLOW_DEFINITION_STORE,
+  WORKFLOW_IDEMPOTENCY_STORE,
   WORKFLOW_MODULE_OPTIONS,
 } from "./providers/injection-tokens.js";
 import { WorkflowRuntimeInitializer } from "./providers/workflow-runtime-initializer.js";
@@ -121,6 +123,7 @@ const EXPORTED_TOKENS = [
   WORKFLOW_GUARD_REGISTRY,
   WORKFLOW_TRANSACTION_RUNNER,
   WORKFLOW_CLOCK,
+  WORKFLOW_IDEMPOTENCY_STORE,
 ];
 
 const CONTROLLERS = [
@@ -229,6 +232,11 @@ function buildWorkflowProviders(explicitCommands: WorkflowCommandRegistration[])
       inject: [WORKFLOW_MODULE_OPTIONS],
     },
     {
+      provide: WORKFLOW_IDEMPOTENCY_STORE,
+      useFactory: (config: WorkflowModuleFactoryConfig) => config.persistence.idempotencyStore ?? null,
+      inject: [WORKFLOW_MODULE_OPTIONS],
+    },
+    {
       provide: WORKFLOW_RUNTIME,
       useFactory: (
         config: WorkflowModuleFactoryConfig,
@@ -240,6 +248,7 @@ function buildWorkflowProviders(explicitCommands: WorkflowCommandRegistration[])
         transactionRunner: WorkflowTransactionRunner,
         clock: WorkflowClock,
         definitionStore: WorkflowDefinitionStore | null,
+        idempotencyStore: WorkflowIdempotencyStore | null,
       ) =>
         new WorkflowRuntime({
           definitionRegistry,
@@ -250,6 +259,7 @@ function buildWorkflowProviders(explicitCommands: WorkflowCommandRegistration[])
           transactionRunner,
           clock,
           definitionStore: definitionStore ?? undefined,
+          idempotencyStore: idempotencyStore ?? undefined,
           observers: config.observers,
           onObserverError: config.onObserverError,
           timeoutRetry: config.timeoutRetry,
@@ -265,6 +275,7 @@ function buildWorkflowProviders(explicitCommands: WorkflowCommandRegistration[])
         WORKFLOW_TRANSACTION_RUNNER,
         WORKFLOW_CLOCK,
         WORKFLOW_DEFINITION_STORE,
+        WORKFLOW_IDEMPOTENCY_STORE,
       ],
     },
     WorkflowService,

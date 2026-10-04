@@ -45,6 +45,27 @@ export class InvalidArgumentError extends WorkflowError {
   }
 }
 
+export class IdempotencyConflictError extends WorkflowError {
+  constructor(public readonly workflowInstanceUuid: string) {
+    super(`Idempotency key was reused with a different event or fingerprint for instance "${workflowInstanceUuid}"`);
+    this.name = "IdempotencyConflictError";
+  }
+}
+
+export class IdempotencyInProgressError extends WorkflowError {
+  constructor(public readonly workflowInstanceUuid: string) {
+    super(`Idempotent event is already executing in this transaction for instance "${workflowInstanceUuid}"`);
+    this.name = "IdempotencyInProgressError";
+  }
+}
+
+export class IdempotencyNotSupportedError extends WorkflowError {
+  constructor() {
+    super("An idempotency key requires a configured WorkflowIdempotencyStore");
+    this.name = "IdempotencyNotSupportedError";
+  }
+}
+
 export class WorkflowInstanceNotFoundError extends WorkflowError {
   public readonly workflowInstanceUuid: string;
 

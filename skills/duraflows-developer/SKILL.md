@@ -736,3 +736,13 @@ All extend `WorkflowError` which extends `Error`.
 ## Reference
 
 For complete API type signatures and detailed behavioral specifications, see [api-reference.md](../../references/api-reference.md).
+
+## Opt-in event idempotency
+
+Enable `pgWorkflowProviders(pool, { idempotency: true })` or the Kysely equivalent after applying optional migration `007_event_idempotency.sql`. Handles and `triggerEvent` accept `idempotencyKey` plus optional `idempotencyFingerprint`. Use a stable upstream occurrence ID, not the event name or a UUID regenerated on each retry. Keys are scoped to the instance and persist across state/definition changes.
+
+Committed duplicates return the original JSON result/history UUID without guards, commands, history writes, state updates, or observers. Routed business failure and guard rejection are recorded too; reevaluating them requires a new key. Exceptions and outer rollbacks remove receipts. Keyed results use JSON normalization on both first execution and replay; subjects are not stored.
+
+Compare event names and caller fingerprints exactly, including presence. Without a fingerprint, changed subjects/metadata are not detected. Keys/fingerprints must be nonblank valid Unicode strings, at most 256 UTF-8 bytes, without NUL; null is invalid. A fingerprint requires a key. Missing persistence support throws `IdempotencyNotSupportedError`; conflicting reuse throws `IdempotencyConflictError`. Transaction-local recursion with the same key throws `IdempotencyInProgressError`.
+
+Existing unkeyed calls work without the new table. Receipts remain for the life of the instance; there is no automatic pruning. Event idempotency does not protect an external API effect that succeeded before a rollback; use downstream idempotency too. `ctx.transitionUuid` is generated per execution, so it is not a stable retry key.

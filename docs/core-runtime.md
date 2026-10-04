@@ -1261,3 +1261,7 @@ runtime.addObserver(auditObserver);
 `context`, `metadata`, and `triggerMetadata` on the event are deep-cloned via `structuredClone` and deep-frozen at event time. Consumers may hold references to these objects indefinitely — mutations to the live instance after the event fires do not affect the snapshot.
 
 `transitionUuid` on the event matches the `transitionUuid` on the `WorkflowExecutionContext` seen by commands that ran during that state entry, making it straightforward to correlate command results with observer events.
+
+## Event idempotency
+
+`WorkflowRuntimeOptions.idempotencyStore` is optional. `TriggerWorkflowEventInput` and handle options accept `idempotencyKey?: string` and `idempotencyFingerprint?: string`. Completed requests replay before current-definition resolution. Replay returns the original JSON result without commands, history, instance updates, or observers; `toState` may describe an earlier state. Success, routed failure, and guard rejection are recorded; exceptions/rollbacks leave no receipt. Keys and fingerprints compare exactly, including presence. See [Event idempotency](./event-idempotency.md) for validation, transaction-local reentry, normalization, and retention.

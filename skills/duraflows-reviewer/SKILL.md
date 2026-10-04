@@ -166,3 +166,13 @@ When reviewing a PR that modifies workflows, ensure the description covers:
 - [ ] Timeout behavior (if any)
 - [ ] Idempotency considerations for new commands
 - [ ] Migration required (new states for in-flight instances?)
+
+## Event idempotency review
+
+- [ ] Keys represent one occurrence per instance and remain stable across retries; they are not regenerated UUIDs, event names alone, or `transitionUuid`.
+- [ ] Fingerprints cover relevant business inputs when conflicting reuse must be detected. Omitted fingerprints do not cause automatic subject/metadata comparison; presence changes conflict too.
+- [ ] Store methods share the instance lock's active transaction/connection. Reservation, result, state, and history roll back together through nested savepoints and outer transactions. No successful event commits an unfinished reservation.
+- [ ] Replay is checked before current-definition/event validation and executes no guards, commands, entry chains, observers, history, or instance updates. Routed failure and guard rejection replay; a new attempt uses a new key.
+- [ ] JSON result snapshots are consistent on first execution and replay and protected against caller mutation. Key/fingerprint validation handles null, Unicode bytes, NUL, and malformed Unicode.
+- [ ] Optional migration `007_event_idempotency.sql` is applied before enabling `{ idempotency: true }`. Existing adapters, Kysely database types, and unkeyed calls remain compatible without the table.
+- [ ] Tests include real concurrent commit/rollback, same-transaction recursion, outer rollback, and HTTP forwarding/conflicts. Documentation states permanent receipt retention and external-effect limits; no claim of exactly-once external calls.
