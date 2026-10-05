@@ -1,5 +1,21 @@
 # Changelog
 
+## [7.4.0](https://github.com/camcima/duraflows/compare/v7.3.0...v7.4.0) (2026-10-05)
+
+Queue events with `enqueueEvent` and use `processPendingExecutions` to persist progress between commands. Recovery resumes from the last checkpoint with renewable leases, fencing, retries, and stable command idempotency keys. Transactional command references can commit database writes and their checkpoint together. Execution inspection, retry, cancellation, and NestJS integration are included.
+
+Apply optional migration `008_durable_execution.sql` and enable `{ durableExecution: true }` on the pg or Kysely provider in every participating runtime before accepting queued events. Configure worker polling and retry policy on the runtime. Existing synchronous `triggerEvent` calls remain compatible.
+
+External effects have at-least-once delivery: pass `ctx.durable.idempotencyKey` to downstream services to deduplicate retries after a crash. Earlier command checkpoints remain committed if a later command fails. Documentation and all five repository skills cover setup and these guarantees. See [Durable command execution](https://github.com/camcima/duraflows/blob/v7.4.0/docs/durable-execution.md).
+
+### Features
+
+* add opt-in durable command progress ([580676f](https://github.com/camcima/duraflows/commit/580676f4ecf7ac6bad35df6c968d1d6ce4f33977))
+
+### Bug Fixes
+
+- **ci:** use the pinned official Codecov CLI and direct legacy upload API to restore coverage reporting while retaining upload failure enforcement ([2319738](https://github.com/camcima/duraflows/commit/2319738e1a7e4d8cae72b496cf5cf02e30eaacc3)).
+
 ## [7.3.0](https://github.com/camcima/duraflows/compare/v7.2.0...v7.3.0) (2026-10-04)
 
 Retry committed event requests with a stable `idempotencyKey` without rerunning guards, commands, entry chains, or observers. Optional `idempotencyFingerprint` detects conflicting inputs. Receipts roll back with workflow writes; success, routed failure, and guard rejection replay their original result.
