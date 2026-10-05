@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [7.4.1](https://github.com/camcima/duraflows/compare/v7.4.0...v7.4.1) (2026-10-05)
 
 ### Bug Fixes
 
