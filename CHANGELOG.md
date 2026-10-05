@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+- Include pending, running, and parked durable snapshots in definition retirement counts, without double-counting instances. Custom durable stores need optional `countInstancesUsingDefinition` for version inspection; no schema migration is required.
+- Preserve omitted queued subjects as `undefined` for guards and commands, matching synchronous execution.
+- Sanitize and bound persisted retry and converted best-effort diagnostics so NUL and malformed Unicode cannot prevent recovery-state writes.
+
 ## [7.4.0](https://github.com/camcima/duraflows/compare/v7.3.0...v7.4.0) (2026-10-05)
 
 Queue events with `enqueueEvent` and use `processPendingExecutions` to persist progress between commands. Recovery resumes from the last checkpoint with renewable leases, fencing, retries, and stable command idempotency keys. Transactional command references can commit database writes and their checkpoint together. Execution inspection, retry, cancellation, and NestJS integration are included.

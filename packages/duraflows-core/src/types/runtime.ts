@@ -161,7 +161,7 @@ export interface DefinitionVersionSummary {
   version: number;
   contentHash: string;
   registeredAt: Date;
-  /** Instances stamped with this version whose current state is not terminal. */
+  /** Distinct instances requiring this version: nonterminal stamped instances or active queued snapshots. */
   activeInstances: number;
 }
 

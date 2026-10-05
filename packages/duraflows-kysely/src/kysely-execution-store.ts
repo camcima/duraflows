@@ -13,6 +13,40 @@ export class KyselyWorkflowExecutionStore<
     if (write && !transaction) throw new WorkflowError("WorkflowExecutionStore writes require an active transaction");
     return (transaction ?? this.db) as unknown as Kysely<WorkflowDatabaseWithExecutions>;
   }
+  async countInstancesUsingDefinition(options: {
+    workflowName: string;
+    definitionVersion: number;
+    excludeStates: readonly string[];
+  }): Promise<number> {
+    const executor = this.executor();
+    let stamped = executor
+      .selectFrom("workflow_instances")
+      .select("uuid")
+      .where("workflow_name", "=", options.workflowName)
+      .where("definition_version", "=", options.definitionVersion);
+    if (options.excludeStates.length > 0)
+      stamped = stamped.where("current_state", "not in", [...options.excludeStates]);
+    const queued = executor
+      .selectFrom("workflow_executions")
+      .select("workflow_instance_uuid as uuid")
+      .where("status", "in", ["pending", "running", "parked"])
+      .where((eb) => eb(eb.ref("execution_json", "->>").key("workflowName"), "=", options.workflowName))
+      .where((eb) =>
+        eb(
+          eb.fn.coalesce(
+            eb.cast<string>(eb.ref("execution_json", "->>").key("definition").key("version"), "text"),
+            eb.val("1"),
+          ),
+          "=",
+          String(options.definitionVersion),
+        ),
+      );
+    const row = await executor
+      .selectFrom(stamped.union(queued).as("definition_usage"))
+      .select((eb) => eb.fn.countAll<number | string | bigint>().as("count"))
+      .executeTakeFirstOrThrow();
+    return Number(row.count);
+  }
   async create(e: DurableWorkflowExecution): Promise<void> {
     await this.executor(true)
       .insertInto("workflow_executions")

@@ -546,4 +546,86 @@ describe("durable command execution", () => {
     expect(keys[1]).toBe(keys[2]);
     expect((await runtime.getExecution(e.uuid))!.journal.map((row) => row.id)).toEqual(["0", "1"]);
   });
+  it.each([false, true])(
+    "preserves omitted subjects through guards, recovery and entry commands (transactional=%s)",
+    async (transactional) => {
+      definitions.register({
+        name: "optional-subject",
+        initialState: "new",
+        states: {
+          new: {
+            events: {
+              go: {
+                guard: { name: "allowed" },
+                targetState: "entering",
+                commands: [{ name: "charge", transactional }],
+              },
+            },
+          },
+          entering: { onEnter: { commands: [{ name: "entry", transactional }], targetState: "done" } },
+          done: {},
+        },
+      });
+      guard.mockImplementation((subject = { allowed: true }) => subject.allowed);
+      charge.mockImplementation((subject = { allowed: true }) => ({ ok: subject.allowed }));
+      entry.mockImplementation((subject = { allowed: true }) => ({ ok: subject.allowed }));
+      runtime = make();
+      const synchronous = await runtime.createInstance({ workflowName: "optional-subject" });
+      expect((await runtime.triggerEvent({ workflowInstanceUuid: synchronous.uuid, eventName: "go" })).outcome).toBe(
+        "success",
+      );
+      uuid = (await runtime.createInstance({ workflowName: "optional-subject" })).uuid;
+      const e = await enqueue("go");
+      charge.mockRejectedValueOnce(new Error("retry"));
+      await runtime.processPendingExecutions();
+      now += 10;
+      runtime = make();
+      await runtime.processPendingExecutions();
+      expect((await runtime.processPendingExecutions()).completed).toEqual([e.uuid]);
+      expect(guard).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each([null, false, 0, "", [], { value: 1 }])("preserves explicit JSON subjects %#", async (subject) => {
+    charge.mockImplementation((received) => {
+      expect(received).toEqual(subject);
+      return { ok: true };
+    });
+    const e = await runtime.enqueueEvent({
+      workflowInstanceUuid: uuid,
+      eventName: "note",
+      idempotencyKey: "subject",
+      subject,
+    });
+    expect((await runtime.processPendingExecutions()).completed).toEqual([e.uuid]);
+  });
+
+  it("counts queued snapshots distinctly from stamped versions and fails closed without adapter support", async () => {
+    definitions = new InMemoryDefinitionRegistry();
+    definitions.register({ ...definition, version: 2, versionPolicy: "latest" });
+    runtime = make();
+    const e = await enqueue();
+    expect((await runtime.listDefinitionVersions("durable")).map((v) => [v.version, v.activeInstances])).toEqual([
+      [1, 1],
+      [2, 1],
+    ]);
+    await runtime.cancelExecution(e.uuid);
+    expect((await runtime.listDefinitionVersions("durable")).map((v) => v.activeInstances)).toEqual([1, 0]);
+    await enqueue("guarded", "rejected");
+    expect((await runtime.listDefinitionVersions("durable"))[1].activeInstances).toBe(0);
+    Object.defineProperty(p.executionStore!, "countInstancesUsingDefinition", { value: undefined });
+    await expect(runtime.listDefinitionVersions("durable")).rejects.toThrow("countInstancesUsingDefinition");
+    const next = await enqueue("note", "ordinary-processing");
+    expect((await runtime.processPendingExecutions()).completed).toEqual([next.uuid]);
+  });
+
+  it("sanitizes diagnostics when a checkpoint parks on an invalid plan", async () => {
+    reserve.mockReturnValue({ ok: false, message: "bad\u0000\ud800" });
+    const e = await enqueue();
+    await runtime.processPendingExecutions();
+    expect((await runtime.processPendingExecutions()).parked).toEqual([e.uuid]);
+    const lastError = (await runtime.getExecution(e.uuid))!.lastError!;
+    expect(lastError).toContain("bad��");
+    expect(lastError).not.toContain("\u0000");
+  });
 });

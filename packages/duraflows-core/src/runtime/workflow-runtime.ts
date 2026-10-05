@@ -64,7 +64,7 @@ import { computeDefinitionHash } from "../util/definition-hash.js";
 import { assertNonNegativeSafeInteger, assertPositiveSafeInteger } from "../util/assert.js";
 import { TimeoutRetryPolicy } from "./timeout-retry-policy.js";
 import { DefinitionResolver } from "./definition-resolver.js";
-import { countActiveInstances, findUnresolvableVersions } from "./definition-executability.js";
+import { countActiveInstances, findUnresolvableVersions, terminalStates } from "./definition-executability.js";
 import { buildStateEnterEvent } from "./state-enter-event.js";
 import { InstanceMigrator } from "./instance-migrator.js";
 
@@ -1045,7 +1045,7 @@ export class WorkflowRuntime {
 
   /**
    * Every stored version of `workflowName`, oldest first, with how many
-   * non-terminal instances are still stamped with it — use it to decide when
+   * instances still require it, including active queued snapshots — use it to decide when
    * an old version has drained and its commands can be deleted. A plain read;
    * requires a definition store.
    */
@@ -1053,13 +1053,24 @@ export class WorkflowRuntime {
     if (!this.definitionStore) {
       throw new WorkflowError("listDefinitionVersions requires a definition store");
     }
+    if (this.executionStore && !this.executionStore.countInstancesUsingDefinition) {
+      throw new WorkflowError(
+        "Durable version inspection requires WorkflowExecutionStore.countInstancesUsingDefinition; implement it to count queued definition snapshots safely",
+      );
+    }
     const summaries: DefinitionVersionSummary[] = [];
     for (const stored of await this.definitionStore.listVersions(workflowName)) {
       summaries.push({
         version: stored.version,
         contentHash: stored.contentHash,
         registeredAt: stored.registeredAt,
-        activeInstances: await countActiveInstances(this.instanceStore, stored),
+        activeInstances: this.executionStore
+          ? await this.executionStore.countInstancesUsingDefinition!({
+              workflowName,
+              definitionVersion: stored.version,
+              excludeStates: terminalStates(stored.definitionJson),
+            })
+          : await countActiveInstances(this.instanceStore, stored),
       });
     }
     return summaries;

@@ -262,7 +262,7 @@ export function createInMemoryPersistence(options: { idempotency?: boolean; dura
   const instanceStore = new InMemoryInstanceStore();
   const historyStore = new InMemoryHistoryStore();
   const idempotencyStore = new InMemoryIdempotencyStore(() => transactionRunner.isActive());
-  const executionStore = new InMemoryExecutionStore(() => transactionRunner.isActive());
+  const executionStore = new InMemoryExecutionStore(() => transactionRunner.isActive(), instanceStore);
   if (options.durableExecution) instanceStore.executionStore = executionStore;
   const transactionRunner = new InMemoryTransactionRunner([
     instanceStore,
@@ -358,7 +358,36 @@ export class InMemoryDefinitionStore implements WorkflowDefinitionStore {
 
 export class InMemoryExecutionStore implements WorkflowExecutionStore, SnapshotableStore {
   private records = new Map<string, DurableWorkflowExecution>();
-  constructor(private readonly isActive: () => boolean) {}
+  constructor(
+    private readonly isActive: () => boolean,
+    private readonly instanceStore: InMemoryInstanceStore,
+  ) {}
+  async countInstancesUsingDefinition(options: {
+    workflowName: string;
+    definitionVersion: number;
+    excludeStates: readonly string[];
+  }): Promise<number> {
+    const instances = this.instanceStore.snapshot() as Map<string, WorkflowInstance>;
+    const uuids = new Set(
+      [...instances.values()]
+        .filter(
+          (i) =>
+            i.workflowName === options.workflowName &&
+            i.definitionVersion === options.definitionVersion &&
+            !options.excludeStates.includes(i.currentState),
+        )
+        .map((i) => i.uuid),
+    );
+    for (const e of this.records.values()) {
+      if (
+        e.workflowName === options.workflowName &&
+        (e.definition.version ?? 1) === options.definitionVersion &&
+        ["pending", "running", "parked"].includes(e.status)
+      )
+        uuids.add(e.workflowInstanceUuid);
+    }
+    return uuids.size;
+  }
   async create(e: DurableWorkflowExecution): Promise<void> {
     if (!this.isActive()) throw new WorkflowError("transaction required");
     if (

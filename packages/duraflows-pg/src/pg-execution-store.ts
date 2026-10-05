@@ -10,6 +10,26 @@ export class PgWorkflowExecutionStore implements WorkflowExecutionStore {
     if (write && !client) throw new WorkflowError("WorkflowExecutionStore writes require an active transaction");
     return client ?? this.pool;
   }
+  async countInstancesUsingDefinition(options: {
+    workflowName: string;
+    definitionVersion: number;
+    excludeStates: readonly string[];
+  }): Promise<number> {
+    const { rows } = await this.executor().query<{ count: string }>(
+      `SELECT count(*) AS count FROM (
+        SELECT uuid FROM workflow_instances
+        WHERE workflow_name = $1 AND definition_version = $2
+          AND NOT (current_state = ANY($3::text[]))
+        UNION
+        SELECT workflow_instance_uuid AS uuid FROM workflow_executions
+        WHERE status IN ('pending','running','parked')
+          AND execution_json->>'workflowName' = $1
+          AND coalesce((execution_json #>> '{definition,version}')::integer, 1) = $2
+      ) AS definition_usage`,
+      [options.workflowName, options.definitionVersion, options.excludeStates],
+    );
+    return Number(rows[0].count);
+  }
   async create(e: DurableWorkflowExecution): Promise<void> {
     await this.executor(true).query(
       `INSERT INTO workflow_executions
