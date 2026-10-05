@@ -107,3 +107,18 @@ export type { WorkflowRuntimeClient } from "./runtime/workflow-handle.js";
 // Observer
 export type { WorkflowObserver, StateEnterEvent, ObserverErrorHandler } from "./types/observer.js";
 export { ObserverRegistry } from "./runtime/observer-registry.js";
+
+export type {
+  EnqueueWorkflowEventInput,
+  DurableExecutionOptions,
+  WorkflowCommandCheckpoint,
+  DurableWorkflowExecution,
+  WorkflowExecutionStore,
+  ProcessPendingExecutionsInput,
+  ProcessPendingExecutionsResult,
+} from "./types/durable.js";
+export {
+  DurableExecutionNotSupportedError,
+  WorkflowInstanceBusyError,
+  ExecutionLeaseLostError,
+} from "./errors/index.js";

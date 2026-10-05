@@ -64,6 +64,18 @@ function createExistingTrx() {
 }
 
 describe("KyselyTransactionRunner", () => {
+  it("detects only its own active transaction and clears the scope after commit", async () => {
+    const { db } = createMockDb();
+    const runner = new KyselyTransactionRunner(db);
+    expect(runner.isTransactionActive()).toBe(false);
+    await runner.runInTransaction(async () => {
+      expect(runner.isTransactionActive()).toBe(true);
+      const other = createMockDb();
+      expect(new KyselyTransactionRunner(other.db).isTransactionActive()).toBe(false);
+    });
+    expect(runner.isTransactionActive()).toBe(false);
+  });
+
   it("starts a transaction, runs callback, and returns result on success", async () => {
     const { db } = createMockDb();
     const runner = new KyselyTransactionRunner(db);

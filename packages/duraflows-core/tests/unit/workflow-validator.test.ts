@@ -20,6 +20,19 @@ function validDefinition(): WorkflowDefinition {
 describe("WorkflowValidator", () => {
   const validator = new WorkflowValidator();
 
+  it("validates transaction mode on event and entry command references without a command registry", () => {
+    const def = validDefinition();
+    def.states.pending.events!.approve.commands = [{ name: "work", transactional: "yes" as unknown as boolean }];
+    def.states.approved.onEnter = { commands: [{ name: "work", transactional: 1 as unknown as boolean }] };
+    expect(validator.validate(def).errors.map((e) => e.path)).toEqual([
+      "states.pending.events.approve.commands[0].transactional",
+      "states.approved.onEnter.commands[0].transactional",
+    ]);
+    def.states.pending.events!.approve.commands[0].transactional = true;
+    def.states.approved.onEnter.commands![0].transactional = false;
+    expect(validator.validate(def).valid).toBe(true);
+  });
+
   it("returns valid:true for a valid definition with states and events", () => {
     const result = validator.validate(validDefinition());
 

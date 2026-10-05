@@ -22,6 +22,18 @@ function queriedSql(client: PoolClient): string[] {
 }
 
 describe("PgTransactionRunner", () => {
+  it("detects only its own active transaction and clears the scope after commit", async () => {
+    const { pool } = createMocks();
+    const runner = new PgTransactionRunner(pool);
+    expect(runner.isTransactionActive()).toBe(false);
+    await runner.runInTransaction(async () => {
+      expect(runner.isTransactionActive()).toBe(true);
+      const other = createMocks();
+      expect(new PgTransactionRunner(other.pool).isTransactionActive()).toBe(false);
+    });
+    expect(runner.isTransactionActive()).toBe(false);
+  });
+
   it("begins, runs callback, commits, and releases client on success", async () => {
     const { pool, client } = createMocks();
     const runner = new PgTransactionRunner(pool);

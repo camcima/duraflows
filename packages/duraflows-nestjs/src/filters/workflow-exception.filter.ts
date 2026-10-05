@@ -7,6 +7,8 @@ import {
   IncompatibleDefinitionError,
   IdempotencyConflictError,
   IdempotencyInProgressError,
+  WorkflowInstanceBusyError,
+  ExecutionLeaseLostError,
 } from "@duraflows/core";
 
 // `send()` (unlike `json()`) exists on both Express and Fastify replies, and
@@ -42,6 +44,8 @@ export class WorkflowExceptionFilter implements ExceptionFilter {
       exception instanceof InvalidEventError ||
       exception instanceof IncompatibleDefinitionError ||
       exception instanceof IdempotencyConflictError ||
+      exception instanceof WorkflowInstanceBusyError ||
+      exception instanceof ExecutionLeaseLostError ||
       exception instanceof IdempotencyInProgressError
     ) {
       response.status(HttpStatus.CONFLICT).send({

@@ -1,5 +1,7 @@
 # Workflow Definitions
 
+For opt-in command checkpoints, worker retries and recovery across process restarts, see [Durable command progress](durable-execution.md). The single-transaction behavior described below applies to synchronous `triggerEvent()` calls.
+
 A workflow definition is a plain TypeScript object that describes the states, events, commands, timeouts, and context of a workflow.
 
 ## WorkflowDefinition

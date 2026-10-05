@@ -1,3 +1,4 @@
+import type { WorkflowExecutionStore, DurableWorkflowExecution } from "../../src/types/durable.js";
 /**
  * Shared in-memory persistence doubles for the core integration suites.
  *
@@ -36,6 +37,7 @@ export interface SnapshotableStore {
 }
 
 export class InMemoryInstanceStore implements WorkflowInstanceStore, SnapshotableStore {
+  executionStore?: WorkflowExecutionStore;
   private instances = new Map<string, WorkflowInstance>();
 
   async create(instance: WorkflowInstance): Promise<void> {
@@ -72,12 +74,22 @@ export class InMemoryInstanceStore implements WorkflowInstanceStore, Snapshotabl
    * Mirrors the SQL adapters: due means expired (strictly in the past), not
    * parked, and any scheduled retry reached; ordered by retryAt ?? expiresAt.
    */
-  async findExpired(limit: number, now: Date): Promise<WorkflowInstance[]> {
+  async findExpired(
+    limit: number,
+    now: Date,
+    options?: { excludeActiveExecutions?: boolean },
+  ): Promise<WorkflowInstance[]> {
     const dueAt = (instance: WorkflowInstance): number =>
       (instance.timeoutRetry?.retryAt ?? instance.expiresAt!).getTime();
+    const excluded = new Set<string>();
+    if (options?.excludeActiveExecutions)
+      for (const instance of this.instances.values()) {
+        if (await this.executionStore?.findActive(instance.uuid)) excluded.add(instance.uuid);
+      }
     return [...this.instances.values()]
       .filter(
         (instance) =>
+          !excluded.has(instance.uuid) &&
           instance.expiresAt !== null &&
           instance.expiresAt < now &&
           !instance.timeoutRetry?.parkedAt &&
@@ -196,6 +208,10 @@ export class InMemoryTransactionRunner implements WorkflowTransactionRunner {
 
   constructor(private readonly stores: readonly SnapshotableStore[]) {}
 
+  isTransactionActive(): boolean {
+    return this.isActive();
+  }
+
   isActive(): boolean {
     return this.scopes.getStore() !== undefined;
   }
@@ -236,25 +252,30 @@ export class InMemoryTransactionRunner implements WorkflowTransactionRunner {
  * the runner is already bound to both stores, so a throw anywhere inside a
  * transaction reverts instance state and history together.
  */
-export function createInMemoryPersistence(options: { idempotency?: boolean } = {}): {
+export function createInMemoryPersistence(options: { idempotency?: boolean; durableExecution?: boolean } = {}): {
   instanceStore: InMemoryInstanceStore;
   historyStore: InMemoryHistoryStore;
   transactionRunner: InMemoryTransactionRunner;
   idempotencyStore?: InMemoryIdempotencyStore;
+  executionStore?: InMemoryExecutionStore;
 } {
   const instanceStore = new InMemoryInstanceStore();
   const historyStore = new InMemoryHistoryStore();
   const idempotencyStore = new InMemoryIdempotencyStore(() => transactionRunner.isActive());
+  const executionStore = new InMemoryExecutionStore(() => transactionRunner.isActive());
+  if (options.durableExecution) instanceStore.executionStore = executionStore;
   const transactionRunner = new InMemoryTransactionRunner([
     instanceStore,
     historyStore,
     ...(options.idempotency ? [idempotencyStore] : []),
+    ...(options.durableExecution ? [executionStore] : []),
   ]);
   return {
     instanceStore,
     historyStore,
     transactionRunner,
     ...(options.idempotency ? { idempotencyStore } : {}),
+    ...(options.durableExecution ? { executionStore } : {}),
   };
 }
 
@@ -332,5 +353,58 @@ export class InMemoryDefinitionStore implements WorkflowDefinitionStore {
       .filter((row) => row.workflowName === workflowName)
       .sort((a, b) => a.version - b.version)
       .map((row) => structuredClone(row));
+  }
+}
+
+export class InMemoryExecutionStore implements WorkflowExecutionStore, SnapshotableStore {
+  private records = new Map<string, DurableWorkflowExecution>();
+  constructor(private readonly isActive: () => boolean) {}
+  async create(e: DurableWorkflowExecution): Promise<void> {
+    if (!this.isActive()) throw new WorkflowError("transaction required");
+    if (
+      this.records.has(e.uuid) ||
+      (await this.findByKey(e.workflowInstanceUuid, e.idempotencyKey)) ||
+      (await this.findActive(e.workflowInstanceUuid))
+    )
+      throw new WorkflowError("execution exists");
+    this.records.set(e.uuid, JSON.parse(JSON.stringify(e)) as DurableWorkflowExecution);
+  }
+  async update(e: DurableWorkflowExecution): Promise<void> {
+    if (!this.isActive()) throw new WorkflowError("transaction required");
+    if (this.records.get(e.uuid)?.revision !== e.revision - 1) throw new WorkflowError("revision conflict");
+    this.records.set(e.uuid, JSON.parse(JSON.stringify(e)) as DurableWorkflowExecution);
+  }
+  async findByUuid(uuid: string): Promise<DurableWorkflowExecution | null> {
+    return structuredClone(this.records.get(uuid) ?? null);
+  }
+  async findByKey(uuid: string, key: string): Promise<DurableWorkflowExecution | null> {
+    return structuredClone(
+      [...this.records.values()].find((e) => e.workflowInstanceUuid === uuid && e.idempotencyKey === key) ?? null,
+    );
+  }
+  async findActive(uuid: string): Promise<DurableWorkflowExecution | null> {
+    return structuredClone(
+      [...this.records.values()].find(
+        (e) => e.workflowInstanceUuid === uuid && ["pending", "running", "parked"].includes(e.status),
+      ) ?? null,
+    );
+  }
+  async findDue(limit: number, now: Date): Promise<DurableWorkflowExecution[]> {
+    return structuredClone(
+      [...this.records.values()]
+        .filter(
+          (e) =>
+            ["pending", "running"].includes(e.status) &&
+            new Date(e.availableAt) <= now &&
+            (e.leaseUntil === null || new Date(e.leaseUntil) <= now),
+        )
+        .slice(0, limit),
+    );
+  }
+  snapshot(): unknown {
+    return structuredClone(this.records);
+  }
+  restore(snapshot: unknown): void {
+    this.records = snapshot as Map<string, DurableWorkflowExecution>;
   }
 }

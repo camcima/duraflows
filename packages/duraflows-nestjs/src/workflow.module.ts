@@ -1,3 +1,5 @@
+import type { WorkflowExecutionStore, DurableExecutionOptions } from "@duraflows/core";
+import { WorkflowExecutionController } from "./controllers/workflow-execution.controller.js";
 import {
   Logger,
   Module,
@@ -44,6 +46,7 @@ import {
   WORKFLOW_GUARD_REGISTRY,
   WORKFLOW_DEFINITION_STORE,
   WORKFLOW_IDEMPOTENCY_STORE,
+  WORKFLOW_EXECUTION_STORE,
   WORKFLOW_MODULE_OPTIONS,
 } from "./providers/injection-tokens.js";
 import { WorkflowRuntimeInitializer } from "./providers/workflow-runtime-initializer.js";
@@ -55,6 +58,7 @@ import { WorkflowTimeoutController } from "./controllers/workflow-timeout.contro
 import { WorkflowInstanceController } from "./controllers/workflow-instance.controller.js";
 
 export interface WorkflowModuleOptions {
+  durableExecution?: DurableExecutionOptions;
   workflows: WorkflowDefinition[];
   commands?: WorkflowCommandRegistration[];
   guards?: WorkflowGuard[];
@@ -79,6 +83,7 @@ export interface WorkflowModuleOptions {
 }
 
 export interface WorkflowModuleFactoryConfig {
+  durableExecution?: DurableExecutionOptions;
   workflows: WorkflowDefinition[];
   persistence: WorkflowPersistenceProvider;
   clock?: WorkflowClock;
@@ -124,9 +129,11 @@ const EXPORTED_TOKENS = [
   WORKFLOW_TRANSACTION_RUNNER,
   WORKFLOW_CLOCK,
   WORKFLOW_IDEMPOTENCY_STORE,
+  WORKFLOW_EXECUTION_STORE,
 ];
 
 const CONTROLLERS = [
+  WorkflowExecutionController,
   WorkflowInstanceController,
   WorkflowEventController,
   WorkflowQueryController,
@@ -237,6 +244,11 @@ function buildWorkflowProviders(explicitCommands: WorkflowCommandRegistration[])
       inject: [WORKFLOW_MODULE_OPTIONS],
     },
     {
+      provide: WORKFLOW_EXECUTION_STORE,
+      useFactory: (config: WorkflowModuleFactoryConfig) => config.persistence.executionStore ?? null,
+      inject: [WORKFLOW_MODULE_OPTIONS],
+    },
+    {
       provide: WORKFLOW_RUNTIME,
       useFactory: (
         config: WorkflowModuleFactoryConfig,
@@ -249,6 +261,7 @@ function buildWorkflowProviders(explicitCommands: WorkflowCommandRegistration[])
         clock: WorkflowClock,
         definitionStore: WorkflowDefinitionStore | null,
         idempotencyStore: WorkflowIdempotencyStore | null,
+        executionStore: WorkflowExecutionStore | null,
       ) =>
         new WorkflowRuntime({
           definitionRegistry,
@@ -260,6 +273,8 @@ function buildWorkflowProviders(explicitCommands: WorkflowCommandRegistration[])
           clock,
           definitionStore: definitionStore ?? undefined,
           idempotencyStore: idempotencyStore ?? undefined,
+          executionStore: executionStore ?? undefined,
+          durableExecution: config.durableExecution,
           observers: config.observers,
           onObserverError: config.onObserverError,
           timeoutRetry: config.timeoutRetry,
@@ -276,6 +291,7 @@ function buildWorkflowProviders(explicitCommands: WorkflowCommandRegistration[])
         WORKFLOW_CLOCK,
         WORKFLOW_DEFINITION_STORE,
         WORKFLOW_IDEMPOTENCY_STORE,
+        WORKFLOW_EXECUTION_STORE,
       ],
     },
     WorkflowService,

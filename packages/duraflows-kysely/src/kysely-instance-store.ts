@@ -1,7 +1,7 @@
 import type { Kysely, Selectable } from "kysely";
 import type { WorkflowInstanceStore, WorkflowInstance, WorkflowTimeoutRetry } from "@duraflows/core";
 import { WorkflowError } from "@duraflows/core";
-import type { WorkflowDatabase, WorkflowInstancesTable } from "./kysely-database.js";
+import type { WorkflowDatabase, WorkflowDatabaseWithExecutions, WorkflowInstancesTable } from "./kysely-database.js";
 import { KyselyTransactionContext } from "./kysely-transaction-context.js";
 
 /** The four timeout-retry column values for `retry` (`null` ⇒ never failed). */
@@ -93,12 +93,16 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
     }
   }
 
-  async findExpired(limit: number, now: Date): Promise<WorkflowInstance[]> {
+  async findExpired(
+    limit: number,
+    now: Date,
+    options?: { excludeActiveExecutions?: boolean },
+  ): Promise<WorkflowInstance[]> {
     const trx = KyselyTransactionContext.getTransaction(this.db);
     if (!trx) {
       throw new WorkflowError("findExpired requires an active transaction");
     }
-    const rows = await trx
+    let query = (trx as unknown as Kysely<WorkflowDatabaseWithExecutions>)
       .selectFrom("workflow_instances")
       .selectAll()
       .where("expires_at", "is not", null)
@@ -109,11 +113,20 @@ export class KyselyWorkflowInstanceStore implements WorkflowInstanceStore {
       // range condition so workflow_instances_timeout_due_idx is range-scanned
       // instead of walked in order with every entry filtered against the heap.
       .where((eb) => eb(eb.fn.coalesce("timeout_retry_at", "expires_at"), "<", now))
-      .orderBy((eb) => eb.fn.coalesce("timeout_retry_at", "expires_at"))
-      .forUpdate()
-      .skipLocked()
-      .limit(limit)
-      .execute();
+      .orderBy((eb) => eb.fn.coalesce("timeout_retry_at", "expires_at"));
+    if (options?.excludeActiveExecutions)
+      query = query.where((eb) =>
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom("workflow_executions")
+              .select("uuid")
+              .whereRef("workflow_executions.workflow_instance_uuid", "=", "workflow_instances.uuid")
+              .where("status", "in", ["pending", "running", "parked"]),
+          ),
+        ),
+      );
+    const rows = await query.forUpdate().skipLocked().limit(limit).execute();
 
     return rows.map((row) => this.mapRow(row));
   }

@@ -76,3 +76,18 @@ export interface WorkflowEventIdempotencyTable {
 export interface WorkflowDatabaseWithIdempotency extends WorkflowDatabase {
   workflow_event_idempotency: WorkflowEventIdempotencyTable;
 }
+
+export interface WorkflowExecutionsTable {
+  uuid: string;
+  workflow_instance_uuid: string;
+  idempotency_key: string;
+  status: string;
+  available_at: Date;
+  lease_until: Date | null;
+  revision: number;
+  execution_json: ColumnType<import("@duraflows/core").DurableWorkflowExecution, string, string>;
+}
+
+export interface WorkflowDatabaseWithExecutions extends WorkflowDatabase {
+  workflow_executions: WorkflowExecutionsTable;
+}

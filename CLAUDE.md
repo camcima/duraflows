@@ -15,7 +15,7 @@ Auto-generated from all feature plans. Last updated: 2026-10-03
 
 ```text
 packages/duraflows-core/src/
-packages/duraflows-pg/src/        # also sql/dbmate/ migrations 001–006; optional 007 for event idempotency
+packages/duraflows-pg/src/        # also sql/dbmate/ migrations 001–006; optional 007 for event idempotency, 008 for durable commands
 packages/duraflows-kysely/src/
 packages/duraflows-nestjs/src/
 skills/                            # agent skills shipped with the repo

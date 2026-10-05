@@ -108,7 +108,11 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
     }
   }
 
-  async findExpired(limit: number, now: Date): Promise<WorkflowInstance[]> {
+  async findExpired(
+    limit: number,
+    now: Date,
+    options?: { excludeActiveExecutions?: boolean },
+  ): Promise<WorkflowInstance[]> {
     const client = PgTransactionContext.getClient(this.pool);
     if (!client) {
       throw new WorkflowError("findExpired requires an active transaction");
@@ -122,6 +126,12 @@ export class PgWorkflowInstanceStore implements WorkflowInstanceStore {
          -- a range condition so workflow_instances_timeout_due_idx is range-scanned
          -- instead of walked in order with every entry filtered against the heap.
          AND coalesce(timeout_retry_at, expires_at) < $2
+         ${
+           options?.excludeActiveExecutions
+             ? `AND NOT EXISTS (SELECT 1 FROM workflow_executions e
+           WHERE e.workflow_instance_uuid = workflow_instances.uuid AND e.status IN ('pending','running','parked'))`
+             : ""
+         }
        ORDER BY coalesce(timeout_retry_at, expires_at)
        FOR UPDATE SKIP LOCKED
        LIMIT $1`,

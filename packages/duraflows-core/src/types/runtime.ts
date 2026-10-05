@@ -12,6 +12,14 @@ export interface CommandResult {
 }
 
 export interface WorkflowExecutionContext {
+  /** Present only on queued execution attempts. Pass idempotencyKey to external systems. */
+  readonly durable?: {
+    readonly executionUuid: string;
+    readonly commandId: string;
+    readonly idempotencyKey: string;
+    readonly attempt: number;
+    heartbeat(): Promise<void>;
+  };
   triggerMetadata: Readonly<Record<string, unknown>>;
   /** Injected clock value for this transition. Treat as immutable — do not call Date mutators on it. */
   readonly now: Date;

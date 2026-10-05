@@ -27,7 +27,10 @@ export interface OnEnterChainResult {
 export type OnEnterHopHandler = (hop: OnEnterHopResult) => Promise<void>;
 
 export class OnEnterExecutor {
-  constructor(private readonly commandExecutor: CommandExecutor) {}
+  constructor(
+    private readonly commandExecutor: CommandExecutor,
+    private readonly newUuid: () => string = randomUUID,
+  ) {}
 
   async executeChain(
     definition: WorkflowDefinition,
@@ -76,7 +79,7 @@ export class OnEnterExecutor {
 
       if (outcome === "failure") {
         if (onEnter.errorState) {
-          const errorEntryUuid = randomUUID();
+          const errorEntryUuid = this.newUuid();
           await recordHop({
             fromState,
             toState: onEnter.errorState,
@@ -96,7 +99,7 @@ export class OnEnterExecutor {
       }
 
       if (onEnter.targetState) {
-        const nextEntryUuid = randomUUID();
+        const nextEntryUuid = this.newUuid();
         await recordHop({
           fromState,
           toState: onEnter.targetState,

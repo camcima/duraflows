@@ -1,5 +1,7 @@
 # Event idempotency
 
+For opt-in command checkpoints, worker retries and recovery across process restarts, see [Durable command progress](durable-execution.md). The single-transaction behavior described below applies to synchronous `triggerEvent()` calls.
+
 Available in duraflows 7.3.0 and later.
 
 Event idempotency lets you safely retry an event after losing its response. A stable key identifies one request

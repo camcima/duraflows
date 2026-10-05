@@ -47,6 +47,8 @@ export interface WorkflowEventDefinition<TState extends string = string> {
 
 export interface WorkflowCommandRef {
   name: string;
+  /** Durable execution only: commit database writes with this command's checkpoint. */
+  transactional?: boolean;
   metadata?: Record<string, unknown>;
 }
 

@@ -22,6 +22,7 @@ export {
   WORKFLOW_CLOCK,
   WORKFLOW_DEFINITION_STORE,
   WORKFLOW_IDEMPOTENCY_STORE,
+  WORKFLOW_EXECUTION_STORE,
 } from "./providers/injection-tokens.js";
 export { NestCommandRegistry } from "./providers/nest-command-registry.js";
 export type { WorkflowCommandRegistration } from "./providers/nest-command-registry.js";
@@ -117,3 +118,15 @@ export {
 } from "@duraflows/core";
 export type { WorkflowObserver, StateEnterEvent, ObserverErrorHandler } from "@duraflows/core";
 export type { WorkflowGuard, WorkflowGuardRef, WorkflowGuardRegistry } from "@duraflows/core";
+
+export { WorkflowExecutionController } from "./controllers/workflow-execution.controller.js";
+export type {
+  EnqueueWorkflowEventInput,
+  DurableWorkflowExecution,
+  WorkflowExecutionStore,
+  WorkflowCommandCheckpoint,
+  DurableExecutionOptions,
+  ProcessPendingExecutionsInput,
+  ProcessPendingExecutionsResult,
+} from "@duraflows/core";
+export { DurableExecutionNotSupportedError, WorkflowInstanceBusyError, ExecutionLeaseLostError } from "@duraflows/core";

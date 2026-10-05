@@ -9,6 +9,8 @@ Testing patterns for duraflows workflows using Vitest. Covers clock injection, i
 
 ---
 
+Transaction/rollback guidance for synchronous events applies to `triggerEvent()`. For independently committed command checkpoints, use the durable command progress section below; prior queued command effects cannot be rolled back with a later command.
+
 ## Test Framework
 
 duraflows uses **Vitest** with global test APIs (`describe`, `it`, `expect`, `vi`).
@@ -1516,3 +1518,15 @@ Test committed routed failures and guard rejections: they replay; only a new key
 `runIdempotencyStoreConformance(label, harness)` checks reservation/completion, exact keys, transaction requirements, and rollback/savepoint behavior. Its harness supplies store, runner, existing instance UUID, transactional `withInstanceLock(work)`, and teardown. Real PostgreSQL tests with separate connections must also race duplicates against commit and rollback; an in-memory double cannot prove locks. Test transaction-bound Kysely providers, NestJS sync/async modules, typed service forwarding, HTTP replay/409, and DTO null rejection.
 
 Event idempotency does not make pre-rollback external effects exactly once. Tests should not assume commands run once across failed transactions. Existing unkeyed fixtures should compile and run without the optional store/table.
+
+## Testing durable command progress
+
+Use persistence with optional `executionStore` and a rollback-capable runner implementing `isTransactionActive()`. Drive a fake clock and explicit `processPendingExecutions()` polls; each processes at most one command per execution. Avoid real sleeps.
+
+Cover acceptance rollback, matching duplicate keys, event/fingerprint conflicts, frozen JSON input, and guard evaluation only at acceptance. Restart the runtime after a checkpoint; assert earlier handlers are not invoked, context restores, and the next command retains its ordinal and downstream key across retry. Inspect `getExecution` while instance state/history remain unchanged until full completion. Include entry chains, routed failures, best-effort failures and unrouted business failure parking.
+
+For transactional commands, write business data through the adapter's active connection, fail a later checkpoint, and prove the matching write rolls back while earlier checkpoints/writes remain. Cover heartbeat within that transaction. Use real PostgreSQL connections for concurrent enqueue, live-lease exclusion, expired takeover and stale-owner fencing; a snapshot-only in-memory runner cannot prove concurrency safety. Assert repeated lease expiration reaches the attempt limit. Test external effect/checkpoint uncertainty with a fake downstream deduplicator.
+
+Verify busy-instance protection for synchronous events, timeouts, rearm and migration; retry/cancel state restrictions; outer-transaction worker refusal; defaults without migration 008; migration artifact upgrade/down; both NestJS factory modes, exported `WORKFLOW_EXECUTION_STORE`, HTTP enqueue/read/process/retry/cancel and input validation. Use the repository's shared `database-durable-cases.ts` as a real-adapter example and `docs/durable-execution.md` for guarantees.
+
+Include a timeout starvation regression with batch limit 1 and an older occupied instance ahead of an eligible one. Inject failures after real checkpoint/history database writes to prove rollback, and test that returned business failures commit transactional writes with their journal entry.

@@ -12,6 +12,12 @@ function createMockClient(): WorkflowRuntimeClient {
 }
 
 describe("WorkflowHandle", () => {
+  it("reports the optional queued capability on older clients", async () => {
+    await expect(
+      new WorkflowHandle("instance", createMockClient()).enqueueEvent("Go", { idempotencyKey: "key" }),
+    ).rejects.toThrow("Durable");
+  });
+
   it("exposes the uuid passed to the constructor", () => {
     const client = createMockClient();
     const handle = new WorkflowHandle("my-uuid", client);

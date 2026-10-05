@@ -38,6 +38,9 @@ const sampleRow = {
 };
 
 const fakeEb = Object.assign((ref: string, op: string, value: unknown) => ({ ref, op, value }), {
+  selectFrom: vi.fn(),
+  not: (expression: unknown) => ({ not: expression }),
+  exists: (expression: unknown) => ({ exists: expression }),
   or: (expressions: unknown[]) => ({ or: expressions }),
   fn: {
     coalesce: (...refs: string[]) => ({ coalesce: refs }),
@@ -62,6 +65,7 @@ function createMockDb(queryResult: Record<string, unknown>[] = []) {
       "selectAll",
       "select",
       "where",
+      "whereRef",
       "forUpdate",
       "skipLocked",
       "orderBy",
@@ -261,6 +265,22 @@ describe("KyselyWorkflowInstanceStore", () => {
   });
 
   describe("findExpired()", () => {
+    it("excludes active executions before applying the timeout batch limit", async () => {
+      const { db, calls } = createMockDb();
+      const trx = db as unknown as Transaction<WorkflowDatabase>;
+      fakeEb.selectFrom.mockReturnValue(db);
+      await KyselyTransactionContext.run(db, trx, () =>
+        new KyselyWorkflowInstanceStore(db).findExpired(1, now, { excludeActiveExecutions: true }),
+      );
+      expect(fakeEb.selectFrom).toHaveBeenCalledWith("workflow_executions");
+      expect(calls).toContainEqual({
+        method: "whereRef",
+        args: ["workflow_executions.workflow_instance_uuid", "=", "workflow_instances.uuid"],
+      });
+      expect(calls).toContainEqual({ method: "where", args: ["status", "in", ["pending", "running", "parked"]] });
+      expect(calls.at(-1)).toEqual({ method: "limit", args: [1] });
+    });
+
     it("throws when called outside a transaction", async () => {
       const { db } = createMockDb();
       const store = new KyselyWorkflowInstanceStore(db);

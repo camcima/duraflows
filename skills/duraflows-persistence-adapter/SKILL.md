@@ -919,3 +919,15 @@ Use a unique composite `(instance UUID, key)` with exact case/Unicode-sensitive 
 Run `runIdempotencyStoreConformance(label, harness)` from `@duraflows/core/testing`. Supply fresh storage, transaction runner, existing instance UUID, `withInstanceLock(work)` under its transaction/lock, and teardown. Also race duplicates using real separate connections: after commit they replay; after rollback one may execute. Test outer rollback, failed savepoints, and recursion through another runtime sharing the transaction.
 
 If an outer transaction catches a failed nested call and continues, the runner must isolate the nested writes/reservation with a savepoint or equivalent rollback. Flat nesting cannot provide that guarantee.
+
+## Optional durable execution store
+
+This is additive: existing adapters need no changes unless they run queued commands. Expose `executionStore?: WorkflowExecutionStore` through the provider and implement optional `WorkflowTransactionRunner.isTransactionActive(): boolean` for workers. Enqueue may join application transactions; processing must reject ambient transactions so checkpoints actually commit independently. Transaction-bound providers must report active even between calls.
+
+Implement `create(execution)`, `update(execution)`, `findByUuid(uuid)`, `findByKey(instanceUuid, key)`, `findActive(instanceUuid)`, `findDue(limit, now)`. Insert/update must use the same active connection and instance row lock as the runtime. Require unique UUID, exact opaque `(instanceUuid, key)`, at most one pending/running/parked execution per instance, and optimistic revision updates (`incoming.revision - 1`). Never upsert over an accepted execution. Return independent JSON copies; timestamps inside the record are ISO strings. Reads inside transactions must see their writes.
+
+Due scans select pending/running records with `availableAt <= now` and absent/expired `leaseUntil`, ordered by availability then UUID. This scan is a hint; the engine rechecks ownership under the instance lock. Lease tokens and revision fencing must prevent stale checkpoint/finalization writes. Roll back writes and checkpoints together, including nested savepoints; expose committed work to other connections only after commit.
+
+The pg adapter's optional migration `008_durable_execution.sql` and `generateDurableExecutionMigrationSql()` define the reference schema. Fresh SQL uses `includeDurableExecution: true`; bundled provider factories opt in via `durableExecution: true`. Default factories must not query the optional table. Enable this store on every participant before accepting queued work, and drain work before disabling/dropping it. Retain records for deduplication/recovery; deletion loses those guarantees. Verify multi-connection lease/rollback races against a real database. See repository `docs/durable-execution.md`.
+
+For durable adapters, honor the optional `findExpired(limit, now, { excludeActiveExecutions: true })` argument. Exclude instances with pending/running/parked executions before limiting results; skipping after the limit can starve other due workflows. Default synchronous-only adapters need no new query/table.

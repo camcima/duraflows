@@ -162,3 +162,24 @@ export class MigrationInterruptedError extends WorkflowError {
     this.result = result;
   }
 }
+
+export class DurableExecutionNotSupportedError extends WorkflowError {
+  constructor() {
+    super("Durable execution requires a configured WorkflowExecutionStore");
+    this.name = "DurableExecutionNotSupportedError";
+  }
+}
+
+export class WorkflowInstanceBusyError extends WorkflowError {
+  constructor(public readonly workflowInstanceUuid: string) {
+    super(`Instance "${workflowInstanceUuid}" has an active durable execution`);
+    this.name = "WorkflowInstanceBusyError";
+  }
+}
+
+export class ExecutionLeaseLostError extends WorkflowError {
+  constructor() {
+    super("Durable execution lease expired or changed owner");
+    this.name = "ExecutionLeaseLostError";
+  }
+}

@@ -1,3 +1,5 @@
+import { runDatabaseDurableCases } from "../../../duraflows-core/tests/helpers/database-durable-cases.js";
+import { pgWorkflowProviders } from "@duraflows/pg";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -32,6 +34,7 @@ const MIGRATION_FILENAMES = [
   "005_timeout_retries.sql",
   "006_definition_version_index.sql",
   "007_event_idempotency.sql",
+  "008_durable_execution.sql",
 ];
 
 const dbmateDir = fileURLToPath(new URL("../../sql/dbmate/", import.meta.url));
@@ -115,6 +118,8 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     }
     await pool.end();
   });
+
+  runDatabaseDurableCases("incremental 008", () => pgWorkflowProviders(pool, { durableExecution: true }));
 
   it("007's incremental schema stores receipts and cascades instance deletion", async () => {
     const uuid = randomUUID();

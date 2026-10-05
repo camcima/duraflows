@@ -191,3 +191,7 @@ MIT
 ## Event idempotency
 
 Pass persistence configured with `{ idempotency: true }` to `WorkflowModule.forRoot` or `forRootAsync`, after applying migration `007_event_idempotency.sql`. Services, handles, and the optional REST event controller accept `idempotencyKey` and optional `idempotencyFingerprint`. REST fields go in the JSON body; conflicts return 409. See [the guide](../../docs/event-idempotency.md) for a complete example and retry semantics.
+
+## Optional durable command progress
+
+Enable the execution store in the persistence provider. Both module factory styles accept `durableExecution` retry/lease options. `WorkflowService` exposes acceptance, processing, inspection, retry and cancellation. `WORKFLOW_EXECUTION_STORE` is an exported DI token; optional execution controllers are included when `enableControllers` is true. See [Durable command progress](https://github.com/camcima/duraflows/blob/main/docs/durable-execution.md) for setup, worker polling, downstream idempotency, rollout and recovery limits.

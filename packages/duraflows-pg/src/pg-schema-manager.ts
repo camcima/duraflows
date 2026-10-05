@@ -1,6 +1,8 @@
 export type UuidStrategy = "uuidv7" | "gen_random_uuid";
 
 export interface MigrationSqlOptions {
+  /** Include the optional durable-execution table. Default false. */
+  includeDurableExecution?: boolean;
   uuidStrategy?: UuidStrategy;
   /** Include the optional event-idempotency table in a fresh schema. Default false. */
   includeIdempotency?: boolean;
@@ -115,9 +117,33 @@ CREATE TABLE workflow_definitions (
 
   if (options?.includeIdempotency) up += `\n\n${generateIdempotencyMigrationSql().up}`;
 
-  const down = `${options?.includeIdempotency ? `${generateIdempotencyMigrationSql().down}\n` : ""}DROP TABLE IF EXISTS workflow_definitions;
+  if (options?.includeDurableExecution) up += `\n\n${generateDurableExecutionMigrationSql().up}`;
+
+  const down = `${options?.includeDurableExecution ? `${generateDurableExecutionMigrationSql().down}\n` : ""}${options?.includeIdempotency ? `${generateIdempotencyMigrationSql().down}\n` : ""}DROP TABLE IF EXISTS workflow_definitions;
 DROP TABLE IF EXISTS workflow_history;
 DROP TABLE IF EXISTS workflow_instances;`;
 
   return { up, down };
+}
+
+/** Optional additive schema for durable execution. */
+export function generateDurableExecutionMigrationSql(): { up: string; down: string } {
+  return {
+    up: `CREATE TABLE workflow_executions (
+  uuid uuid PRIMARY KEY,
+  workflow_instance_uuid uuid NOT NULL REFERENCES workflow_instances(uuid) ON DELETE CASCADE,
+  idempotency_key text COLLATE "C" NOT NULL CHECK (octet_length(idempotency_key) BETWEEN 1 AND 256),
+  status text NOT NULL CHECK (status IN ('pending','running','parked','completed','cancelled')),
+  available_at timestamptz NOT NULL,
+  lease_until timestamptz NULL,
+  revision integer NOT NULL CHECK (revision >= 0),
+  execution_json jsonb NOT NULL CHECK (jsonb_typeof(execution_json) = 'object'),
+  UNIQUE (workflow_instance_uuid, idempotency_key)
+);
+CREATE UNIQUE INDEX workflow_executions_active_idx ON workflow_executions (workflow_instance_uuid)
+  WHERE status IN ('pending','running','parked');
+CREATE INDEX workflow_executions_due_idx ON workflow_executions (available_at, uuid)
+  WHERE status IN ('pending','running');`,
+    down: "DROP TABLE IF EXISTS workflow_executions;",
+  };
 }

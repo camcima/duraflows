@@ -1,5 +1,7 @@
 # Core Runtime API
 
+For opt-in command checkpoints, worker retries and recovery across process restarts, see [Durable command progress](durable-execution.md). The single-transaction behavior described below applies to synchronous `triggerEvent()` calls.
+
 The `@duraflows/core` package provides the framework-agnostic workflow runtime, types, validation, compilation, and execution engine.
 
 ## WorkflowRuntime

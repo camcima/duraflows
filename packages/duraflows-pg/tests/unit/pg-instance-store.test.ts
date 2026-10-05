@@ -193,6 +193,17 @@ describe("PgWorkflowInstanceStore", () => {
   });
 
   describe("findExpired()", () => {
+    it("excludes active executions before applying the timeout batch limit", async () => {
+      const pool = createMockPool();
+      const client = createMockClient({ rows: [], rowCount: 0 });
+      const store = new PgWorkflowInstanceStore(pool);
+      await PgTransactionContext.run(pool, client, () => store.findExpired(1, now, { excludeActiveExecutions: true }));
+      const sql = (client.query as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      expect(sql).toContain("NOT EXISTS");
+      expect(sql).toContain("e.workflow_instance_uuid = workflow_instances.uuid");
+      expect(sql.indexOf("workflow_executions")).toBeLessThan(sql.indexOf("LIMIT"));
+    });
+
     it("throws when called outside a transaction", async () => {
       const pool = createMockPool();
       const store = new PgWorkflowInstanceStore(pool);
@@ -214,6 +225,7 @@ describe("PgWorkflowInstanceStore", () => {
       const sql = (txClient.query as ReturnType<typeof vi.fn>).mock.calls[0][0];
       expect(sql).toContain("FOR UPDATE SKIP LOCKED");
       expect(sql).toContain("LIMIT $1");
+      expect(sql).not.toContain("workflow_executions");
     });
   });
 

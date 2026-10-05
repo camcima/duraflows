@@ -1,3 +1,5 @@
+import { KyselyWorkflowExecutionStore } from "./kysely-execution-store.js";
+export { KyselyWorkflowExecutionStore } from "./kysely-execution-store.js";
 import type { Kysely, Transaction } from "kysely";
 import type { WorkflowPersistenceProvider, WorkflowTransactionRunner } from "@duraflows/core";
 import { runAfterCommitCallbacks } from "@duraflows/core";
@@ -18,6 +20,8 @@ export { KyselyWorkflowDefinitionStore } from "./kysely-definition-store.js";
 export { KyselyWorkflowIdempotencyStore } from "./kysely-idempotency-store.js";
 export type {
   WorkflowDatabase,
+  WorkflowDatabaseWithExecutions,
+  WorkflowExecutionsTable,
   WorkflowInstancesTable,
   WorkflowHistoryTable,
   WorkflowDefinitionsTable,
@@ -32,6 +36,8 @@ export type {
 export interface KyselyWorkflowProvidersOptions extends KyselyTransactionRunnerOptions {
   /** Opt-in; apply the event-idempotency migration before keyed calls. */
   idempotency?: boolean;
+  /** Apply migration 008 before enabling on every worker. */
+  durableExecution?: boolean;
 }
 
 /**
@@ -56,6 +62,7 @@ export function kyselyWorkflowProviders<DB extends WorkflowDatabase>(
     historyStore,
     transactionRunner,
     definitionStore,
+    ...(options.durableExecution ? { executionStore: new KyselyWorkflowExecutionStore(narrowed) } : {}),
     ...(options.idempotency ? { idempotencyStore: new KyselyWorkflowIdempotencyStore(narrowed) } : {}),
   };
 }
@@ -67,11 +74,12 @@ export function kyselyWorkflowProviders<DB extends WorkflowDatabase>(
  */
 export function kyselyWorkflowProvidersFromTransaction<DB extends WorkflowDatabase>(
   trx: Transaction<DB>,
-  options: Pick<KyselyWorkflowProvidersOptions, "idempotency"> = {},
+  options: Pick<KyselyWorkflowProvidersOptions, "idempotency" | "durableExecution"> = {},
 ): WorkflowPersistenceProvider {
   const narrowed = trx as unknown as Kysely<WorkflowDatabase>;
   const boundTrx = trx as unknown as Transaction<WorkflowDatabase>;
   const transactionRunner: WorkflowTransactionRunner = {
+    isTransactionActive: () => true,
     async runInTransaction<T>(callback: () => Promise<T>): Promise<T> {
       // Scoped to the bound trx; an unrelated ambient transaction from another
       // provider must never supersede it.
@@ -104,6 +112,7 @@ export function kyselyWorkflowProvidersFromTransaction<DB extends WorkflowDataba
     historyStore,
     transactionRunner,
     definitionStore,
+    ...(options.durableExecution ? { executionStore: new KyselyWorkflowExecutionStore(narrowed) } : {}),
     ...(options.idempotency ? { idempotencyStore: new KyselyWorkflowIdempotencyStore(narrowed) } : {}),
   };
 }
