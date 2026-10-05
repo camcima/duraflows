@@ -1,6 +1,6 @@
 # Durable command execution
 
-Status: implemented and validated. Opt-in additive API; not yet released.
+Status: implemented and validated. Opt-in additive API. Release: v7.4.0.
 
 `enqueueEvent` persists a JSON input and frozen definition snapshot under the instance lock. A request key (required) identifies one queued execution per instance; this namespace is separate from synchronous event receipts. Matching duplicates return that execution; event/fingerprint mismatch conflicts. Guards run once on acceptance. One pending/running/parked execution owns an instance. Every participating application worker must enable the execution store before accepting queued traffic.
 
