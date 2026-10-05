@@ -1,3 +1,4 @@
+import { sanitizeDiagnostic } from "./sanitize-diagnostic.js";
 import { extractErrorMessage } from "./error-message.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { WorkflowDefinition, WorkflowCommandRef } from "../types/definition.js";
@@ -60,6 +61,10 @@ function snapshot<T>(value: T): T {
   } catch (error) {
     throw new WorkflowError("Durable execution values must be JSON-serializable", error);
   }
+}
+
+function subjectSnapshot(subject: unknown): unknown {
+  return subject === undefined ? undefined : deepFreeze(snapshot(subject));
 }
 
 // Reject lossy inputs rather than silently dropping functions, undefined, Dates or class state.
@@ -232,14 +237,12 @@ export class DurableExecutionRunner {
       };
       if (event.guard) {
         if (!this.deps.guardRegistry) throw new WorkflowError("Durable event requires a guard registry");
-        const passed = await this.deps.guardRegistry
-          .get(event.guard.name)
-          .evaluate(deepFreeze(snapshot(input.subject ?? null)), {
-            ...this.context(execution),
-            toState: event.targetState ?? instance.currentState,
-            context: deepFreeze(snapshot(instance.context)),
-            commandMetadata: deepFreeze(snapshot(event.guard.metadata ?? {})),
-          });
+        const passed = await this.deps.guardRegistry.get(event.guard.name).evaluate(subjectSnapshot(input.subject), {
+          ...this.context(execution),
+          toState: event.targetState ?? instance.currentState,
+          context: deepFreeze(snapshot(instance.context)),
+          commandMetadata: deepFreeze(snapshot(event.guard.metadata ?? {})),
+        });
         if (!passed) {
           execution.rejectedBy = event.guard.name;
           const historyUuid = await this.deps.historyStore.append({
@@ -341,7 +344,7 @@ export class DurableExecutionRunner {
         }
         try {
           const status = await this.owned(claimed, async (current) => {
-            current.lastError = describeThrown(error);
+            current.lastError = sanitizeDiagnostic(describeThrown(error));
             current.status = current.attempts >= current.policy.maxAttempts ? "parked" : "pending";
             const delay = Math.min(
               current.policy.maxDelayMs,
@@ -465,10 +468,10 @@ export class DurableExecutionRunner {
       },
     };
     try {
-      return await command.execute(deepFreeze(snapshot(claim.subject ?? null)), context);
+      return await command.execute(subjectSnapshot(claim.subject), context);
     } catch (error) {
       if (!claim.bestEffortCommands.includes(pending.ref.name)) throw error;
-      return { ok: false, code: "BEST_EFFORT_THROWN", message: describeThrown(error) };
+      return { ok: false, code: "BEST_EFFORT_THROWN", message: sanitizeDiagnostic(describeThrown(error)) };
     }
   }
 
@@ -500,7 +503,7 @@ export class DurableExecutionRunner {
       if (error instanceof PendingCommand) current.status = "pending";
       else {
         current.status = "parked";
-        current.lastError = describeThrown(error);
+        current.lastError = sanitizeDiagnostic(describeThrown(error));
       }
       current.availableAt = this.deps.clock.now().toISOString();
       current.leaseToken = null;

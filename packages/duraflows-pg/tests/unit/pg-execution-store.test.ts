@@ -55,6 +55,19 @@ describe("PgWorkflowExecutionStore", () => {
       PgWorkflowExecutionStore,
     );
   });
+  it("counts definition usage on the ambient connection", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [{ count: "2" }] });
+    const pool = { query } as unknown as Pool;
+    const store = new PgWorkflowExecutionStore(pool);
+    const options = { workflowName: "order", definitionVersion: 2, excludeStates: ["done"] };
+    expect(await store.countInstancesUsingDefinition(options)).toBe(2);
+    expect(query.mock.calls[0][1]).toEqual(["order", 2, ["done"]]);
+    const transactionQuery = vi.fn().mockResolvedValue({ rows: [{ count: "0" }] });
+    await PgTransactionContext.run(pool, { query: transactionQuery } as unknown as PoolClient, async () => {
+      expect(await store.countInstancesUsingDefinition({ ...options, excludeStates: [] })).toBe(0);
+    });
+    expect(transactionQuery).toHaveBeenCalledOnce();
+  });
   it("keeps the table opt-in and supplies standalone upgrade and rollback SQL", () => {
     expect(generateMigrationSql().up).not.toContain("workflow_executions");
     const migration = generateDurableExecutionMigrationSql();

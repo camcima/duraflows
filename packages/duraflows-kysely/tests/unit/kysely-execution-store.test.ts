@@ -21,6 +21,9 @@ describe("KyselyWorkflowExecutionStore", () => {
   it("uses ambient transactions for writes and checks revision ownership", async () => {
     const b = {
       selectFrom: vi.fn(),
+      union: vi.fn(),
+      as: vi.fn(),
+      executeTakeFirstOrThrow: vi.fn().mockResolvedValue({ count: "2" }),
       select: vi.fn(),
       where: vi.fn(),
       orderBy: vi.fn(),
@@ -34,6 +37,8 @@ describe("KyselyWorkflowExecutionStore", () => {
     };
     for (const key of [
       "selectFrom",
+      "union",
+      "as",
       "select",
       "where",
       "orderBy",
@@ -59,9 +64,27 @@ describe("KyselyWorkflowExecutionStore", () => {
       b.executeTakeFirst.mockResolvedValueOnce(undefined);
       expect(await read()).toBeNull();
     }
+    const options = { workflowName: "order", definitionVersion: 2, excludeStates: ["done"] };
+    expect(await store.countInstancesUsingDefinition(options)).toBe(2);
+    expect(await store.countInstancesUsingDefinition({ ...options, excludeStates: [] })).toBe(2);
+    const selectCount = b.select.mock.calls.find(([arg]) => typeof arg === "function")![0] as (eb: unknown) => unknown;
+    const countExpression = { as: vi.fn() };
+    selectCount({ fn: { countAll: vi.fn().mockReturnValue(countExpression) } });
+    expect(countExpression.as).toHaveBeenCalledWith("count");
+    const jsonPath = { key: vi.fn() };
+    jsonPath.key.mockReturnValue(jsonPath);
+    const countEb = Object.assign(vi.fn(), {
+      ref: vi.fn().mockReturnValue(jsonPath),
+      cast: vi.fn(),
+      val: vi.fn(),
+      fn: { coalesce: vi.fn() },
+    });
+    for (const [arg] of b.where.mock.calls) if (typeof arg === "function") (arg as (eb: unknown) => unknown)(countEb);
     const now = new Date();
     expect(await store.findDue(2, now)).toEqual([e]);
-    const predicate = b.where.mock.calls.find(([arg]) => typeof arg === "function")![0] as (eb: unknown) => unknown;
+    const predicate = b.where.mock.calls.filter(([arg]) => typeof arg === "function").at(-1)![0] as (
+      eb: unknown,
+    ) => unknown;
     const eb = Object.assign(vi.fn().mockReturnValue("expression"), { or: vi.fn() });
     predicate(eb);
     expect(eb).toHaveBeenCalledWith("lease_until", "<=", now);

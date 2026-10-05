@@ -10,10 +10,10 @@ import {
 /** Real multi-connection tests shared by the two PostgreSQL adapters. */
 export function runDatabaseDurableCases(label: string, providers: () => WorkflowPersistenceProvider): void {
   describe(`${label} durable executions`, () => {
-    function fixture(transactional = false) {
+    function fixture(transactional = false, suffix = "", bestEffort = false) {
       const p = providers();
-      const name = transactional ? "durable-db-transactional" : "durable-db";
-      const definitions = new InMemoryDefinitionRegistry();
+      const name = (transactional ? "durable-db-transactional" : "durable-db") + suffix;
+      let definitions = new InMemoryDefinitionRegistry();
       definitions.register({
         name,
         initialState: "new",
@@ -39,6 +39,7 @@ export function runDatabaseDurableCases(label: string, providers: () => Workflow
       let first: WorkflowCommand["execute"] = () => ({ ok: true });
       let second: WorkflowCommand["execute"] = () => ({ ok: true });
       commands.register("first", {
+        bestEffort,
         execute: (s, c) => {
           firstCalls++;
           return first(s, c);
@@ -62,6 +63,10 @@ export function runDatabaseDurableCases(label: string, providers: () => Workflow
       return {
         p,
         name,
+        replaceDefinition: (definition: import("../../src/index.js").WorkflowDefinition) => {
+          definitions = new InMemoryDefinitionRegistry();
+          definitions.register(definition);
+        },
         make,
         first: (fn: WorkflowCommand["execute"]) => {
           first = fn;
@@ -295,6 +300,154 @@ export function runDatabaseDurableCases(label: string, providers: () => Workflow
       expect((await runtime.getInstance(business.uuid))!.context).toEqual({ failureRecorded: true });
       expect((await runtime.getExecution(e.uuid))!.journal[0].result).toEqual({ ok: false, code: "DECLINED" });
       await runtime.cancelExecution(e.uuid);
+    });
+    it.each([false, true])(
+      "persists safe retry and parked diagnostics with transactional=%s",
+      async (transactional) => {
+        const f = fixture(transactional, "-unicode");
+        const runtime = f.make();
+        const business = await runtime.createInstance({ workflowName: f.name });
+        const instance = await runtime.createInstance({ workflowName: f.name });
+        f.first(async () => {
+          if (transactional) {
+            const row = (await f.p.instanceStore.lockByUuid(business.uuid))!;
+            row.context.changed = true;
+            row.version++;
+            await f.p.instanceStore.update(row);
+          }
+          return { ok: true };
+        });
+        f.second(async () => {
+          if (transactional) {
+            const row = (await f.p.instanceStore.lockByUuid(business.uuid))!;
+            row.context.changed = false;
+            row.version++;
+            await f.p.instanceStore.update(row);
+          }
+          throw new Error("bad\u0000\ud800\udc00\ud800\udc00\udc00");
+        });
+        const e = await runtime.enqueueEvent({
+          workflowInstanceUuid: instance.uuid,
+          eventName: "go",
+          idempotencyKey: "unicode",
+        });
+        await runtime.processPendingExecutions();
+        for (let attempt = 1; attempt <= 10; attempt++) {
+          const batch = await runtime.processPendingExecutions();
+          expect(batch.failed).toEqual([]);
+          expect(batch[attempt === 10 ? "parked" : "retrying"]).toContain(e.uuid);
+          const current = (await runtime.getExecution(e.uuid))!;
+          expect(current.lastError).toBe("bad�𐀀𐀀�");
+          expect(current.leaseToken).toBeNull();
+          expect(current.leaseUntil).toBeNull();
+          expect(current.journal).toHaveLength(1);
+          if (transactional) expect((await runtime.getInstance(business.uuid))!.context).toEqual({ changed: true });
+          f.advance(4000000);
+        }
+        await runtime.cancelExecution(e.uuid);
+      },
+    );
+
+    it("checkpoints best-effort thrown diagnostics and finalizes history", async () => {
+      const f = fixture(false, "-best-effort-unicode", true);
+      const runtime = f.make();
+      const instance = await runtime.createInstance({ workflowName: f.name });
+      f.first(() => {
+        throw "bad\u0000\ud800";
+      });
+      const e = await runtime.enqueueEvent({
+        workflowInstanceUuid: instance.uuid,
+        eventName: "go",
+        idempotencyKey: "best-effort",
+      });
+      expect((await runtime.processPendingExecutions()).progressed).toContain(e.uuid);
+      expect((await runtime.processPendingExecutions()).completed).toContain(e.uuid);
+      expect((await runtime.getExecution(e.uuid))!.journal[0].result).toMatchObject({
+        ok: false,
+        code: "BEST_EFFORT_THROWN",
+        message: "bad��",
+      });
+      expect((await runtime.getHistory(instance.uuid))[0].commandResultsJson[0].message).toBe("bad��");
+    });
+
+    it("counts captured versions across transaction boundaries without double-counting", async () => {
+      const f = fixture(false, "-usage");
+      const v1 = f.make();
+      const instance = await v1.createInstance({ workflowName: f.name });
+      const original = await v1.enqueueEvent({
+        workflowInstanceUuid: instance.uuid,
+        eventName: "go",
+        idempotencyKey: "original",
+      });
+      // Definition v1 omits its version and must still count once, not twice.
+      expect((await v1.listDefinitionVersions(f.name))[0].activeInstances).toBe(1);
+      await v1.cancelExecution(original.uuid);
+      const unrelated = fixture(false, "-unrelated-usage");
+      const other = unrelated.make();
+      const otherInstance = await other.createInstance({ workflowName: unrelated.name });
+      const otherExecution = await other.enqueueEvent({
+        workflowInstanceUuid: otherInstance.uuid,
+        eventName: "go",
+        idempotencyKey: "other",
+      });
+      expect((await v1.listDefinitionVersions(f.name))[0].activeInstances).toBe(1);
+      await other.cancelExecution(otherExecution.uuid);
+      const v2Definition = {
+        name: f.name,
+        version: 2,
+        versionPolicy: "latest" as const,
+        initialState: "new",
+        states: {
+          new: { events: { go: { targetState: "done", commands: [{ name: "first" }, { name: "second" }] } } },
+          done: {},
+        },
+      };
+      f.replaceDefinition(v2Definition);
+      const v2 = f.make();
+      await v2.initialize();
+      const count = async (runtime = v2) =>
+        (await runtime.listDefinitionVersions(f.name)).map((v) => v.activeInstances);
+      expect(await count()).toEqual([1, 0]);
+      const input = { workflowInstanceUuid: instance.uuid, eventName: "go", idempotencyKey: "queued" };
+      await expect(
+        f.p.transactionRunner.runInTransaction(async () => {
+          await v2.enqueueEvent(input);
+          expect(await count()).toEqual([1, 1]);
+          throw new Error("rollback");
+        }),
+      ).rejects.toThrow("rollback");
+      expect(await count()).toEqual([1, 0]);
+      const e = await v2.enqueueEvent(input);
+      expect(await count()).toEqual([1, 1]);
+      expect(
+        await f.p.executionStore!.countInstancesUsingDefinition!({
+          workflowName: f.name,
+          definitionVersion: 2,
+          excludeStates: ["new"],
+        }),
+      ).toBe(1);
+      f.first(async () => {
+        expect(await count()).toEqual([1, 1]);
+        return { ok: true };
+      });
+      await v2.processPendingExecutions();
+      const recovered = f.make();
+      expect((await recovered.processPendingExecutions()).completed).toContain(e.uuid);
+      expect(await count(recovered)).toEqual([0, 0]);
+      const another = await recovered.createInstance({ workflowName: f.name });
+      const parked = await recovered.enqueueEvent({
+        ...input,
+        workflowInstanceUuid: another.uuid,
+        idempotencyKey: "parked",
+      });
+      expect(await count()).toEqual([0, 1]);
+      f.first(() => ({ ok: false }));
+      await recovered.processPendingExecutions();
+      expect((await recovered.getExecution(parked.uuid))!.status).toBe("parked");
+      expect(await count()).toEqual([0, 1]);
+      await recovered.cancelExecution(parked.uuid);
+      // The stamped nonterminal instance still requires v2.
+      expect(await count()).toEqual([0, 1]);
     });
   });
 }

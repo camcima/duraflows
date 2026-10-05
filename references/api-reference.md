@@ -593,7 +593,7 @@ interface DefinitionVersionSummary {
   version: number;
   contentHash: string;
   registeredAt: Date;
-  activeInstances: number; // non-terminal instances stamped with this version
+  activeInstances: number; // distinct instances requiring this version, including active queued snapshots
 }
 ```
 
@@ -1313,6 +1313,8 @@ All five operations are exposed by `WorkflowService`. `WorkflowHandle.enqueueEve
 
 `WorkflowCommandRef.transactional?: boolean` runs a queued command in the checkpoint transaction. `WorkflowExecutionContext.durable?` supplies `executionUuid`, `commandId`, `idempotencyKey`, `attempt` and `heartbeat(): Promise<void>`. The flag does not change synchronous execution, which already uses a transaction.
 
+`WorkflowExecutionStore` optionally implements `countInstancesUsingDefinition({ workflowName, definitionVersion, excludeStates }): Promise<number>` for version retirement inspection. It counts the distinct union of nonterminal stamped instances and pending/running/parked captured snapshots in one consistent read. State exclusions apply only to stamped instances. Durable `listDefinitionVersions()` requires this capability and throws when it is absent.
+
 `WorkflowExecutionStore` exposes `create(execution)`, `update(execution)`, `findByUuid(uuid)`, `findByKey(instanceUuid, key)`, `findActive(instanceUuid)` and `findDue(limit, now)`. Runners optionally implement `isTransactionActive(): boolean`; worker processing requires it and rejects active transactions. See the [adapter contract and semantics](../docs/durable-execution.md#custom-persistence-adapters).
 
 Provider factories accept `durableExecution?: boolean` (default false), separate from the runtime's policy object. pg exports `PgWorkflowExecutionStore` and `generateDurableExecutionMigrationSql`; `MigrationSqlOptions.includeDurableExecution?: boolean` enables the optional table in fresh-install SQL. Kysely exports `KyselyWorkflowExecutionStore`, `WorkflowExecutionsTable`, and `WorkflowDatabaseWithExecutions`. NestJS exports `WORKFLOW_EXECUTION_STORE` and `WorkflowExecutionController`.
@@ -1320,3 +1322,5 @@ Provider factories accept `durableExecution?: boolean` (default false), separate
 `DurableExecutionNotSupportedError` reports a missing execution store; `WorkflowInstanceBusyError` reports an occupied instance; `ExecutionLeaseLostError` fences stale ownership. All extend `WorkflowError`. Invalid policy/input/operator actions use `InvalidArgumentError`, and conflicting request identities use `IdempotencyConflictError`. NestJS maps busy/lease conflicts to 409. See [Durable command progress](../docs/durable-execution.md) for the full delivery guarantees and HTTP routes.
 
 When `executionStore` is enabled, timeout scans call `WorkflowInstanceStore.findExpired(limit, now, { excludeActiveExecutions: true })`. Durable adapters must filter pending/running/parked executions before the batch limit; the optional third argument leaves legacy adapters compatible.
+
+Queued guards and commands receive `undefined` for an omitted subject and preserve explicit `null`. Runtime-generated persisted diagnostics replace NUL and unpaired UTF-16 surrogates with U+FFFD and are bounded to 2,000 UTF-16 code units without splitting a pair. This applies to durable `lastError`, converted best-effort thrown messages, and timeout retry errors; application business data is unchanged.

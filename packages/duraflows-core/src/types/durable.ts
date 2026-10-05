@@ -75,6 +75,17 @@ export interface ProcessPendingExecutionsResult {
  * Store independent JSON copies; findDue is a hint, always rechecked under lock.
  */
 export interface WorkflowExecutionStore {
+  /**
+   * Optional retirement-inspection capability. Count the distinct union of
+   * nonterminal instances stamped with this version and instances owning a
+   * pending/running/parked execution captured under this version. State
+   * exclusions apply only to stamped instances. Read in one consistent snapshot.
+   */
+  countInstancesUsingDefinition?(options: {
+    workflowName: string;
+    definitionVersion: number;
+    excludeStates: readonly string[];
+  }): Promise<number>;
   create(execution: DurableWorkflowExecution): Promise<void>;
   update(execution: DurableWorkflowExecution): Promise<void>;
   findByUuid(uuid: string): Promise<DurableWorkflowExecution | null>;

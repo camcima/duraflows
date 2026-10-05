@@ -194,3 +194,10 @@ Reference: repository `docs/durable-execution.md` and `references/api-reference.
 
 - [ ] Timeout candidate scans exclude active executions before the batch limit, so busy/parked instances cannot starve other due work.
 - [ ] Database failure tests inject checkpoint/finalization storage failure after successful writes; rollback claims distinguish propagated exceptions from committed business outcomes and best-effort failures.
+
+### Durable recovery and version retirement
+
+- `listDefinitionVersions().activeInstances` counts distinct instances requiring a version through either a nonterminal stamp or a pending/running/parked queued snapshot. One instance can retain two versions. Stop producers accepting the retiring version before using a zero count.
+- Custom durable stores implement optional `countInstancesUsingDefinition({ workflowName, definitionVersion, excludeStates })` for version inspection. Count the distinct union in one consistent read; state exclusions apply only to stamped instances and an omitted captured version means 1. Without this capability, inspection throws; ordinary durable processing still works.
+- Omitted queued subjects reach guards and commands as `undefined`; explicit null remains null. Test default parameters through acceptance, retries and entry chains.
+- Runtime-generated persisted diagnostics replace NUL and unpaired surrogates and are bounded to 2,000 UTF-16 code units without splitting a pair. Test retry/parking and converted best-effort failures against both real database adapters. Application business payloads are not sanitized.

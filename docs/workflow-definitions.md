@@ -134,6 +134,8 @@ const versions = await runtime.listDefinitionVersions("order");
 const drained = versions.filter((v) => v.version < 2 && v.activeInstances === 0);
 ```
 
+With durable execution enabled, `activeInstances` also includes pending, running, and parked executions captured under each version. An instance counts once per version and can require both its stamped version and a different queued version. Stop accepting work under a version before using a zero count to retire its handlers. Custom durable adapters must implement `countInstancesUsingDefinition` for this inspection.
+
 See [`listDefinitionVersions`](./core-runtime.md#listdefinitionversions) for
 the full signature.
 
@@ -525,7 +527,7 @@ interface WorkflowStateDefinition {
 | `onEnter`  | `WorkflowOnEnterDefinition`               | No       | Auto-fire behavior when this state is entered                |
 | `metadata` | `Record<string, unknown>`                 | No       | Arbitrary state metadata                                     |
 
-A state with no `events` (or an empty `events` map) is a **terminal state**, whether or not it has an `onEnter`: no event can move an instance resting there. An `onEnter` runs only on entry, inside the transition that entered the state -- so a no-events state whose `onEnter` has a `targetState` is passed through, not rested in -- and an instance resting in a terminal state never executes its definition again. This is the rule `listDefinitionVersions` and the [startup executability check](./core-runtime.md#startup-executability-check) use to count active instances. `toMermaidDiagram` draws end-node edges by a different rule: it also excludes states whose `onEnter` has a `targetState`, since the diagram shows where a flow ends rather than where an instance can rest.
+A state with no `events` (or an empty `events` map) is a **terminal state**, whether or not it has an `onEnter`: no event can move an instance resting there. An `onEnter` runs only on entry, inside the transition that entered the state -- so a no-events state whose `onEnter` has a `targetState` is passed through, not rested in -- and an instance resting in a terminal state never executes its definition again. This terminal-state rule governs stamped-instance counts in `listDefinitionVersions` and the [startup executability check](./core-runtime.md#startup-executability-check). Version inspection additionally counts active queued snapshots. `toMermaidDiagram` draws end-node edges by a different rule: it also excludes states whose `onEnter` has a `targetState`, since the diagram shows where a flow ends rather than where an instance can rest.
 
 When a workflow enters a state, the `context` values defined on that state are **merged** into the instance's context (existing keys are preserved, matching keys are overwritten). This is useful for setting state-derived values like status flags.
 

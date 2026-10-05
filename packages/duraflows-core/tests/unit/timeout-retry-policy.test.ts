@@ -60,6 +60,16 @@ describe("TimeoutRetryPolicy", () => {
   });
 
   it.each([
+    ["\ud800", "�"],
+    ["\udc00", "�"],
+    ["valid 😀", "valid 😀"],
+    ["a".repeat(1999) + "😀", "a".repeat(1999)],
+    ["a".repeat(1998) + "😀x", "a".repeat(1998) + "😀"],
+  ])("stores well-formed bounded Unicode %#", (input, expected) => {
+    expect(new TimeoutRetryPolicy().next(null, input, now).lastError).toBe(expected);
+  });
+
+  it.each([
     ["initialDelayMs of 0", { initialDelayMs: 0 }],
     ["a negative maxDelayMs", { maxDelayMs: -1 }],
     ["a fractional maxAttempts", { maxAttempts: 1.5 }],

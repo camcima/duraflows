@@ -1530,3 +1530,10 @@ For transactional commands, write business data through the adapter's active con
 Verify busy-instance protection for synchronous events, timeouts, rearm and migration; retry/cancel state restrictions; outer-transaction worker refusal; defaults without migration 008; migration artifact upgrade/down; both NestJS factory modes, exported `WORKFLOW_EXECUTION_STORE`, HTTP enqueue/read/process/retry/cancel and input validation. Use the repository's shared `database-durable-cases.ts` as a real-adapter example and `docs/durable-execution.md` for guarantees.
 
 Include a timeout starvation regression with batch limit 1 and an older occupied instance ahead of an eligible one. Inject failures after real checkpoint/history database writes to prove rollback, and test that returned business failures commit transactional writes with their journal entry.
+
+### Durable recovery and version retirement
+
+- `listDefinitionVersions().activeInstances` counts distinct instances requiring a version through either a nonterminal stamp or a pending/running/parked queued snapshot. One instance can retain two versions. Stop producers accepting the retiring version before using a zero count.
+- Custom durable stores implement optional `countInstancesUsingDefinition({ workflowName, definitionVersion, excludeStates })` for version inspection. Count the distinct union in one consistent read; state exclusions apply only to stamped instances and an omitted captured version means 1. Without this capability, inspection throws; ordinary durable processing still works.
+- Omitted queued subjects reach guards and commands as `undefined`; explicit null remains null. Test default parameters through acceptance, retries and entry chains.
+- Runtime-generated persisted diagnostics replace NUL and unpaired surrogates and are bounded to 2,000 UTF-16 code units without splitting a pair. Test retry/parking and converted best-effort failures against both real database adapters. Application business payloads are not sanitized.

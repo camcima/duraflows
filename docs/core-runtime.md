@@ -445,7 +445,7 @@ The array returned by `getHistory()` (and `findByInstanceUuid()` underneath it) 
 
 ### listDefinitionVersions()
 
-Reports every stored version of a workflow and how many non-terminal instances are still stamped with it — use it to decide when an old version has drained and its commands/guards can be retired.
+Reports every stored version of a workflow and how many distinct instances still require it — use it to decide when an old version has drained and its commands/guards can be retired. With durable execution enabled, the count includes pending, running, and parked executions captured under that version as well as nonterminal instances stamped with it. An instance counts once per version; it may require its stamped version and a different queued version simultaneously.
 
 ```ts
 async listDefinitionVersions(workflowName: string): Promise<DefinitionVersionSummary[]>
@@ -456,17 +456,20 @@ interface DefinitionVersionSummary {
   version: number;
   contentHash: string;
   registeredAt: Date;
-  activeInstances: number; // non-terminal instances stamped with this version
+  activeInstances: number; // distinct instances requiring this version, including active queued snapshots
 }
 ```
 
 Results are ordered by `version` ascending (`WorkflowDefinitionStore.listVersions()`'s contract). "Terminal" means a state with no `events` (or an empty map), whether or not it has an `onEnter`: an `onEnter` runs only inside the transition that enters the state, so an instance resting there never executes that version again — the same rule the [startup executability check](#startup-executability-check) uses; instances resting in one are not counted as active.
+
+Terminal-state exclusions apply only to stamped instances; an active queued snapshot still retains its captured version. Completed and cancelled executions contribute no queued dependency. Stop producers from accepting work under a version before retiring its handlers: these counts describe a point in time.
 
 A plain read: it does not call `initialize()`, so it can be used before or independently of runtime startup.
 
 **Throws:**
 
 - `WorkflowError("listDefinitionVersions requires a definition store")` — the runtime was constructed without a `definitionStore`.
+- `WorkflowError` — durable execution is enabled but the custom execution store does not implement `countInstancesUsingDefinition`. Inspection requires this capability to include queued snapshots safely.
 
 **Example:**
 

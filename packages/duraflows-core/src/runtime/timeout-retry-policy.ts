@@ -1,8 +1,7 @@
 import { InvalidArgumentError } from "../errors/index.js";
 import type { WorkflowTimeoutRetry, WorkflowTimeoutRetryOptions } from "../types/runtime.js";
 import { assertPositiveSafeInteger } from "../util/assert.js";
-
-const MAX_LAST_ERROR_LENGTH = 2000;
+import { sanitizeDiagnostic } from "./sanitize-diagnostic.js";
 
 /**
  * Validated retry policy for failed timeout processing: exponential backoff
@@ -41,7 +40,7 @@ export class TimeoutRetryPolicy {
    */
   next(previous: WorkflowTimeoutRetry | null, error: string, now: Date): WorkflowTimeoutRetry {
     const attempts = (previous?.attempts ?? 0) + 1;
-    const lastError = error.replaceAll("\u0000", "\uFFFD").slice(0, MAX_LAST_ERROR_LENGTH);
+    const lastError = sanitizeDiagnostic(error);
     if (attempts >= this.maxAttempts) {
       return { attempts, lastError, retryAt: null, parkedAt: now };
     }

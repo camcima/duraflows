@@ -931,3 +931,10 @@ Due scans select pending/running records with `availableAt <= now` and absent/ex
 The pg adapter's optional migration `008_durable_execution.sql` and `generateDurableExecutionMigrationSql()` define the reference schema. Fresh SQL uses `includeDurableExecution: true`; bundled provider factories opt in via `durableExecution: true`. Default factories must not query the optional table. Enable this store on every participant before accepting queued work, and drain work before disabling/dropping it. Retain records for deduplication/recovery; deletion loses those guarantees. Verify multi-connection lease/rollback races against a real database. See repository `docs/durable-execution.md`.
 
 For durable adapters, honor the optional `findExpired(limit, now, { excludeActiveExecutions: true })` argument. Exclude instances with pending/running/parked executions before limiting results; skipping after the limit can starve other due workflows. Default synchronous-only adapters need no new query/table.
+
+### Durable recovery and version retirement
+
+- `listDefinitionVersions().activeInstances` counts distinct instances requiring a version through either a nonterminal stamp or a pending/running/parked queued snapshot. One instance can retain two versions. Stop producers accepting the retiring version before using a zero count.
+- Custom durable stores implement optional `countInstancesUsingDefinition({ workflowName, definitionVersion, excludeStates })` for version inspection. Count the distinct union in one consistent read; state exclusions apply only to stamped instances and an omitted captured version means 1. Without this capability, inspection throws; ordinary durable processing still works.
+- Omitted queued subjects reach guards and commands as `undefined`; explicit null remains null. Test default parameters through acceptance, retries and entry chains.
+- Runtime-generated persisted diagnostics replace NUL and unpaired surrogates and are bounded to 2,000 UTF-16 code units without splitting a pair. Test retry/parking and converted best-effort failures against both real database adapters. Application business payloads are not sanitized.
