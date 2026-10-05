@@ -32,6 +32,8 @@ jobs:
           fail_ci_if_error: true
           # Use the supported PyPI distribution when cli.codecov.io is unavailable.
           use_pypi: true
+          # The legacy endpoint avoids the failing ingest.codecov.io certificate.
+          use_legacy_upload_endpoint: true
 
   integration:
     runs-on: ubuntu-latest
