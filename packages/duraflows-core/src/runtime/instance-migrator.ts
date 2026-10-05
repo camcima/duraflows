@@ -17,6 +17,7 @@ import { describeThrown, InvalidArgumentError, MigrationInterruptedError, Workfl
 const PAGE_SIZE = 100;
 
 export interface InstanceMigratorDeps {
+  assertIdle?: (uuid: string) => Promise<void>;
   instanceStore: WorkflowInstanceStore;
   historyStore: WorkflowHistoryStore;
   clock: WorkflowClock;
@@ -134,6 +135,7 @@ export class InstanceMigrator {
                 const instance = await this.deps.instanceStore.lockByUuid(uuid);
                 const planned = this.plan(instance, input, target);
                 if (planned.kind === "migrate") {
+                  await this.deps.assertIdle?.(uuid);
                   await this.apply(instance!, planned, input, target, eventsToFire);
                 }
                 return planned;

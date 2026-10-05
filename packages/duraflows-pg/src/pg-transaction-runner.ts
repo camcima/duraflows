@@ -79,6 +79,10 @@ export class PgTransactionRunner implements WorkflowTransactionRunner {
     return runOwnedPgTransaction(this.pool, this.timeoutStatements, () => callback());
   }
 
+  isTransactionActive(): boolean {
+    return pgTransactionScopes.current(this.pool) !== undefined;
+  }
+
   afterCommit(callback: AfterCommitCallback): void {
     pgTransactionScopes.afterCommit(this.pool, callback);
   }

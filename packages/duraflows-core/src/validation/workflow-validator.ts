@@ -67,10 +67,15 @@ export class WorkflowValidator {
           });
         }
 
-        if (state.onEnter.commands && options?.knownCommandNames) {
+        if (state.onEnter.commands) {
           for (let i = 0; i < state.onEnter.commands.length; i++) {
             const cmdRef = state.onEnter.commands[i];
-            if (!options.knownCommandNames.has(cmdRef.name)) {
+            if (cmdRef.transactional !== undefined && typeof cmdRef.transactional !== "boolean")
+              errors.push({
+                path: `${onEnterPath}.commands[${i}].transactional`,
+                message: "transactional must be a boolean",
+              });
+            if (options?.knownCommandNames && !options.knownCommandNames.has(cmdRef.name)) {
               errors.push({
                 path: `${onEnterPath}.commands[${i}]`,
                 message: `Command "${cmdRef.name}" is not registered`,
@@ -118,10 +123,15 @@ export class WorkflowValidator {
           });
         }
 
-        if (event.commands && options?.knownCommandNames) {
+        if (event.commands) {
           for (let i = 0; i < event.commands.length; i++) {
             const cmdRef = event.commands[i];
-            if (!options.knownCommandNames.has(cmdRef.name)) {
+            if (cmdRef.transactional !== undefined && typeof cmdRef.transactional !== "boolean")
+              errors.push({
+                path: `${eventPath}.commands[${i}].transactional`,
+                message: "transactional must be a boolean",
+              });
+            if (options?.knownCommandNames && !options.knownCommandNames.has(cmdRef.name)) {
               errors.push({
                 path: `${eventPath}.commands[${i}]`,
                 message: `Command "${cmdRef.name}" is not registered`,

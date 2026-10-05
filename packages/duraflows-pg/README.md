@@ -154,3 +154,7 @@ MIT
 ## Optional event idempotency
 
 Apply `sql/dbmate/007_event_idempotency.sql` (or use `generateIdempotencyMigrationSql()`), then use `pgWorkflowProviders(pool, { idempotency: true })`. Fresh schemas can use `generateMigrationSql({ includeIdempotency: true })`. Default factories and schemas leave the feature disabled; deployments without keyed calls need no new table. `PgWorkflowIdempotencyStore` is also exported for custom wiring. Receipts join the same active transaction as workflow writes. Deploy supporting application code everywhere before enabling keyed traffic. See [the guide](../../docs/event-idempotency.md) for storage retention, rollback, and replay behavior.
+
+## Optional durable command progress
+
+Apply optional migration `008_durable_execution.sql` (or `generateDurableExecutionMigrationSql()`), then set `{ durableExecution: true }` on `pgWorkflowProviders`. Fresh schemas can use `generateMigrationSql({ includeDurableExecution: true })`. `PgWorkflowExecutionStore` is exported for custom wiring. See [Durable command progress](https://github.com/camcima/duraflows/blob/main/docs/durable-execution.md) for setup, worker polling, downstream idempotency, rollout and recovery limits.

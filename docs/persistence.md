@@ -1,5 +1,7 @@
 # Persistence
 
+For opt-in command checkpoints, worker retries and recovery across process restarts, see [Durable command progress](durable-execution.md). The single-transaction behavior described below applies to synchronous `triggerEvent()` calls.
+
 The workflow runtime is decoupled from any specific database library. The core package defines four persistence interfaces. The `@duraflows/pg` package provides a built-in PostgreSQL adapter using `pg`, but you can implement these interfaces with Prisma, Drizzle, TypeORM, or any other library.
 
 ## Persistence Interfaces

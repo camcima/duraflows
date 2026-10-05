@@ -1,3 +1,4 @@
+import { runDatabaseDurableCases } from "../../../duraflows-core/tests/helpers/database-durable-cases.js";
 import { runDatabaseIdempotencyCases } from "../../../duraflows-core/tests/helpers/database-idempotency-cases.js";
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
@@ -92,7 +93,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     try {
       await client.query("CREATE SCHEMA IF NOT EXISTS kysely_it");
       await client.query("DROP TABLE IF EXISTS workflow_history, workflow_instances, workflow_definitions CASCADE");
-      const { up } = generateMigrationSql({ includeIdempotency: true });
+      const { up } = generateMigrationSql({ includeIdempotency: true, includeDurableExecution: true });
       await client.query(up);
     } finally {
       client.release();
@@ -108,6 +109,8 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     }
     await db.destroy();
   });
+
+  runDatabaseDurableCases("kysely", () => kyselyWorkflowProviders(db, { durableExecution: true }));
 
   runDatabaseIdempotencyCases("kysely", () => kyselyWorkflowProviders(db, { idempotency: true }));
 

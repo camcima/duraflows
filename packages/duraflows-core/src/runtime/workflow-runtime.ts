@@ -1,3 +1,13 @@
+import { extractErrorMessage } from "./error-message.js";
+import { DurableExecutionRunner } from "./durable-execution.js";
+import type {
+  WorkflowExecutionStore,
+  DurableExecutionOptions,
+  EnqueueWorkflowEventInput,
+  DurableWorkflowExecution,
+  ProcessPendingExecutionsInput,
+  ProcessPendingExecutionsResult,
+} from "../types/durable.js";
 import { randomUUID } from "node:crypto";
 import type { WorkflowDefinitionRegistry } from "../registry/definition-registry.js";
 import type { WorkflowDefinition } from "../types/definition.js";
@@ -44,6 +54,8 @@ import {
   IdempotencyConflictError,
   IdempotencyInProgressError,
   IdempotencyNotSupportedError,
+  DurableExecutionNotSupportedError,
+  WorkflowInstanceBusyError,
 } from "../errors/index.js";
 import { WorkflowHandle } from "./workflow-handle.js";
 import type { WorkflowObserver, StateEnterEvent, ObserverErrorHandler } from "../types/observer.js";
@@ -88,25 +100,9 @@ function matchesTimeoutSnapshot(instance: WorkflowInstance, snapshot: WorkflowIn
   );
 }
 
-/**
- * Pulls the operator-facing message out of a failed transition. Only the last
- * command result matters — the executor stops at the first failure, so every
- * earlier result succeeded.
- */
-function extractErrorMessage(
-  outcome: "success" | "failure" | "guard-rejected",
-  commandResults: readonly CommandResult[],
-): string | undefined {
-  if (outcome !== "failure" || commandResults.length === 0) {
-    return undefined;
-  }
-  const lastResult = commandResults[commandResults.length - 1];
-  // `ok` here is defensive: the executor stops at the first failure, so a
-  // "failure" outcome always ends on a failed result.
-  return lastResult.ok ? undefined : (lastResult.message ?? lastResult.code ?? "Command failed");
-}
-
 export interface WorkflowRuntimeOptions {
+  executionStore?: WorkflowExecutionStore;
+  durableExecution?: DurableExecutionOptions;
   definitionRegistry: WorkflowDefinitionRegistry;
   commandRegistry: WorkflowCommandRegistry;
   guardRegistry?: WorkflowGuardRegistry;
@@ -144,6 +140,8 @@ export interface WorkflowRuntimeOptions {
 }
 
 export class WorkflowRuntime {
+  private readonly executionStore?: WorkflowExecutionStore;
+  private readonly durableRunner?: DurableExecutionRunner;
   private readonly definitionRegistry: WorkflowDefinitionRegistry;
   private readonly instanceStore: WorkflowInstanceStore;
   private readonly historyStore: WorkflowHistoryStore;
@@ -202,7 +200,28 @@ export class WorkflowRuntime {
     this.maxOnEnterDepth = options.maxOnEnterDepth ?? DEFAULT_MAX_ON_ENTER_DEPTH;
     this.observerRegistry = new ObserverRegistry(options.observers ?? [], options.onObserverError);
     this.timeoutRetryPolicy = new TimeoutRetryPolicy(options.timeoutRetry);
+    this.executionStore = options.executionStore;
+    if (options.executionStore)
+      this.durableRunner = new DurableExecutionRunner({
+        store: options.executionStore,
+        instanceStore: this.instanceStore,
+        historyStore: this.historyStore,
+        transactionRunner: this.transactionRunner,
+        commandRegistry: this.commandRegistry,
+        guardRegistry: this.guardRegistry,
+        clock: this.clock,
+        options: options.durableExecution,
+        maxOnEnterDepth: this.maxOnEnterDepth,
+        initialize: () => this.initialize(),
+        resolve: async (instance) => {
+          const { definition } = await this.definitionResolver.forInstance(instance);
+          await this.ensureSnapshot(definition);
+          return definition;
+        },
+        runWithObservers: (work) => this.runWithObservers(work),
+      });
     this.instanceMigrator = new InstanceMigrator({
+      assertIdle: (uuid) => this.assertIdle(uuid),
       instanceStore: this.instanceStore,
       historyStore: this.historyStore,
       clock: this.clock,
@@ -423,6 +442,38 @@ export class WorkflowRuntime {
     });
   }
 
+  private async assertIdle(uuid: string): Promise<void> {
+    if (await this.executionStore?.findActive(uuid)) throw new WorkflowInstanceBusyError(uuid);
+  }
+
+  private requireDurable(): DurableExecutionRunner {
+    if (!this.durableRunner) throw new DurableExecutionNotSupportedError();
+    return this.durableRunner;
+  }
+
+  async enqueueEvent(input: EnqueueWorkflowEventInput): Promise<DurableWorkflowExecution> {
+    const runner = this.requireDurable();
+    return runner.enqueue(input);
+  }
+
+  async processPendingExecutions(input?: ProcessPendingExecutionsInput): Promise<ProcessPendingExecutionsResult> {
+    const runner = this.requireDurable();
+    await this.initialize();
+    return runner.process(input);
+  }
+
+  async getExecution(uuid: string): Promise<DurableWorkflowExecution | null> {
+    this.requireDurable();
+    return this.executionStore!.findByUuid(uuid);
+  }
+
+  async retryExecution(uuid: string): Promise<DurableWorkflowExecution> {
+    return this.requireDurable().control(uuid, "retry");
+  }
+  async cancelExecution(uuid: string): Promise<DurableWorkflowExecution> {
+    return this.requireDurable().control(uuid, "cancel");
+  }
+
   async triggerEvent(input: TriggerWorkflowEventInput): Promise<WorkflowExecutionResult> {
     // Keep a keyed request's identity stable across awaits and command calls.
     if (input.idempotencyKey !== undefined) input = { ...input };
@@ -453,6 +504,7 @@ export class WorkflowRuntime {
         });
       }
 
+      await this.assertIdle(instance.uuid);
       const { definition, compiled } = await this.definitionResolver.forInstance(instance);
       if (instance.definitionVersion !== this.definitionVersionOf(definition)) {
         await this.ensureSnapshot(definition);
@@ -611,7 +663,9 @@ export class WorkflowRuntime {
 
     // Step 1: find expired instances (short-lived txn; locks released immediately).
     const expired = await this.transactionRunner.runInTransaction(async () => {
-      return this.instanceStore.findExpired(limit, now);
+      return this.executionStore
+        ? this.instanceStore.findExpired(limit, now, { excludeActiveExecutions: true })
+        : this.instanceStore.findExpired(limit, now);
     });
 
     // Step 2: process each instance in its own transaction.
@@ -626,6 +680,8 @@ export class WorkflowRuntime {
             // Instance disappeared (another worker deleted it); skip silently.
             return;
           }
+
+          if (await this.executionStore?.findActive(instance.uuid)) return;
 
           // Still due? Another worker may have processed it, or recorded a
           // failure that scheduled a later retry or parked it.
@@ -688,6 +744,7 @@ export class WorkflowRuntime {
     try {
       return await this.transactionRunner.runInTransaction(async () => {
         const instance = await this.instanceStore.lockByUuid(snapshot.uuid);
+        if (await this.executionStore?.findActive(snapshot.uuid)) return null;
         const now = this.clock.now();
         if (!instance || !matchesTimeoutSnapshot(instance, snapshot) || !isTimeoutDue(instance, now)) {
           return null;
@@ -1032,6 +1089,7 @@ export class WorkflowRuntime {
     await this.initialize();
     return this.transactionRunner.runInTransaction(async () => {
       const instance = await this.instanceStore.lockByUuid(workflowInstanceUuid);
+      await this.assertIdle(workflowInstanceUuid);
       if (!instance) {
         throw new WorkflowInstanceNotFoundError(workflowInstanceUuid);
       }

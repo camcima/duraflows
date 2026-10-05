@@ -1,5 +1,7 @@
 # Error Handling
 
+For opt-in command checkpoints, worker retries and recovery across process restarts, see [Durable command progress](durable-execution.md). The single-transaction behavior described below applies to synchronous `triggerEvent()` calls.
+
 The workflow runtime defines a hierarchy of error classes that represent different failure modes. All errors extend `WorkflowError`, which extends the native `Error`.
 
 ## Error Hierarchy

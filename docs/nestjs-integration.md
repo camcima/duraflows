@@ -1,5 +1,7 @@
 # NestJS Integration
 
+For opt-in command checkpoints, worker retries and recovery across process restarts, see [Durable command progress](durable-execution.md). The single-transaction behavior described below applies to synchronous `triggerEvent()` calls.
+
 The `@duraflows/nestjs` package provides a NestJS module that wires the workflow runtime into dependency injection with services, optional REST controllers, and DI-backed command resolution.
 
 ## Installation

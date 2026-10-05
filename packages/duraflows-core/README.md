@@ -141,3 +141,7 @@ MIT
 ## Event idempotency
 
 Provide optional `WorkflowIdempotencyStore` and pass a stable `idempotencyKey` to `triggerEvent` or a handle. Keys identify one occurrence per instance; duplicates replay the committed result. An optional `idempotencyFingerprint` detects conflicting business inputs. Unkeyed calls retain existing behavior. See [the guide](../../docs/event-idempotency.md) for the transaction contract, outcome semantics, and limits.
+
+## Optional durable command progress
+
+The runtime adds `enqueueEvent`, `processPendingExecutions`, `getExecution`, `retryExecution` and `cancelExecution`; the existing synchronous API keeps its transaction semantics. See [Durable command progress](https://github.com/camcima/duraflows/blob/main/docs/durable-execution.md) for setup, worker polling, downstream idempotency, rollout and recovery limits.

@@ -1,3 +1,5 @@
+import type { EnqueueWorkflowEventInput, DurableWorkflowExecution } from "../types/durable.js";
+import { DurableExecutionNotSupportedError } from "../errors/index.js";
 import type {
   WorkflowInstance,
   WorkflowExecutionResult,
@@ -8,6 +10,7 @@ import type {
 import type { WorkflowHistoryRecord } from "../types/persistence.js";
 
 export interface WorkflowRuntimeClient {
+  enqueueEvent?(input: EnqueueWorkflowEventInput): Promise<DurableWorkflowExecution>;
   getInstance(uuid: string): Promise<WorkflowInstance | null>;
   triggerEvent(input: TriggerWorkflowEventInput): Promise<WorkflowExecutionResult>;
   getAvailableEvents(input: GetAvailableEventsInput): Promise<AvailableWorkflowEvent[]>;
@@ -42,6 +45,14 @@ export class WorkflowHandle {
       idempotencyKey: options?.idempotencyKey,
       idempotencyFingerprint: options?.idempotencyFingerprint,
     });
+  }
+
+  async enqueueEvent(
+    eventName: string,
+    options: Omit<EnqueueWorkflowEventInput, "workflowInstanceUuid" | "eventName">,
+  ): Promise<DurableWorkflowExecution> {
+    if (!this.client.enqueueEvent) throw new DurableExecutionNotSupportedError();
+    return this.client.enqueueEvent({ ...options, workflowInstanceUuid: this.uuid, eventName });
   }
 
   async getAvailableEvents(): Promise<AvailableWorkflowEvent[]> {

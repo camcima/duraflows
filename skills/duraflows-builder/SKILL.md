@@ -5,6 +5,8 @@ description: "Builds complete duraflows workflow implementations from natural-la
 
 # duraflows Workflow Builder
 
+Transaction/rollback guidance for synchronous events applies to `triggerEvent()`. For independently committed command checkpoints, use the durable command progress section below; prior queued command effects cannot be rolled back with a later command.
+
 A step-by-step reasoning process for translating natural-language requirements into complete duraflows workflow implementations.
 
 ---
@@ -418,3 +420,11 @@ await handle.triggerEvent("PaymentReceived", {
 A key identifies one occurrence on an instance, including after state changes. Same-key retries return the committed original result without executing guards, commands, or observers. Routed failures and rejected guards also replay; a deliberate new attempt needs a new key. Rolled-back executions remain retryable. Without a caller fingerprint, changed subjects are not compared. Preserve arbitrary subjects, but keyed results are JSON snapshots.
 
 Do not introduce a fresh key on each retry, use just an event name, or claim that event idempotency guarantees exactly-once external calls. Commands still need stable downstream idempotency when their external effects can survive database rollback. Existing unkeyed applications need no extra table or adapter capability.
+
+## Choosing durable command execution
+
+When requirements include surviving a crash between commands, generate the opt-in queued path: migration 008, provider `{ durableExecution: true }`, `enqueueEvent` with a stable required key, and a scheduled `processPendingExecutions` worker outside transactions. Keep `triggerEvent` for a single atomic database transition. Configure every runtime touching those instances with the execution store before accepting work.
+
+Classify each command: external calls use the default mode and downstream `ctx.durable.idempotencyKey`; short database writes use command-reference `transactional: true` and the same adapter transaction connection. Include explicit error/compensation states because earlier checkpoints cannot be rolled back. Long calls need awaited heartbeats and service timeouts; leases cannot stop external effects.
+
+Use plain JSON subjects and persist recoverable IDs/results in context. Polling advances one command per execution, including entry chains; state/history publish at full completion. Expose `getExecution` for progress and operator retry/cancellation for parked work. Monitor `parked` and `failed`. Do not promise arbitrary-code replay or exactly-once external calls. Preserve compatible handlers across deployments; explain request retention and the separate synchronous/queued key namespaces. See `docs/durable-execution.md` in the repository.

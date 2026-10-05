@@ -1,3 +1,9 @@
+import type {
+  EnqueueWorkflowEventInput,
+  DurableWorkflowExecution,
+  ProcessPendingExecutionsInput,
+  ProcessPendingExecutionsResult,
+} from "@duraflows/core";
 import { Inject, Injectable } from "@nestjs/common";
 import { WorkflowHandle } from "@duraflows/core";
 import type {
@@ -72,6 +78,22 @@ export class WorkflowService {
     // the live row, so there is nothing to do with the value at runtime.
     const result = await this.runtime.triggerEvent(input);
     return result as WorkflowExecutionResult<TState>;
+  }
+
+  async enqueueEvent(input: EnqueueWorkflowEventInput): Promise<DurableWorkflowExecution> {
+    return this.runtime.enqueueEvent(input);
+  }
+  async getExecution(uuid: string): Promise<DurableWorkflowExecution | null> {
+    return this.runtime.getExecution(uuid);
+  }
+  async processPendingExecutions(input?: ProcessPendingExecutionsInput): Promise<ProcessPendingExecutionsResult> {
+    return this.runtime.processPendingExecutions(input);
+  }
+  async retryExecution(uuid: string): Promise<DurableWorkflowExecution> {
+    return this.runtime.retryExecution(uuid);
+  }
+  async cancelExecution(uuid: string): Promise<DurableWorkflowExecution> {
+    return this.runtime.cancelExecution(uuid);
   }
 
   async getAvailableEvents(input: GetAvailableEventsInput): Promise<AvailableWorkflowEvent[]> {

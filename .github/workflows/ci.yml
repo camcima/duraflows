@@ -24,12 +24,17 @@ jobs:
       - run: pnpm run format:check
       - run: pnpm run typecheck
       - run: pnpm run test:coverage
-      - uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage/coverage-final.json
-          flags: unit
-          fail_ci_if_error: true
+      - name: Upload coverage to Codecov
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          CODECOV_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # Direct legacy upload avoids the unavailable ingest registration API.
+          python3 -m venv "${RUNNER_TEMP}/codecov-cli"
+          "${RUNNER_TEMP}/codecov-cli/bin/pip" install codecov-cli==11.3.1
+          "${RUNNER_TEMP}/codecov-cli/bin/codecovcli" --disable-telem do-upload \
+            --legacy --fail-on-error --git-service github --sha "$CODECOV_COMMIT" \
+            --file coverage/coverage-final.json --flag unit
 
   integration:
     runs-on: ubuntu-latest

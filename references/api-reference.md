@@ -1294,3 +1294,29 @@ Thrown when: `migrateInstances()` fails while _listing_ candidates -- `instanceS
 `WorkflowIdempotencyReservation` has `workflowInstanceUuid`, `key`, `eventName`, and optional `fingerprint`. `WorkflowIdempotencyRecord` adds `createdAt: Date` and `result: WorkflowExecutionResult | null`. Store methods `find(uuid, key)`, `reserve(input)`, and `complete(uuid, key, result)` all require the workflow transaction and connection; incomplete reservations are transaction-local. The conformance harness supplies `store`, `transactionRunner`, `instanceUuid`, transactional `withInstanceLock(work)`, and `teardown`.
 
 For validation, JSON result normalization, replay semantics, schema, HTTP examples, and guarantee limits, see [Event idempotency](../docs/event-idempotency.md).
+
+## Durable execution API
+
+`WorkflowRuntimeOptions` and `WorkflowPersistenceProvider` accept optional `executionStore: WorkflowExecutionStore`. Runtime/NestJS configuration also accepts `durableExecution: DurableExecutionOptions` (`leaseDurationMs`, `initialDelayMs`, `maxDelayMs`, `maxAttempts`). Defaults are 30,000 / 1,000 / 3,600,000 ms and 10 attempts. All must be positive safe integers; maximum delay must be at least initial delay.
+
+| Operation                                              | Return type                                 | Behavior                                                                                  |
+| ------------------------------------------------------ | ------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `enqueueEvent(input: EnqueueWorkflowEventInput)`       | `Promise<DurableWorkflowExecution>`         | Required `idempotencyKey`; otherwise the same input fields as `TriggerWorkflowEventInput` |
+| `processPendingExecutions(input?: { limit?: number })` | `Promise<ProcessPendingExecutionsResult>`   | Default limit 100; at most one command per selected execution                             |
+| `getExecution(uuid: string)`                           | `Promise<DurableWorkflowExecution \| null>` | Read persisted journal and status                                                         |
+| `retryExecution(uuid: string)`                         | `Promise<DurableWorkflowExecution>`         | Reset a parked execution's attempts, preserve journal                                     |
+| `cancelExecution(uuid: string)`                        | `Promise<DurableWorkflowExecution>`         | Cancel pending/parked/expired work; preserve prior effects                                |
+
+All five operations are exposed by `WorkflowService`. `WorkflowHandle.enqueueEvent(eventName, options)` omits instance UUID/event name from the input options. `WorkflowRuntimeClient.enqueueEvent` remains optional for existing client implementations.
+
+`DurableWorkflowExecution` contains identity, definition/input snapshots, `status` (`pending`, `running`, `parked`, `completed`, `cancelled`), `revision`, `journal: WorkflowCommandCheckpoint[]`, `result: WorkflowExecutionResult | null`, retry/lease state and ISO-string timestamps. Each checkpoint contains `id`, `name`, `result`, `context`, `attempts` and `completedAt`. Batch results contain `processed: number`, UUID arrays `completed`, `progressed`, `retrying`, `parked`, `skipped`, and `failed: { uuid, error }[]`.
+
+`WorkflowCommandRef.transactional?: boolean` runs a queued command in the checkpoint transaction. `WorkflowExecutionContext.durable?` supplies `executionUuid`, `commandId`, `idempotencyKey`, `attempt` and `heartbeat(): Promise<void>`. The flag does not change synchronous execution, which already uses a transaction.
+
+`WorkflowExecutionStore` exposes `create(execution)`, `update(execution)`, `findByUuid(uuid)`, `findByKey(instanceUuid, key)`, `findActive(instanceUuid)` and `findDue(limit, now)`. Runners optionally implement `isTransactionActive(): boolean`; worker processing requires it and rejects active transactions. See the [adapter contract and semantics](../docs/durable-execution.md#custom-persistence-adapters).
+
+Provider factories accept `durableExecution?: boolean` (default false), separate from the runtime's policy object. pg exports `PgWorkflowExecutionStore` and `generateDurableExecutionMigrationSql`; `MigrationSqlOptions.includeDurableExecution?: boolean` enables the optional table in fresh-install SQL. Kysely exports `KyselyWorkflowExecutionStore`, `WorkflowExecutionsTable`, and `WorkflowDatabaseWithExecutions`. NestJS exports `WORKFLOW_EXECUTION_STORE` and `WorkflowExecutionController`.
+
+`DurableExecutionNotSupportedError` reports a missing execution store; `WorkflowInstanceBusyError` reports an occupied instance; `ExecutionLeaseLostError` fences stale ownership. All extend `WorkflowError`. Invalid policy/input/operator actions use `InvalidArgumentError`, and conflicting request identities use `IdempotencyConflictError`. NestJS maps busy/lease conflicts to 409. See [Durable command progress](../docs/durable-execution.md) for the full delivery guarantees and HTTP routes.
+
+When `executionStore` is enabled, timeout scans call `WorkflowInstanceStore.findExpired(limit, now, { excludeActiveExecutions: true })`. Durable adapters must filter pending/running/parked executions before the batch limit; the optional third argument leaves legacy adapters compatible.

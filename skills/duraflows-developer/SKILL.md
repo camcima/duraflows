@@ -5,6 +5,8 @@ description: "Provides domain expertise for developing durable workflows with @d
 
 # duraflows Developer Guide
 
+Transaction/rollback guidance for synchronous events applies to `triggerEvent()`. For independently committed command checkpoints, use the durable command progress section below; prior queued command effects cannot be rolled back with a later command.
+
 ## Architecture
 
 duraflows is a **durable workflow runtime** for TypeScript built on [@camcima/finita](https://github.com/camcima/finita) (FSM engine). Four packages:
@@ -18,7 +20,7 @@ duraflows is a **durable workflow runtime** for TypeScript built on [@camcima/fi
 
 **Compatibility:** duraflows v2.0.0+ declares `engines.node >= 20` (carried through from `@camcima/finita` v3). The pre-v2 line predates the Node 20 floor and shipped without an `engines` field — check the published package's `engines.node` for exact runtime requirements. The public WorkflowDefinition surface is unchanged across the v1 → v2 boundary; the v2 bump is an internal Finita upgrade plus the Node floor.
 
-Commands call APIs, write to databases, and send messages. They are not replayed or checkpointed. Opt-in event idempotency returns a recorded event result without running its commands again. Durability comes from:
+Commands call APIs, write to databases, and send messages. Synchronous `triggerEvent()` runs them in one transaction. Opt-in `enqueueEvent()` checkpoints command results and context; workers resume unfinished commands without rerunning completed handlers. Opt-in event idempotency returns a recorded event result without running its commands again. Durability comes from:
 
 - Persisted workflow state (current state, context, version)
 - Complete immutable audit history of every transition
@@ -746,3 +748,19 @@ Committed duplicates return the original JSON result/history UUID without guards
 Compare event names and caller fingerprints exactly, including presence. Without a fingerprint, changed subjects/metadata are not detected. Keys/fingerprints must be nonblank valid Unicode strings, at most 256 UTF-8 bytes, without NUL; null is invalid. A fingerprint requires a key. Missing persistence support throws `IdempotencyNotSupportedError`; conflicting reuse throws `IdempotencyConflictError`. Transaction-local recursion with the same key throws `IdempotencyInProgressError`.
 
 Existing unkeyed calls work without the new table. Receipts remain for the life of the instance; there is no automatic pruning. Event idempotency does not protect an external API effect that succeeded before a rollback; use downstream idempotency too. `ctx.transitionUuid` is generated per execution, so it is not a stable retry key.
+
+## Durable command progress
+
+Use `enqueueEvent({ workflowInstanceUuid, eventName, idempotencyKey, subject?, triggerMetadata?, idempotencyFingerprint? })` when commands must survive a later failure independently. Apply optional migration 008 and enable `{ durableExecution: true }` on the pg/Kysely provider in **every** runtime touching these instances before accepting queued traffic. Runtime/NestJS `durableExecution` is a policy object, not the provider's boolean: defaults are `leaseDurationMs: 30000`, `initialDelayMs: 1000`, `maxDelayMs: 3600000`, `maxAttempts: 10`.
+
+Schedule `processPendingExecutions({ limit: 100 })` outside transactions. One poll executes at most one command per selected execution; keep polling. Inspect `getExecution(uuid)` for partial progress. The full event and its entry chain publish instance state/history only at finalization; earlier database command writes are already committed. Pending/running/parked work blocks new events, applying migrations and timeout rearm; sweeps skip it.
+
+External handlers run outside the workflow transaction. Pass `ctx.durable.idempotencyKey` downstream; a crash between effect and checkpoint can repeat that command. `ctx.durable` also supplies `executionUuid`, ordinal `commandId`, one-based `attempt`, and `heartbeat()`. Await heartbeats before lease expiry for long work; there is no automatic heartbeat/cancellation. Keep clocks synchronized. Synchronous handlers have no `ctx.durable`.
+
+Use `{ name: "reserve", transactional: true }` for short database-only command references, including `onEnter`. Use the provider's ambient transaction connection for writes so checkpoint and writes commit/rollback together. Model compensation explicitly with `errorState`; a later failure does not undo earlier commits. Thrown errors retry/park; unrouted `{ ok: false }` is journaled and parks. `retryExecution` preserves checkpoints; use cancellation and a recovery event for a recorded business failure. Cancellation cannot revoke prior effects or a running external request.
+
+Queued subjects/trigger metadata must be plain JSON and are snapshotted; subjects are frozen. Results/context must be JSON-compatible. Definitions and best-effort policy are captured, but handler code is not: retain compatible handlers for unfinished work. Queue keys are a separate namespace from synchronous idempotency receipts. Reusing a key returns the current execution, including cancellation/rejection, not a new attempt. No built-in daemon, record pruning, arbitrary JavaScript replay, durable observers, sleeps or signals are provided.
+
+NestJS exposes all five operations through `WorkflowService`, `WORKFLOW_EXECUTION_STORE`, and optional `/workflows/.../executions/...` controllers. See the repository's `docs/durable-execution.md` and `references/api-reference.md` for exact routes and adapter contracts.
+
+For queued transactional commands, errors propagated out of command execution and checkpoint/finalization failures roll back that command's database writes. A returned `{ ok: false }` commits those writes with the recorded business outcome, including when an unrouted failure parks; explicitly undo writes or propagate an error from a mandatory command when rollback is intended. Best-effort handlers convert thrown JavaScript errors to recorded failures and may commit earlier writes.

@@ -170,3 +170,7 @@ MIT
 ## Optional event idempotency
 
 Apply migration `007_event_idempotency.sql` from `@duraflows/pg`, or use its `generateIdempotencyMigrationSql()`, then enable `kyselyWorkflowProviders(db, { idempotency: true })`. Transaction-bound providers support `kyselyWorkflowProvidersFromTransaction(trx, { idempotency: true })`. Both default to disabled. `KyselyWorkflowIdempotencyStore`, `WorkflowEventIdempotencyTable`, and the optional `WorkflowDatabaseWithIdempotency` extension are exported; existing `WorkflowDatabase` consumer types remain valid. Receipts use the same transaction and roll back with it. See [the guide](../../docs/event-idempotency.md) for deployment and guarantees.
+
+## Optional durable command progress
+
+Apply optional migration 008 from `@duraflows/pg`, then set `{ durableExecution: true }` on `kyselyWorkflowProviders`. `KyselyWorkflowExecutionStore`, `WorkflowExecutionsTable` and optional `WorkflowDatabaseWithExecutions` are exported; the existing `WorkflowDatabase` type is unchanged. Transaction-bound providers can enqueue, but workers must use ordinary providers outside any transaction. See [Durable command progress](https://github.com/camcima/duraflows/blob/main/docs/durable-execution.md) for setup, worker polling, downstream idempotency, rollout and recovery limits.

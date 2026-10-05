@@ -60,7 +60,8 @@ export interface WorkflowInstanceStore {
    * re-locks each instance individually with `lockByUuid` and re-checks that
    * it is still due before processing it — not from this scan.
    */
-  findExpired(limit: number, now: Date): Promise<WorkflowInstance[]>;
+  /** When durable execution is enabled, exclude active executions BEFORE limiting the batch. */
+  findExpired(limit: number, now: Date, options?: { excludeActiveExecutions?: boolean }): Promise<WorkflowInstance[]>;
 
   /**
    * List instances parked after too many failed timeout attempts
@@ -162,6 +163,8 @@ export interface WorkflowHistoryRecord {
 }
 
 export interface WorkflowTransactionRunner {
+  /** Optional for legacy runners; required by durable workers to reject ambient transactions. */
+  isTransactionActive?(): boolean;
   /**
    * Execute the callback within a database transaction. Commits on success,
    * rolls back on error.
@@ -242,6 +245,8 @@ export interface WorkflowDefinitionStore {
 }
 
 export interface WorkflowPersistenceProvider {
+  /** Opt-in durable command execution. */
+  executionStore?: import("./durable.js").WorkflowExecutionStore;
   instanceStore: WorkflowInstanceStore;
   historyStore: WorkflowHistoryStore;
   transactionRunner: WorkflowTransactionRunner;

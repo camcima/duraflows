@@ -32,6 +32,7 @@ Pick `@duraflows/pg` for the simpler default (raw `pg` pool, minimal deps). Pick
 ## Key Features
 
 - **Declarative workflow definitions** in plain TypeScript objects, optionally generic over a `TState` union for type-safe `currentState`/`fromState`/`toState`
+- **Durable command progress** -- opt-in queued events checkpoint each command and recover unfinished work after a crash; [setup and guarantees](docs/durable-execution.md)
 - **Command execution** with sequential fail-fast policy and success/failure branching
 - **Timeout processing** with persisted deadlines and batch processing; a timeout that keeps failing is retried with exponential backoff and then parked until an operator re-arms it
 - **Event guards** -- declarative preconditions that reject an event without running commands (`outcome: "guard-rejected"`, recorded in history)

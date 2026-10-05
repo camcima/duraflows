@@ -89,6 +89,10 @@ export class KyselyTransactionRunner implements WorkflowTransactionRunner {
     );
   }
 
+  isTransactionActive(): boolean {
+    return kyselyTransactionScopes.current(this.db) !== undefined;
+  }
+
   afterCommit(callback: AfterCommitCallback): void {
     kyselyTransactionScopes.afterCommit(this.db, callback);
   }

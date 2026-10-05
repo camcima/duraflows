@@ -9,6 +9,8 @@ Use this checklist when reviewing code that touches duraflows workflows, command
 
 ---
 
+Transaction/rollback guidance for synchronous events applies to `triggerEvent()`. For independently committed command checkpoints, use the durable command progress section below; prior queued command effects cannot be rolled back with a later command.
+
 ## Workflow Definition Review
 
 ### States
@@ -176,3 +178,19 @@ When reviewing a PR that modifies workflows, ensure the description covers:
 - [ ] JSON result snapshots are consistent on first execution and replay and protected against caller mutation. Key/fingerprint validation handles null, Unicode bytes, NUL, and malformed Unicode.
 - [ ] Optional migration `007_event_idempotency.sql` is applied before enabling `{ idempotency: true }`. Existing adapters, Kysely database types, and unkeyed calls remain compatible without the table.
 - [ ] Tests include real concurrent commit/rollback, same-transaction recursion, outer rollback, and HTTP forwarding/conflicts. Documentation states permanent receipt retention and external-effect limits; no claim of exactly-once external calls.
+
+## Durable command progress review
+
+- [ ] Migration 008 precedes opt-in deployment; every runtime touching the instances enables `executionStore`. Old/disabled workers cannot enforce busy-instance protection. Existing synchronous callers and adapters still work without the table.
+- [ ] Acceptance requires a stable key; fingerprint matches request identity. Queue and synchronous receipt namespaces are distinct. Subject/trigger metadata are plain JSON; handler outputs/context are recoverable JSON.
+- [ ] A scheduler polls `processPendingExecutions` outside ambient transactions; the runner detects them. One poll advances one command per selected execution, including entry commands. Parked/failed work is observable.
+- [ ] External commands forward the stable per-occurrence `ctx.durable.idempotencyKey`; no exactly-once claim. Long commands heartbeat before expiry, clocks are synchronized, and stale workers cannot checkpoint. Lease fencing does not cancel network requests.
+- [ ] `transactional: true` commands are short database-only operations using the adapter's active connection. Their writes and checkpoint share a commit. Prior command writes remain committed after later failure; compensation is explicit.
+- [ ] State/history publish at full event completion, with partial progress available through `getExecution`. Observers remain nondurable. Retry preserves the journal; cancel does not undo effects, and a cancelled key cannot start a fresh request.
+- [ ] Compatible handlers remain deployed for unfinished snapshots. Records retain payloads indefinitely; storage/privacy needs and drain-before-disable procedures are documented.
+- [ ] Tests prove restart recovery, lost-lease fencing, repeated crashes reaching retry limits, transactional rollback, finalization rollback, NestJS DI/HTTP and unchanged synchronous behavior. Real multi-connection tests supplement in-memory tests.
+
+Reference: repository `docs/durable-execution.md` and `references/api-reference.md`.
+
+- [ ] Timeout candidate scans exclude active executions before the batch limit, so busy/parked instances cannot starve other due work.
+- [ ] Database failure tests inject checkpoint/finalization storage failure after successful writes; rollback claims distinguish propagated exceptions from committed business outcomes and best-effort failures.

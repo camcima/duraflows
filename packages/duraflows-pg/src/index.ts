@@ -1,3 +1,5 @@
+import { PgWorkflowExecutionStore } from "./pg-execution-store.js";
+export { PgWorkflowExecutionStore } from "./pg-execution-store.js";
 import type { Pool } from "pg";
 import type { WorkflowPersistenceProvider } from "@duraflows/core";
 import { PgWorkflowInstanceStore } from "./pg-instance-store.js";
@@ -13,7 +15,11 @@ export { PgWorkflowInstanceStore } from "./pg-instance-store.js";
 export { PgWorkflowHistoryStore } from "./pg-history-store.js";
 export { PgWorkflowDefinitionStore } from "./pg-definition-store.js";
 export { PgWorkflowIdempotencyStore } from "./pg-idempotency-store.js";
-export { generateMigrationSql, generateIdempotencyMigrationSql } from "./pg-schema-manager.js";
+export {
+  generateMigrationSql,
+  generateIdempotencyMigrationSql,
+  generateDurableExecutionMigrationSql,
+} from "./pg-schema-manager.js";
 export type { UuidStrategy, MigrationSqlOptions } from "./pg-schema-manager.js";
 
 /**
@@ -23,6 +29,8 @@ export type { UuidStrategy, MigrationSqlOptions } from "./pg-schema-manager.js";
 export interface PgWorkflowProvidersOptions extends PgTransactionRunnerOptions {
   /** Opt-in; apply the event-idempotency migration before keyed calls. */
   idempotency?: boolean;
+  /** Apply migration 008 before enabling on every worker. */
+  durableExecution?: boolean;
 }
 
 export function pgWorkflowProviders(pool: Pool, options: PgWorkflowProvidersOptions = {}): WorkflowPersistenceProvider {
@@ -35,6 +43,7 @@ export function pgWorkflowProviders(pool: Pool, options: PgWorkflowProvidersOpti
     historyStore,
     transactionRunner,
     definitionStore,
+    ...(options.durableExecution ? { executionStore: new PgWorkflowExecutionStore(pool) } : {}),
     ...(options.idempotency ? { idempotencyStore: new PgWorkflowIdempotencyStore(pool) } : {}),
   };
 }
