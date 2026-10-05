@@ -30,6 +30,8 @@ jobs:
           files: coverage/coverage-final.json
           flags: unit
           fail_ci_if_error: true
+          # Use the supported PyPI distribution when cli.codecov.io is unavailable.
+          use_pypi: true
 
   integration:
     runs-on: ubuntu-latest
