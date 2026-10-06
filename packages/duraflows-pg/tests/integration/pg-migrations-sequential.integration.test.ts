@@ -119,7 +119,21 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     await pool.end();
   });
 
-  runDatabaseDurableCases("incremental 008", () => pgWorkflowProviders(pool, { durableExecution: true }));
+  runDatabaseDurableCases(
+    "incremental 008",
+    () => pgWorkflowProviders(pool, { durableExecution: true }),
+    async (uuid) => {
+      const { rows } = await pool.query<{ lease_until: Date | null }>(
+        "SELECT lease_until FROM workflow_executions WHERE uuid = $1",
+        [uuid],
+      );
+      expect(rows).toHaveLength(1);
+      return rows[0].lease_until;
+    },
+    async () => {
+      await pool.query("TRUNCATE workflow_history, workflow_instances, workflow_definitions CASCADE");
+    },
+  );
 
   it("007's incremental schema stores receipts and cascades instance deletion", async () => {
     const uuid = randomUUID();

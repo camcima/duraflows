@@ -1,6 +1,8 @@
 dist/
 node_modules/
 coverage/
+reports/mutation/
+.stryker-tmp/
 CHANGELOG.md
 IMPLEMENTATION_REVIEW.md
 pnpm-lock.yaml

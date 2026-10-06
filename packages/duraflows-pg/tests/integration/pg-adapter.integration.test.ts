@@ -108,7 +108,21 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
     await pool.end();
   });
 
-  runDatabaseDurableCases("pg", () => pgWorkflowProviders(pool, { durableExecution: true }));
+  runDatabaseDurableCases(
+    "pg",
+    () => pgWorkflowProviders(pool, { durableExecution: true }),
+    async (uuid) => {
+      const { rows } = await pool.query<{ lease_until: Date | null }>(
+        "SELECT lease_until FROM workflow_executions WHERE uuid = $1",
+        [uuid],
+      );
+      expect(rows).toHaveLength(1);
+      return rows[0].lease_until;
+    },
+    async () => {
+      await pool.query("TRUNCATE workflow_history, workflow_instances, workflow_definitions CASCADE");
+    },
+  );
 
   runDatabaseIdempotencyCases("pg", () => pgWorkflowProviders(pool, { idempotency: true }));
 
@@ -424,6 +438,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       await pool.query("TRUNCATE workflow_definitions");
     });
 
+    // This case performs hundreds of SQL operations; allow it to finish before cleanup under load.
     it("pages through every v1 instance, relabels them and records $migrated", async () => {
       const runtimeV1 = buildRuntime(v1);
       const uuids: string[] = [];
@@ -469,7 +484,7 @@ if (!databaseUrl && process.env.REQUIRE_INTEGRATION_DB === "1") {
       ]);
       await runtimeV2.triggerEvent({ workflowInstanceUuid: uuids[0], eventName: "Approve" });
       expect((await runtimeV2.getInstance(uuids[0]))!.currentState).toBe("accepted");
-    });
+    }, 30_000);
 
     it("filters by state in the query and finishes with a cursor loop", async () => {
       const runtimeV1 = buildRuntime(v1);

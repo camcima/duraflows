@@ -8,6 +8,8 @@
     "clean": "tsc --build --clean && tsc --build --clean tsconfig.cjs.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:mutation": "stryker run && node scripts/check-mutation-report.mjs",
+    "test:mutation:postgres": "node scripts/run-postgres-mutation.mjs",
     "test:watch": "vitest",
     "typecheck": "vitest --typecheck.enabled --run",
     "lint": "eslint packages/*/src/ packages/*/tests/ --max-warnings=0",
@@ -22,6 +24,8 @@
     "@commitlint/config-conventional": "^21.2.3",
     "@eslint/js": "^10.0.1",
     "@release-it/conventional-changelog": "^12.0.2",
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
     "@types/node": "^26.6.2",
     "@vitest/coverage-v8": "^5.0.1",
     "eslint": "^10.11.0",
@@ -43,6 +47,9 @@
       "path-to-regexp": "^8.4.0",
       "typescript": "^5.9.3",
       "undici": ">=8.5.0"
+    },
+    "patchedDependencies": {
+      "@stryker-mutator/vitest-runner@10.0.0": "patches/@stryker-mutator__vitest-runner@10.0.0.patch"
     }
   },
   "skills": {
