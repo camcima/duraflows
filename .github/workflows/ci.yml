@@ -106,6 +106,13 @@ jobs:
       - run: pnpm run build
       - run: pnpm run typecheck
       - run: pnpm vitest run packages/duraflows-nestjs
+      # The npm bundled with Node 20 (10.8.2) crashes in arborist #loadPeerSet
+      # ("Cannot read properties of null (reading 'edgesOut')") while walking
+      # @duraflows/core's optional vitest peer; on Node 20 every npm 10.x does,
+      # including 10.9.9. Upgrade npm only, keeping the Node 20 runtime.
+      - name: Upgrade npm for the smoke install (Node 20)
+        if: matrix.node == '20'
+        run: npm install -g npm@11.21.0
       - run: node scripts/smoke-nestjs-consumer.mjs
 
   osv-scanner:
