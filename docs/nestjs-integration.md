@@ -22,7 +22,7 @@ pnpm add class-validator class-transformer
 
 `@duraflows/nestjs` supports **NestJS 11 and 12** (`@nestjs/common` / `@nestjs/core` peer range `^11.0.0 || ^12.0.0`), from both CommonJS and ESM applications. CI runs the package's tests and a packed-`dist` smoke test against NestJS `11.0.0`, the latest 11.x, and the latest 12.x.
 
-- NestJS 12 packages are ESM-only. A CommonJS app loads them (and the CommonJS build of `@duraflows/nestjs` loads them) through Node's `require(esm)`, which is unflagged from **Node.js 20.19 / 22.12**. Jest on CommonJS additionally needs Node.js 24.9+, per the NestJS migration guide.
+- NestJS 12 packages are ESM-only. A CommonJS app loads them (and the CommonJS build of `@duraflows/nestjs` loads them) through Node's `require(esm)`, which is unflagged from **Node.js 22.12** (earlier Node.js 22 releases need `--experimental-require-module`). Jest on CommonJS additionally needs Node.js 24.9+, per the NestJS migration guide.
 - Moving an app from NestJS 11 to 12 needs no duraflows changes: the module API, the REST controllers, the `ValidationPipe`-based DTOs, and the exception filter behave the same on both.
 
 ## @WorkflowCommand Decorator

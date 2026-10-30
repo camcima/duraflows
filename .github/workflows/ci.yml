@@ -16,7 +16,7 @@ jobs:
           version: 9.15.0
       - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
@@ -58,7 +58,7 @@ jobs:
           version: 9.15.0
       - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm vitest run packages/duraflows-pg/tests/integration packages/duraflows-kysely/tests/integration
@@ -81,10 +81,10 @@ jobs:
       matrix:
         include:
           # `range` re-resolves @nestjs/* before testing; empty = keep the lockfile.
-          - { nest: "11.0.0 (floor)", range: "11.0.0", node: "20" }
-          - { nest: "11", range: "^11", node: "20" }
-          - { nest: "12", range: "", node: "20" }
+          - { nest: "11.0.0 (floor)", range: "11.0.0", node: "22" }
+          - { nest: "11", range: "^11", node: "22" }
           - { nest: "12", range: "", node: "22" }
+          - { nest: "12", range: "", node: "24" }
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -106,13 +106,6 @@ jobs:
       - run: pnpm run build
       - run: pnpm run typecheck
       - run: pnpm vitest run packages/duraflows-nestjs
-      # The npm bundled with Node 20 (10.8.2) crashes in arborist #loadPeerSet
-      # ("Cannot read properties of null (reading 'edgesOut')") while walking
-      # @duraflows/core's optional vitest peer; on Node 20 every npm 10.x does,
-      # including 10.9.9. Upgrade npm only, keeping the Node 20 runtime.
-      - name: Upgrade npm for the smoke install (Node 20)
-        if: matrix.node == '20'
-        run: npm install -g npm@11.21.0
       - run: node scripts/smoke-nestjs-consumer.mjs
 
   osv-scanner:

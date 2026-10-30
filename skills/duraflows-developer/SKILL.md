@@ -18,7 +18,7 @@ duraflows is a **durable workflow runtime** for TypeScript built on [@camcima/fi
 | `@duraflows/kysely` | PostgreSQL adapter using Kysely (idiomatic query builder, AsyncLocalStorage transactions) |
 | `@duraflows/nestjs` | NestJS module with DI, services, optional REST controllers                                |
 
-**Compatibility:** duraflows v2.0.0+ declares `engines.node >= 20` (carried through from `@camcima/finita` v3). The pre-v2 line predates the Node 20 floor and shipped without an `engines` field — check the published package's `engines.node` for exact runtime requirements. The public WorkflowDefinition surface is unchanged across the v1 → v2 boundary; the v2 bump is an internal Finita upgrade plus the Node floor.
+**Compatibility:** the major release after v7.4.1 raises the floor to `engines.node >= 22` (Node.js 20 reached end of life in April 2026). duraflows v2.0.0 through v7.4.1 declare `engines.node >= 20` (carried through from `@camcima/finita` v3). The pre-v2 line predates the Node 20 floor and shipped without an `engines` field — check the published package's `engines.node` for exact runtime requirements. The public WorkflowDefinition surface is unchanged across the v1 → v2 boundary; the v2 bump is an internal Finita upgrade plus the Node floor.
 
 Commands call APIs, write to databases, and send messages. Synchronous `triggerEvent()` runs them in one transaction. Opt-in `enqueueEvent()` checkpoints command results and context; workers resume unfinished commands without rerunning completed handlers. Opt-in event idempotency returns a recorded event result without running its commands again. Durability comes from:
 
