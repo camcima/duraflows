@@ -4,7 +4,7 @@ Thanks for your interest in contributing! This guide covers everything you need 
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - pnpm 9.15+ (the repo pins `pnpm@9.15.0` via the `packageManager` field; Corepack will fetch it automatically)
 - Docker (optional — only needed to run the adapter integration tests locally; set `DATABASE_URL` to point at a PostgreSQL 13+ instance and run `pnpm vitest run packages/duraflows-pg/tests/integration packages/duraflows-kysely/tests/integration`. Without `DATABASE_URL` these suites are skipped.)
 

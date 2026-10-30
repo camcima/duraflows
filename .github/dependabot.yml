@@ -6,13 +6,16 @@ updates:
       interval: weekly
     open-pull-requests-limit: 10
     ignore:
+      # TypeScript 7 is held: typescript-eslint peers typescript <6.1.0
       - dependency-name: typescript
         update-types:
           - version-update:semver-major
       # Held by maintainer (2026-10): remove this entry to resume updates
       - dependency-name: "@nestjs/*"
-      # Held by maintainer (2026-10): remove this entry to resume updates
+      # Majors only: keep @types/node on its current major
       - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
     groups:
       dev-dependencies:
         dependency-type: development
