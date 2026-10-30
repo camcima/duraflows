@@ -9,6 +9,10 @@ updates:
       - dependency-name: typescript
         update-types:
           - version-update:semver-major
+      # Held by maintainer (2026-10): remove this entry to resume updates
+      - dependency-name: "@nestjs/*"
+      # Held by maintainer (2026-10): remove this entry to resume updates
+      - dependency-name: "@types/node"
     groups:
       dev-dependencies:
         dependency-type: development
